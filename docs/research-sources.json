@@ -1,0 +1,219 @@
+{
+  "retrieved_at_jst": "2026-10-10T14:53:23+09:00",
+  "method": "GitHub public repository search API, raw READMEs, source archives; documentation fetched via HTTPS. No tools installed or executed.",
+  "repositories": [
+    {
+      "repository": "Clarittyai/devbay",
+      "url": "https://github.com/Clarittyai/devbay",
+      "default_branch": "main",
+      "pushed_at": "2026-10-05T21:37:23Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true,
+      "head_sha_at_review": "fedc2aa42fc6fb603a7a7c2d511f17212d6afd53"
+    },
+    {
+      "repository": "F1bonacc1/process-compose",
+      "url": "https://github.com/F1bonacc1/process-compose",
+      "default_branch": "main",
+      "pushed_at": "2026-10-05T11:03:45Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "Geocodio/treehouse",
+      "url": "https://github.com/Geocodio/treehouse",
+      "default_branch": "main",
+      "pushed_at": "2026-07-16T15:04:47Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "berdon/ldev",
+      "url": "https://github.com/berdon/ldev",
+      "default_branch": "master",
+      "pushed_at": "2026-08-15T19:58:35Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "cachix/devenv",
+      "url": "https://github.com/cachix/devenv",
+      "default_branch": "main",
+      "pushed_at": "2026-10-09T12:48:34Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "cyucelen/isola",
+      "url": "https://github.com/cyucelen/isola",
+      "default_branch": "main",
+      "pushed_at": "2026-09-14T10:44:58Z",
+      "license_api": "MIT",
+      "readme_retrieved": true,
+      "head_sha_at_review": "1a049b53dbeaeddcf80e4c44fdc4f29066e96646"
+    },
+    {
+      "repository": "ddev/ddev",
+      "url": "https://github.com/ddev/ddev",
+      "default_branch": "main",
+      "pushed_at": "2026-10-09T16:52:49Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "fairy-pitta/portree",
+      "url": "https://github.com/fairy-pitta/portree",
+      "default_branch": "main",
+      "pushed_at": "2026-08-19T06:09:12Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "git-treeline/cli",
+      "url": "https://github.com/git-treeline/cli",
+      "default_branch": "main",
+      "pushed_at": "2026-10-01T17:57:03Z",
+      "license_api": "MIT",
+      "readme_retrieved": true,
+      "head_sha_at_review": "d3bedcfc272a86fb1f6afb4ebe74278f9aa02dd2"
+    },
+    {
+      "repository": "hefgi/ecluse",
+      "url": "https://github.com/hefgi/ecluse",
+      "default_branch": "main",
+      "pushed_at": "2026-10-02T15:04:44Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true,
+      "head_sha_at_review": "bd4c575a78f65e470908a94b5047b456be3523fa"
+    },
+    {
+      "repository": "jdtzmn/port",
+      "url": "https://github.com/jdtzmn/port",
+      "default_branch": "main",
+      "pushed_at": "2026-10-06T03:59:56Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "jetify-com/devbox",
+      "url": "https://github.com/jetify-com/devbox",
+      "default_branch": "main",
+      "pushed_at": "2026-10-08T09:32:26Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "loft-sh/devpod",
+      "url": "https://github.com/loft-sh/devpod",
+      "default_branch": "main",
+      "pushed_at": "2025-11-14T06:33:38Z",
+      "license_api": "MPL-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "max-sixty/worktrunk",
+      "url": "https://github.com/max-sixty/worktrunk",
+      "default_branch": "main",
+      "pushed_at": "2026-10-09T23:15:07Z",
+      "license_api": "NOASSERTION",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "mostafasudo/worktree-compose",
+      "url": "https://github.com/mostafasudo/worktree-compose",
+      "default_branch": "main",
+      "pushed_at": "2026-08-04T14:09:38Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "nekocode/agent-worktree",
+      "url": "https://github.com/nekocode/agent-worktree",
+      "default_branch": "main",
+      "pushed_at": "2026-08-25T13:49:31Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "nsrosenqvist/croft",
+      "url": "https://github.com/nsrosenqvist/croft",
+      "default_branch": "main",
+      "pushed_at": "2026-05-21T21:09:02Z",
+      "license_api": "NOASSERTION",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "onnimonni/devenv-lazy-cow-worktrees",
+      "url": "https://github.com/onnimonni/devenv-lazy-cow-worktrees",
+      "default_branch": "main",
+      "pushed_at": "2026-10-09T21:31:50Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "rohansx/workz",
+      "url": "https://github.com/rohansx/workz",
+      "default_branch": "main",
+      "pushed_at": "2026-09-05T02:59:47Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "sample-usr/herdr-devenv-worktree",
+      "url": "https://github.com/sample-usr/herdr-devenv-worktree",
+      "default_branch": "main",
+      "pushed_at": "2026-07-28T08:38:36Z",
+      "license_api": null,
+      "readme_retrieved": true
+    },
+    {
+      "repository": "sunduq-ai/falq",
+      "url": "https://github.com/sunduq-ai/falq",
+      "default_branch": "main",
+      "pushed_at": "2026-06-21T11:17:41Z",
+      "license_api": "MIT",
+      "readme_retrieved": true,
+      "head_sha_at_review": "32c39b5e2f1ca65bb80e79fed4c4f769428788f6"
+    },
+    {
+      "repository": "thousand-ships/wtpool",
+      "url": "https://github.com/thousand-ships/wtpool",
+      "default_branch": "main",
+      "pushed_at": "2026-08-14T07:45:31Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "tznc/treq",
+      "url": "https://github.com/tznc/treq",
+      "default_branch": "main",
+      "pushed_at": "2026-10-10T00:39:51Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "vercel-labs/portless",
+      "url": "https://github.com/vercel-labs/portless",
+      "default_branch": "main",
+      "pushed_at": "2026-10-07T17:32:18Z",
+      "license_api": "Apache-2.0",
+      "readme_retrieved": true
+    },
+    {
+      "repository": "wyattjoh/devenv-agents",
+      "url": "https://github.com/wyattjoh/devenv-agents",
+      "default_branch": "main",
+      "pushed_at": "2026-10-05T16:17:25Z",
+      "license_api": null,
+      "readme_retrieved": true
+    },
+    {
+      "repository": "zoltanersek/berth",
+      "url": "https://github.com/zoltanersek/berth",
+      "default_branch": "main",
+      "pushed_at": "2026-07-08T10:51:17Z",
+      "license_api": "MIT",
+      "readme_retrieved": true
+    }
+  ]
+}
