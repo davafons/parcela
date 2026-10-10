@@ -25,6 +25,8 @@ Rust/Cargo 1.95.0, Caddy 2.11.7, Process Compose 1.122.0, Ruby 4.0.2 / Rails 8.1
 
 Shirabe's targeted `bin/test` passes 8 tests / 25 assertions for the integration/launcher and production host authorization. Targeted RuboCop, ShellCheck, Bundler dependency checks and house rules pass.
 
+GitHub Actions [run 38065259625](https://github.com/davafons/parcela/actions/runs/38065259625) passed `scripts/check` on macOS and Ubuntu for runtime commit `06636da42b6c98d93d10c489b83fa1aa1d2c053c`. `gh run view 38065259625 --repo davafons/parcela` reports the result. These are Rust/schema checks, not Linux live-service acceptance.
+
 ## Real-machine cutover state
 
 User-authorized user-local binaries and the unprivileged `org.parcela.proxy` launch agent are installed. The real Shirabe checkout is adopted as primary; its launcher/manifest use Parcela and Process Compose, without the rb-portless gem/binstub/Procfile. Its existing development databases and uploads remain in `storage`; no preparation/reset/import was run.
@@ -37,4 +39,4 @@ The user retired the shared rb-portless front door, accepting loss of Nadeshiko 
 
 No cross-process stop/crash recovery, detached application control, alias/tenant routing, sharing, general data-isolation certification, automatic backend packaging or source/data destruction. Daemonized descendants and failed route revocation are not magically reconciled; uncertain leases remain recorded. HTTP readiness is not continuous after listener establishment.
 
-Actual Shirabe Cable transport, linked SDK rebuild behavior, full application/searchable-corpus regression, broader application HTTP/2 behavior, Linux runtime, remote CI, release packaging, browser trust and reboot persistence remain unverified. The privileged PF/trust helper succeeded on this host; custom/conflicting PF ruleset handling has only nonprivileged guard checks. The PRD's P0 goals are not a shipped-feature list.
+Actual Shirabe Cable transport, linked SDK rebuild behavior, full application/searchable-corpus regression, broader application HTTP/2 behavior, Linux runtime, release packaging, browser trust and reboot persistence remain unverified. The privileged PF/trust helper succeeded on this host; custom/conflicting PF ruleset handling has only nonprivileged guard checks. The PRD's P0 goals are not a shipped-feature list.
