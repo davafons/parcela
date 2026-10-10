@@ -11,6 +11,7 @@ Primary URLs are `https://shirabe.localhost`; previews are `https://auth-shirabe
 - `run -- ARGV`: literal foreground command, owned loopback endpoint, initial HTTP readiness, signal/exit handling and route teardown.
 - `up`: foreground native Process Compose graph, private Unix control socket, one routed HTTP service plus workers.
 - `task NAME -- ARGS`: explicit finite project commands, optional timeout, private result record.
+- `transfer plan/capture/verify/restore` and `stream-sqlite`: explicit paused checkpoints and data copies, not execution handoff.
 - `status`: durable intent, not a live health guarantee. `doctor` optionally probes explicitly supplied backend versions.
 
 The runtime is experimental. No detached application control, persisted-PID stop/recovery, automatic backend installation, sharing, tenant routing or general data-isolation certification. Inspection/adoption do not launch services or prove that a URL is live. A crashed session or unknown socket requires explicit reconciliation.
@@ -57,3 +58,4 @@ State defaults to `PARCELA_STATE_DIR`, `$XDG_STATE_HOME/parcela`, then `~/.local
 - [Architecture](docs/architecture.md): ownership and backend boundaries.
 - [Transfer commands](docs/transfer.md): paused snapshots, not active-work handoff.
 - [Portable environments](docs/portable-environments.md): selected handoff contract.
+- [Paused Shirabe replica check](docs/check-portable-shirabe.md): opt-in Linux destination acceptance.

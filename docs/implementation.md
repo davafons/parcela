@@ -27,6 +27,20 @@ Shirabe's targeted `bin/test` passes 8 tests / 25 assertions for the integration
 
 GitHub Actions [run 38065259625](https://github.com/davafons/parcela/actions/runs/38065259625) passed `scripts/check` on macOS and Ubuntu for runtime commit `06636da42b6c98d93d10c489b83fa1aa1d2c053c`. `gh run view 38065259625 --repo davafons/parcela` reports the result. These are Rust/schema checks, not Linux live-service acceptance.
 
+## Verified on Tower, Linux, 2026-10-12
+
+Rust 1.95.0, Caddy 2.11.7, Process Compose 1.122.0, lsof 4.99.5. Backend downloads/builds reside in a private task directory; no system install, trust change, or network sharing occurred.
+
+The portable-handoff stack's `scripts/check` passes 54 Rust tests and 20 Python destination-acceptance guard tests on macOS and Linux, plus formatting, Clippy and schema validation. The guard suite includes repeated immutable inspection, strict retained-input SQLite sidecar/WAL refusal, stopped-queue fingerprints and opener checks, row/schema/application metadata change detection, private paths, a web/CSS-only graph, explicit unprivileged ports, private diagnostics, and an ASCII-safe Rails probe.
+
+Generic Linux live backend acceptance passes with actual Caddy, Process Compose and lsof. It exercises two simultaneous TLS routes, literal argv, forwarded-header spoof rejection, SSE, WebSocket upgrade, unknown-host rejection, duplicate ownership, SIGTERM/exit status, foreign-port preservation, a native web+worker graph over a private UDS, and independent teardown. Test HTTP 34839 / HTTPS 56943 are not standard-port acceptance.
+
+Paused full-data Shirabe destination acceptance passed as `resume-20261012/acceptance-05` under `/home/davafons/.local/state/parcela/agent-tests/portable-handoff`. Its private report has `complete: true`: named HTTPS health/search returned 200, Rails read 3,659,561 dictionary entries and 414 upload records, Japanese tokenization and a sampled Active Storage download passed, and web/CSS were Running. Queue/mail used test adapters; copied jobs and SDK watching stayed disabled. After shutdown the route returned 503, no queue openers/sidecars remained, the queue fingerprint matched, and all retained database snapshots and upload hashes were unchanged. Foreground application/proxy exits were 143/0. [The repeatable procedure](check-portable-shirabe.md) owns the setup.
+
+The earlier queue failure was an artifact/runtime distinction: Rails switched the copied queue to WAL, changing only journal-mode/counter header fields. Retained snapshots still require rollback-journal format and exact SHA-256 preservation. The stopped runtime queue is compared byte-for-byte except for those fields, without rewriting it; [the transfer contract](transfer.md#destination-shirabe-acceptance) defines that boundary. The regression failed before the fix and passes afterward. Acceptance ran under `LANG=C LC_ALL=C` and verifies the locale-safe Rails probe.
+
+These snapshots are independently consistent, not an atomic application checkpoint. This proves a paused replica's tested service/data paths, not active agent continuation, complete application regression, or execution handoff.
+
 ## Real-machine cutover state
 
 User-authorized user-local binaries and the unprivileged `org.parcela.proxy` launch agent are installed. The real Shirabe checkout is adopted as primary; its launcher/manifest use Parcela and Process Compose, without the rb-portless gem/binstub/Procfile. Its existing development databases and uploads remain in `storage`; no preparation/reset/import was run.
@@ -39,4 +53,4 @@ The user retired the shared rb-portless front door, accepting loss of Nadeshiko 
 
 No cross-process stop/crash recovery, detached application control, alias/tenant routing, sharing, general data-isolation certification, automatic backend packaging or source/data destruction. Daemonized descendants and failed route revocation are not magically reconciled; uncertain leases remain recorded. HTTP readiness is not continuous after listener establishment.
 
-Actual Shirabe Cable transport, linked SDK rebuild behavior, full application/searchable-corpus regression, broader application HTTP/2 behavior, Linux runtime, release packaging, browser trust and reboot persistence remain unverified. The privileged PF/trust helper succeeded on this host; custom/conflicting PF ruleset handling has only nonprivileged guard checks. The PRD's P0 goals are not a shipped-feature list.
+Actual Shirabe Cable transport, linked SDK rebuild behavior, full application/searchable-corpus regression, broader application HTTP/2 behavior, active native agent handoff, a Mac-to-Linux-to-Mac round trip, release packaging, browser trust and reboot persistence remain unverified. The privileged PF/trust helper succeeded on this host; custom/conflicting PF ruleset handling has only nonprivileged guard checks. The PRD's P0 goals are not a shipped-feature list.

@@ -70,3 +70,19 @@ The VFS supports one unpublished main database, not a general remote filesystem.
 The JSON receipt includes byte count, receiver SHA-256, consistency/transport description, and paused activation. Source and receiver must use matching builds; protocol-version negotiation is not implemented yet. No port forwarding, network listener, CA trust, or app service is started.
 
 `scripts/check_sqlite_stream.py` is the repeatable SSH acceptance helper. It takes explicit `--database NAME=PATH` selections, creates a new private target directory, runs streaming capture, rehashes and validates the persisted snapshots, and writes a private receipt. A partial run retains an incomplete receipt and already verified copies; it is not a complete environment checkpoint.
+
+## Destination Shirabe acceptance
+
+`scripts/check_portable_shirabe.py` checks a new Linux replica from a source checkpoint, four finalized database snapshots, a Shirabe upload snapshot, and an explicit private tokenizer dependency. It requires explicit backend paths and unprivileged test ports. It installs nothing and changes no system trust or network sharing.
+
+The check restores independent source/history, hashes and validates the input databases, and copies data into private preview paths. Its recorded test overlay replaces the restored manifest's service graph with web and CSS only. Copied jobs and SDK watching remain disabled. Rails uses a test queue adapter, test mail delivery, and a new preview signing secret. The process environment excludes inherited credentials and uses a private test home. `--tokenizer-dir` and `--tokenizer-version` bind one pinned Sudachi full-edition dictionary explicitly; the check records its SHA-256 and refuses ambiguous editions/versions or linked/public files. A Ruby bundle alone does not supply this runtime data dependency.
+
+Acceptance exercises named HTTPS `/up`, the real Rails dictionary connection, Japanese tokenization through the declared dependency, one referenced upload through Active Storage, the search HTTP route, native Process Compose service state, and route withdrawal after shutdown. A successful receipt also requires a preserved copied queue and byte-identical retained database snapshots. Retained inputs must remain finalized rollback-journal snapshots.
+
+Rails can switch the runtime queue to WAL without changing queue data. After application shutdown, the check requires an unambiguous `lsof` result showing no queue openers, refuses SQLite sidecars, and validates the queue through an immutable read-only connection. The before/after fingerprints cover every byte except SQLite's journal-mode fields (offsets 18–19) and change-counter fields (24–27 and 92–95). Queue pages, schema, file size, and all other header metadata must match. This is not permission to inspect a live WAL database or normalize retained inputs.
+
+This does not verify login continuation, all uploads through Rails, full application behavior, SDK watching, native agent continuation, or a return transfer.
+
+The private `report.json` records source identity, test overlay hashes, database and upload hashes and sizes, Rails resource paths and counts, HTTP results, child exits, and whether the check completed. Inputs without the original stream receipt receive a new validation baseline; acceptance does not reconstruct the lost transport receipt. Database consistency remains per-file, not atomic across the application.
+
+Failed and completed runs retain their own replica, logs, and a private `ph-*` state directory under the explicitly supplied `--state-parent`. Preflight requires a short socket path and enough filesystem space for independent database copies plus upload scratch. Output/state paths cannot be inside retained input snapshots. Existing run directories are never overwritten. [Check a paused Shirabe replica on Linux](check-portable-shirabe.md) gives the destination procedure.
