@@ -1,0 +1,19 @@
+# Organizer schema example. No command is executed by config check/adoption.
+version: 1
+project:
+  id: generic-demo
+  name: demo
+default_service: web
+services:
+  web: {}
+  api: {}
+tasks:
+  test:
+    argv: [python3, -m, unittest]
+    timeout_seconds: 60
+# Preserved as native graph data, not yet validated against Process Compose.
+process_compose:
+  version: "0.5"
+  processes:
+    web:
+      command: "python3 -m http.server ${PORT} --bind 127.0.0.1"

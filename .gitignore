@@ -1,5 +1,3 @@
-/bin/
+/target/
 /.parcela/
-*.test
-coverage.out
 .DS_Store

@@ -1,6 +1,6 @@
 # Workspace organization and local development environments
 
-Version: **0.3, user decisions incorporated**  
+Version: **0.4, Rust architecture selected**  
 Date: **2026-10-10**  
 Product name: **Parcela**, selected by the user.  
 Status: **implementation authorized and in progress; runtime acceptance tracked in [implementation status](implementation.md)**.
@@ -34,11 +34,23 @@ A new project is justified by the desired integrated workflow, not by inventing 
 - Support an always-on host and private phone access when Tailscale sharing is enabled.
 - Trim features that do not support these jobs. No compatibility promise for every portless flag or internal mechanism.
 
-### Proposed defaults, not yet confirmed
+### Selected implementation architecture
+
+- Rust owns the CLI, workspace registry, configuration, environment lifecycle,
+  task execution, endpoint ownership and integration.
+- Caddy is the managed external HTTP/TLS engine; Process Compose is the managed
+  external service supervisor. No embedded backend or retained Go scaffold.
+- Project configuration owns commands and data policy. Switching languages does
+  not replace either maintained backend or change the safety/isolation contract.
+- The Rust foundation's executable schema/commands are documented in
+  [configuration](configuration.md); coverage and gaps are recorded in
+  [implementation status](implementation.md). Adoption/context do not start
+  services, and planned URLs are not runtime acceptance.
+
+### Proposed operational defaults
 
 - macOS and Linux first; no Windows promise for the initial release.
 - HTTPS by default, loopback-only, standard ports 443 and 80; explicit one-time setup/trust.
-- Go implementation, using Caddy as the proposed HTTP/TLS engine. Embedded versus managed binary is an implementation spike, not settled fact.
 - One product installation supplies/manages its routing engine without requiring users to maintain a Caddyfile. How that is packaged is a technical spike, not a user-facing setup choice. Process Compose availability/version is checked explicitly.
 - Data policy comes from each project; no universal fresh-database or clone-development default. A generic consistent-snapshot helper can be added without becoming a provider ecosystem.
 - mDNS name publication is an optional convenience for LAN discovery, not required for LAN sharing.
@@ -246,7 +258,7 @@ Requirements regardless of layout:
 - Direct `process-compose up` is an advanced compatibility option, not the required default interface. It needs maintained hooks/resolved context if supported; it is not automatically workspace-aware.
 - The environment layer must retain route ownership across service restarts and reconcile after interrupted shutdown. A cleanup shell task alone is not proof of crash safety.
 
-Proposed manifest concepts: project ID/name, default service, route layout/domain, service endpoint mappings, private paths, environment bindings, initialization/reset tasks, and an unchanged Process Compose graph. Exact schema and commands are not finalized.
+Proposed manifest concepts: project ID/name, default service, route layout/domain, service endpoint mappings, private paths, environment bindings, initialization/reset tasks, and an unchanged Process Compose graph. The initial Rust foundation schema is documented in [configuration](configuration.md); lifecycle/resource bindings and complete runtime commands are not finalized. Organizer validation does not validate backend graph compatibility.
 
 ## 10. Ports, sockets, runtime, and data
 
@@ -283,7 +295,7 @@ Project-defined commands are the confirmed data mechanism. Database-provider pol
 
 ## 11. Lifecycle and control surface
 
-Proposed public actions, not existing commands:
+Target public actions; only the foundation subset in [configuration](configuration.md) exists today:
 
 | Action | Contract |
 |---|---|
@@ -349,9 +361,9 @@ CLI / Process Compose integration hooks
  existing tools/data         optional private Tailscale exposure
 ```
 
-Recommendation: Go control plane with a maintained HTTP/TLS engine, provisionally Caddy. A separate product need not contain a handwritten proxy or certificate implementation. The proposed user experience is one product install/setup, not maintaining a separate Caddyfile or launching both CLIs. Internally choose embedded Caddy versus a product-managed binary after measuring packaging, configuration ownership, certificate policy, upgrade behavior, and footprint. Process Compose remains the maintained supervisor; setup reports its prerequisite/version explicitly and does not install software during an ordinary run.
+Selected architecture: Rust control plane, managed Caddy for HTTP/TLS, and Process Compose for service supervision. Do not embed a Go implementation or retain the abandoned Go scaffold. The user experience is one product install/setup, not maintaining a separate Caddyfile or launching both CLIs. Process Compose remains the maintained supervisor; setup reports its prerequisite/version explicitly and does not install software during an ordinary run.
 
-If using Caddy, disable automatic trust installation during ordinary runtime; perform trust explicitly. Isolate its state/config/admin endpoint from any user-managed Caddy instance. Serialize owned changes or use ETag/If-Match concurrency control; do not assume multiple admin requests form a transaction.
+For managed Caddy, disable automatic trust installation during ordinary runtime; perform trust explicitly. Isolate its state/config/admin endpoint from any user-managed Caddy instance. Serialize owned changes or use ETag/If-Match concurrency control; do not assume multiple admin requests form a transaction.
 
 Keep the initial provider set small. No interchangeable-supervisor framework, plugin marketplace, giant framework detector, generic agent integration, telemetry requirement, or new TUI. Reuse Process Compose's mature UI/control features. HTTP/2-to-backend, custom user cert/key plumbing, Windows GUI trust, ngrok/Funnel, and npm monorepo discovery are not initial differentiators.
 
@@ -412,6 +424,7 @@ The user's responses resolve these product directions; do not re-ask them as uns
 | Topic | Recorded direction |
 |---|---|
 | Product identity | Parcela: workspace/environment organizer, not just a router |
+| Implementation | Rust control plane; managed external Caddy and Process Compose; abandon the untested Go drafts |
 | URL layout | Favor cookie-safe flat names; configurable nested alternative; tenants off by default |
 | Entry point | Our CLI wraps and organizes Process Compose; standalone portless-style run retained |
 | Distribution | One-install routing/control experience recommended and explained; backend packaging remains a technical spike, not an assumed user decision |
@@ -433,7 +446,7 @@ The user's responses resolve these product directions; do not re-ask them as uns
 | F4 | Which OS is the first always-on target: Linux or macOS? | macOS local POC plus Linux design; choose the server before platform-specific service acceptance |
 | F5 | During migration, must untouched rb-portless projects retain their current no-port URLs? | Explicit front-door cutover; if simultaneous compatibility is essential, a separately verified import/coexistence contract |
 
-Technical questions to settle by experiment, not by making the user design internals: embedded versus managed Caddy, exact single-file schema/pass-through compatibility, route reconciliation across Process Compose restarts, standard-port privilege bootstrap, and safe optional LAN listener changes. Configuration examples must be validated against the actual selected versions before calling them executable.
+Technical questions to settle by experiment, not by making the user design internals: managed backend packaging, exact single-file schema/pass-through compatibility, route reconciliation across Process Compose restarts, standard-port privilege bootstrap, and safe optional LAN listener changes. Configuration examples must be validated against the actual selected versions before calling them executable.
 
 Implementation readiness requires the remaining product answers, a fixed v1 contract, verified packaging/listener/bootstrap strategy, a reviewed Shirabe recipe, and executable acceptance fixtures. A written spec or a name choice is not evidence that the runtime is installed or tested.
 
