@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+# Explicit backend paths; nothing is installed and no trust is changed.
+cargo build --locked
+exec python3 scripts/check_live.py "$@"

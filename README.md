@@ -1,73 +1,57 @@
 # Parcela
 
-A service-agnostic workspace and local-environment organizer, separate from
-rb-portless. The selected architecture is **Rust** for the CLI/control plane,
-**managed Caddy** for HTTP/TLS, and **managed Process Compose** for supervision.
-Project configuration owns commands and data policy; Parcela does not rebuild
-either backend.
+A service-agnostic workspace and local-environment organizer. Rust owns identity, configuration and lifecycle; managed external Caddy owns HTTP/TLS; Process Compose owns service graphs. Projects own commands and data policy.
 
-Target URLs: primary `https://shirabe.localhost`, preview
-`https://auth-shirabe.localhost`. Flat names, tenants off, loopback only and
-standard HTTPS ports are the defaults. No silent high-port fallback.
+Primary URLs are `https://shirabe.localhost`; previews are `https://auth-shirabe.localhost`. Flat names, tenants off, loopback only. Standard ports are the normal front door; high-port tests and external forwarding require explicit profiles, never silent fallback.
 
 ## Current implementation
 
-The early Go drafts have been discarded. The Rust foundation implements:
+- Strict `parcela.yaml`, stable UUID identities, explicit primary/preview adoption and a private SQLite registry.
+- `proxy run/status`: dedicated Caddy, private Unix admin socket, exact-host routes and internal TLS. Automatic CA trust installation is disabled.
+- `run -- ARGV`: literal foreground command, owned loopback endpoint, initial HTTP readiness, signal/exit handling and route teardown.
+- `up`: foreground native Process Compose graph, private Unix control socket, one routed HTTP service plus workers.
+- `task NAME -- ARGS`: explicit finite project commands, optional timeout, private result record.
+- `status`: durable intent, not a live health guarantee. `doctor` optionally probes explicitly supplied backend versions.
 
-- Strict `parcela.yaml` validation, project-defined task argv and native graph data.
-- Explicit adoption of existing checkouts; stable UUIDs independent of branches.
-- Private, transactional SQLite registry with project/hostname/primary ownership.
-- Project-scoped or explicit machine-wide inventory, including missing sources.
-- JSON context with **planned** URLs and explicit capability/verification caveats.
+The runtime is experimental. No detached application control, persisted-PID stop/recovery, automatic backend installation, sharing, tenant routing or general data-isolation certification. Inspection/adoption do not launch services or prove that a URL is live. A crashed session or unknown socket requires explicit reconciliation.
 
-**It does not yet start applications, allocate endpoints, execute tasks, manage
-Caddy/Process Compose, install/trust certificates, or share anything.** Adoption
-registers a checkout, not a running or data-isolated environment. `doctor` reports
-implementation capabilities only; it does not probe installed backends.
+## Build and verify
 
-## Build and check
-
-Requires Rust 1.89+ and a C compiler for bundled SQLite; tested locally on macOS
-with Rust 1.95.0. No Go toolchain, Caddy or Process Compose installation is needed
-for this foundation. A distribution license has not yet been selected.
+Requires Rust 1.89+ and a C compiler for bundled SQLite; local checks use Rust 1.95.0 on macOS. Runtime needs separately installed Caddy 2.x, Process Compose 1.x and `lsof`/`ps`. A distribution license has not yet been selected.
 
 ```sh
 cargo build --locked
 scripts/check
-cargo run --quiet -- --path examples/generic config check
-cargo run --quiet -- doctor
+scripts/check-live --caddy /path/to/caddy --process-compose /path/to/process-compose
+scripts/check-shirabe --source /path/to/shirabe --caddy /path/to/caddy \
+  --process-compose /path/to/process-compose
 ```
 
-The check script runs formatting, Clippy, tests, the example-schema check and a
-Go-artifact check. CI defines macOS/Linux jobs; CI is not live-service acceptance.
+Live checks use disposable source/state and explicit test ports, without changing system trust. Shirabe checks use fresh schemas and a synthetic user, not a copied live dictionary. Linux CI configuration is not Linux service acceptance.
 
-## Try adoption without touching your projects
+## Use an existing checkout
 
-All currently implemented commands output JSON. Errors go to stderr. Use a
-private temporary state directory for experiments:
+Create a project-owned manifest, then adopt explicitly:
 
 ```sh
-demo=$(mktemp -d)
-mkdir "$demo/checkout"
-cp examples/generic/parcela.yaml "$demo/checkout/"
-cargo run --quiet -- --path "$demo/checkout" --state-dir "$demo/state" \
-  workspace adopt --role preview --label auth
-cargo run --quiet -- --path "$demo/checkout" --state-dir "$demo/state" context
-cargo run --quiet -- --state-dir "$demo/state" workspace list --all
+parcela workspace adopt --role primary --label primary
+parcela proxy run                 # separate foreground front door, prerequisites required
+parcela up                       # or: parcela run -- your-command --literal-argument
+parcela task test -- unit
+parcela status
 ```
 
-`planned_urls.web` will be `https://auth-demo.localhost`; it is **not serving**.
-No runtime/data directory is created, and no source/VCS history is changed.
-Repeated adoption with the same role/label preserves identity; conflicts fail
-rather than taking over ownership. Primary designation is always explicit.
+`run/up` do not perform preparation or install anything. Each command must consume its assigned endpoint and paths. Core context is routing-only until the project binds its resources. Application child output passes through; inspection commands print JSON and diagnostics use stderr.
 
-State defaults to `PARCELA_STATE_DIR`, then `$XDG_STATE_HOME/parcela`, then
-`~/.local/state/parcela`; `--state-dir` overrides them. Existing state must be
-user-owned and private. Inspection does not create absent state.
+State defaults to `PARCELA_STATE_DIR`, `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`; `--state-dir` overrides them. Existing state must be private and user-owned. A short state path is needed for Unix socket limits.
+
+## Explicit macOS standard-port setup
+
+`scripts/setup_macos.py` is an operator-only helper, never called by normal commands. It configures a guarded loopback PF anchor/boot job and trusts the specified Parcela CA. Caddy remains unprivileged, with an explicitly configured `--forwarded-standard-ports --http-port 8080 --https-port 8443` profile. This preserves canonical port-free URLs and verifies the port-80 router marker before application startup. The helper requires an already running owned front door and root authorization; it refuses incompatible root rules or occupied listeners. Review its prerequisites before using it on another host.
 
 ## Documentation
 
-- [PRD](docs/PRD.md): release requirements, not a claim of implemented features.
-- [Implementation status](docs/implementation.md): verified coverage and next milestones.
-- [Configuration and CLI](docs/configuration.md): the current foundation contract.
-- [Rust architecture](docs/architecture.md): ownership and managed backend boundaries.
+- [PRD](docs/PRD.md): release goals, not implemented-feature claims.
+- [Implementation status](docs/implementation.md): verification and remaining gaps.
+- [Configuration and CLI](docs/configuration.md): executable contract.
+- [Architecture](docs/architecture.md): ownership and backend boundaries.

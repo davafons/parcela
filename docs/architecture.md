@@ -1,67 +1,36 @@
 # Rust control plane and managed backends
 
-## Settled direction
-
-Parcela is a Rust binary and library. The early Go implementation drafts were
-abandoned before runtime acceptance; there is no Go module, embedded Caddy,
-second CLI or retained Go implementation. Caddy and Process Compose may
-internally use Go; they are maintained external executables, not code compiled
-into Parcela. Historical PRDs/research and arbitrary Go application fixtures are
-not alternative Parcela implementations.
+Parcela owns identity, context and integration, not a proxy stack or a second supervisor. There is no retained Go implementation. Caddy and Process Compose are external maintained executables.
 
 | Owner | Responsibility |
 |---|---|
-| Rust / Parcela | CLI, schema, project/checkout identity, durable registry, context, endpoint ownership, environment/task lifecycle and route reconciliation |
-| Managed Caddy | HTTP proxying, TLS/certificates, WebSockets/SSE, protocol handling |
-| Managed Process Compose | Service graph/dependencies/readiness, recovery/restarts, logs, control API/TUI and shutdown |
-| Project configuration | Executables, preparation, data/snapshot/reset policy, resource declarations and external-effect safeguards |
+| Rust | Schema, registry, roles/labels, endpoint intent, locks, literal argv, task results and route updates |
+| Caddy | HTTP/TLS, certificates, HTTP protocol handling, streaming and upgrades |
+| Process Compose | Native graph, scheduling, workers, control API, logs and graceful shutdown |
+| Project | Commands, framework integration, preparation/data baseline, resource paths and external-effect policy |
 
-The single-product experience does not require users to maintain a Caddyfile or
-launch a supervisor separately. Backend acquisition/version pinning/checksums,
-upgrade/rollback and standard-port/bootstrap packaging remain a technical spike.
-Ordinary commands must never silently install tools, request privilege, trust a
-CA or take over another user's backend/listener.
+## Crate boundaries
 
-## Current crate boundaries
+`config` validates organizer fields and retains native graph data. `registry` serializes durable identity and session/port intent, with generation/nonce fencing. `context` describes registered/planned metadata without allocating resources or certifying live health. `private` owns private files/kernel locks. `process` retains foreground child handles/groups and verifies listener PID ancestry. `http` is a bounded control/readiness client, never a proxy. `router` generates and updates the dedicated Caddy configuration. `runtime` supplies context and monitors one routed endpoint plus native workers. `main` dispatches CLI/JSON and propagates results.
 
-- `config`: strict organizer schema, native graph data, deterministic flat
-  hostnames and canonical manifest/checkout discovery.
-- `registry`: private SQLite state, immutable IDs, transactional adoption and
-  hostname/source/primary conflicts. No ports or process handles yet.
-- `context`: read-only planned URLs/private-path contract, capabilities and
-  caveats. No allocation or resource preparation yet.
-- `main`: argument dispatch, state resolution, JSON stdout and error stderr.
+## Ownership
 
-Rust dependencies include bundled SQLite, Serde and a maintained YAML parser;
-`Cargo.lock` is tracked. There is no proxy stack or service scheduler dependency.
+Adoption is explicit; a preview never implicitly becomes primary. Branches/bookmarks are not identities. Missing source and uncertain runtime state do not authorize deletion. Inspection does not create absent state. Private user-owned paths are operational boundaries, not isolation against malicious same-user code.
 
-## Next runtime boundaries (not implemented)
+A bound port probe plus durable lease is not an atomic listener handoff. Before publishing, the runtime verifies that the loopback listener belongs to its live retained child/descendants and passes HTTP readiness. Changed listener identity withdraws the route and repeats readiness. The runtime does not continuously poll HTTP application health after establishment. Crash recovery from stored PIDs is unsupported.
 
-Endpoint allocation needs persistent machine-wide leases plus actual listener
-ownership verification; probe-and-release is not an atomic bind handoff. Do not
-advertise a route merely because an unowned port answers. Process control needs
-launch/birth identity or another validated handle; PID alone is insufficient.
+## Dedicated routing
 
-Caddy uses Parcela-owned config/state and a private admin endpoint, separate from
-any user Caddy. Local listeners bind loopback on 443/80 with explicit privilege
-setup. Automatic trust installation is disabled; trust is a separate authorized
-operation. Serialize complete owned route updates or use ETag/If-Match; unknown
-hosts fail closed. Stopped preview namespaces cannot fall through to another
-owner's wildcard. No fallback browser-facing port and no new handwritten proxy.
+Caddy uses isolated config/storage and a private Unix admin socket, separate from any user's Caddy. Updates serialize complete configs and verify the current ownership marker. Ready sessions route only under their router token. Registered unavailable names retain exact unavailable routes and TLS subjects; unknown hosts cannot fall through to another environment. Certificates are internal; automatic trust installation is disabled.
 
-Process Compose gets an unchanged native graph plus one resolved generation of
-context. Each environment has its own instance, private Unix control socket and
-explicit Unix-socket mode. Rust owns environment targeting and context; Process
-Compose owns scheduling, restarts, tasks where appropriate and service UI.
-Readiness/restart/crash reconciliation must be experimentally verified before
-advertising endpoints as ready. No interchangeable-supervisor framework or
-second scheduler.
+Standard ports are the normal browser-facing plane. Tests explicitly choose high ports. An external standard-port forwarding profile explicitly separates unprivileged internal 8080/8443 from public 80/443; it preserves canonical URLs and checks the public port-80 marker before application startup. The macOS setup helper is separately authorized, checks existing rules/listeners, and installs only its own guarded forwarding anchor/boot job and specified CA trust. Caddy and application commands stay unprivileged. Host setup evidence and unverified reboot/browser behavior are tracked in [implementation status](implementation.md).
 
-Standalone `run` will preserve literal argv, forward termination and propagate
-exit status without a new automatic restart policy. Project commands remain
-framework-agnostic. Data policy is never hardcoded to Rails, fresh databases or
-copying development data.
+## Supervision and teardown
 
-Sharing, CA trust, standard-port setup, boot services and source/data destruction
-are separate explicit operations. Every new capability must have disposable
-acceptance fixtures and report its verified, unsupported or unknown surfaces.
+Native Process Compose data is exported without organizer schema reinterpretation, with resolved context and explicit private Unix-socket mode. Projects can include non-routed workers. Its own scheduler/control API remains authoritative for service state. Core supports only foreground application ownership; an explicitly installed launch agent may host the foreground front-door command.
+
+On normal application teardown, core marks stopping, revokes routes, signals the retained child/group, then marks stopped. Failed revocation reports failure and retains the lease. Unknown existing sockets or interrupted leases fail closed; no implicit deletion, takeover or persisted-PID kill. Children must stay supervised and honor shutdown: detached/daemonized descendants are not certified.
+
+Standalone `run` preserves literal argv and has no automatic restart policy. Project tasks are optional finite argv with explicit timeouts/results. `up` does not prepare, reset or import data. The Shirabe bridge belongs to that app, not Rust: it authorizes hosts, supplies canonical HTTPS URLs, scopes cookies and chooses primary versus preview paths/secrets.
+
+Backend acquisition/upgrade packaging, detached application operations, robust crash reconciliation, sharing and broader release acceptance remain future work. Ordinary commands never install software, request privilege, trust a CA or take over listeners.

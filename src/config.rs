@@ -16,9 +16,13 @@ pub struct Manifest {
     pub services: BTreeMap<String, Service>,
     #[serde(default)]
     pub tasks: BTreeMap<String, Task>,
-    /// Passed through to Process Compose in a later lifecycle milestone.
+    /// Native graph passed through to Process Compose without organizer schema reinterpretation.
     #[serde(default)]
     pub process_compose: Option<Value>,
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
+    #[serde(default = "yes")]
+    pub inherit_environment: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -34,6 +38,8 @@ pub struct Project {
 pub struct Service {
     /// Optional explicit subdomain for non-default services.
     pub subdomain: Option<String>,
+    #[serde(default = "root_path")]
+    pub readiness_path: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -41,6 +47,13 @@ pub struct Service {
 pub struct Task {
     pub argv: Vec<String>,
     pub timeout_seconds: Option<u64>,
+}
+
+fn yes() -> bool {
+    true
+}
+fn root_path() -> String {
+    "/".into()
 }
 
 pub fn dns_label(value: &str) -> Result<()> {
@@ -92,6 +105,15 @@ impl Manifest {
         let mut names = std::collections::BTreeSet::new();
         for (name, service) in &self.services {
             dns_label(name)?;
+            ensure!(
+                service.readiness_path.starts_with('/')
+                    && service.readiness_path.is_ascii()
+                    && !service
+                        .readiness_path
+                        .bytes()
+                        .any(|b| b <= b' ' || b == 127),
+                "invalid readiness_path for {name}"
+            );
             if name == &self.default_service {
                 ensure!(
                     service.subdomain.is_none(),
@@ -119,6 +141,22 @@ impl Manifest {
             ensure!(
                 task.timeout_seconds != Some(0),
                 "task {name} timeout must be positive"
+            );
+        }
+        for (key, value) in &self.environment {
+            ensure!(
+                !key.is_empty()
+                    && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                    && !key.as_bytes()[0].is_ascii_digit(),
+                "invalid environment key: {key}"
+            );
+            ensure!(
+                !key.starts_with("PARCELA_") && key != "PORT" && key != "HOST",
+                "reserved context key: {key}"
+            );
+            ensure!(
+                !value.contains('\0'),
+                "environment value contains NUL: {key}"
             );
         }
         if let Some(graph) = &self.process_compose {

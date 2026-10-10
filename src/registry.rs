@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 const COLUMNS: &str = "id, project_id, source, role, label, hostname, generation, vcs";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
@@ -145,14 +145,26 @@ impl Registry {
                     PRAGMA user_version = 1;")?;
             } else {
                 ensure!(
-                    version == VERSION,
+                    version == 1 || version == VERSION,
                     "unsupported registry schema {version}; no changes made"
                 );
+            }
+            if version <= 1 {
+                transaction.execute_batch("CREATE TABLE sessions (
+                    environment_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+                    token TEXT NOT NULL, router_token TEXT NOT NULL, generation INTEGER NOT NULL,
+                    backend_port INTEGER NOT NULL, status TEXT NOT NULL,
+                    kind TEXT NOT NULL, public_url TEXT NOT NULL);
+                    CREATE UNIQUE INDEX active_port ON sessions(backend_port) WHERE status != 'stopped';
+                    PRAGMA user_version = 2;")?;
             }
             transaction.commit()?;
         } else {
             let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
-            ensure!(version == VERSION, "unsupported registry schema {version}");
+            ensure!(
+                version == 1 || version == VERSION,
+                "unsupported registry schema {version}"
+            );
         }
         Ok(Some(Self {
             connection,
@@ -271,6 +283,103 @@ impl Registry {
         Ok(workspace)
     }
 
+    pub fn state_path(&self) -> &Path {
+        &self.state
+    }
+
+    pub fn session(&self, environment: &str) -> Result<Option<Session>> {
+        let version: i64 = self
+            .connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version == 1 {
+            return Ok(None);
+        }
+        Ok(self.connection.query_row("SELECT environment_id, token, router_token, generation, backend_port, status, kind, public_url FROM sessions WHERE environment_id = ?1", [environment], read_session).optional()?)
+    }
+
+    pub fn sessions(&self) -> Result<Vec<Session>> {
+        let version: i64 = self
+            .connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version == 1 {
+            return Ok(Vec::new());
+        }
+        let mut statement = self.connection.prepare("SELECT environment_id, token, router_token, generation, backend_port, status, kind, public_url FROM sessions ORDER BY environment_id")?;
+        Ok(statement
+            .query_map([], read_session)?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn begin_session(
+        &mut self,
+        workspace: &Workspace,
+        router_token: &str,
+        port: u16,
+        kind: &str,
+        public_url: &str,
+    ) -> Result<Session> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous: Option<String> = transaction
+            .query_row(
+                "SELECT status FROM sessions WHERE environment_id=?1",
+                [&workspace.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        ensure!(
+            previous.as_deref().is_none_or(|status| status == "stopped"),
+            "environment already has an active or interrupted run; no process will be guessed or killed. Inspect the record and explicitly reconcile it"
+        );
+        transaction.execute(
+            "UPDATE workspaces SET generation = generation + 1 WHERE id = ?1",
+            [&workspace.id],
+        )?;
+        let generation = transaction.query_row(
+            "SELECT generation FROM workspaces WHERE id = ?1",
+            [&workspace.id],
+            |r| r.get(0),
+        )?;
+        let session = Session {
+            environment_id: workspace.id.clone(),
+            token: Uuid::new_v4().to_string(),
+            router_token: router_token.into(),
+            generation,
+            backend_port: port,
+            status: "starting".into(),
+            kind: kind.into(),
+            public_url: public_url.into(),
+        };
+        transaction.execute("INSERT INTO sessions (environment_id, token, router_token, generation, backend_port, status, kind, public_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+            ON CONFLICT(environment_id) DO UPDATE SET token=excluded.token, router_token=excluded.router_token, generation=excluded.generation, backend_port=excluded.backend_port, status=excluded.status, kind=excluded.kind, public_url=excluded.public_url WHERE sessions.status='stopped'",
+            params![session.environment_id, session.token, session.router_token, session.generation, port, session.status, kind, public_url])
+            .context("endpoint lease conflict; no foreign listener was changed")?;
+        transaction.commit()?;
+        Ok(session)
+    }
+
+    pub fn session_status(&mut self, session: &Session, status: &str) -> Result<()> {
+        ensure!(
+            ["starting", "ready", "stopping", "stopped"].contains(&status),
+            "invalid session transition"
+        );
+        let changed = self.connection.execute(
+            "UPDATE sessions SET status=?1 WHERE environment_id=?2 AND token=?3 AND generation=?4",
+            params![
+                status,
+                session.environment_id,
+                session.token,
+                session.generation
+            ],
+        )?;
+        ensure!(
+            changed == 1,
+            "session ownership changed; refusing stale update"
+        );
+        Ok(())
+    }
+
     pub fn runtime_path(&self, workspace: &Workspace) -> PathBuf {
         self.state.join("environments").join(&workspace.id)
     }
@@ -302,4 +411,42 @@ fn read_workspace(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
         generation,
         vcs: row.get(7)?,
     })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub environment_id: String,
+    pub token: String,
+    pub router_token: String,
+    pub generation: i64,
+    pub backend_port: u16,
+    pub status: String,
+    pub kind: String,
+    pub public_url: String,
+}
+fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
+    let session = Session {
+        environment_id: row.get(0)?,
+        token: row.get(1)?,
+        router_token: row.get(2)?,
+        generation: row.get(3)?,
+        backend_port: row.get(4)?,
+        status: row.get(5)?,
+        kind: row.get(6)?,
+        public_url: row.get(7)?,
+    };
+    if [
+        &session.environment_id,
+        &session.token,
+        &session.router_token,
+    ]
+    .iter()
+    .any(|id| Uuid::parse_str(id).is_err())
+        || session.generation <= 0
+        || !["starting", "ready", "stopping", "stopped"].contains(&session.status.as_str())
+        || session.backend_port < 1024
+    {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    Ok(session)
 }

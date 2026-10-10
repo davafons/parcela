@@ -60,8 +60,8 @@ impl ResolvedContext {
                 data_isolation_verified: false,
             },
             caveats: vec![
-                "URLs are planned, not serving; no endpoints allocated or services launched",
-                "Runtime/data preparation, backend packaging, trust and network sharing are not implemented",
+                "Inspection does not start services or verify planned URLs; use proxy status and status for separate ownership/intent reports",
+                "Data isolation requires project bindings; recorded intent is not live health. Automatic packaging and network sharing remain unsupported",
             ],
         }
     }
