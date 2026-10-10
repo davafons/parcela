@@ -57,6 +57,10 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 
 Inspection prints JSON; child output from lifecycle commands passes through. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No `stop`, detached operation, sharing or arbitrary persisted-PID signaling.
 
+## Transfer policy and checkpoints
+
+The optional strict `transfer` policy and paused capture/restore commands are documented in [transfer commands](transfer.md). Preflight does not create registry state or certify execution handoff. Source-only checkpoints do not capture declared application data or profiles.
+
 ## Ownership and failure
 
 Registry schema 2 adds session/port leases; writable opening migrates schema 1 explicitly, preserving identities. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.

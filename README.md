@@ -55,3 +55,5 @@ State defaults to `PARCELA_STATE_DIR`, `$XDG_STATE_HOME/parcela`, then `~/.local
 - [Implementation status](docs/implementation.md): verification and remaining gaps.
 - [Configuration and CLI](docs/configuration.md): executable contract.
 - [Architecture](docs/architecture.md): ownership and backend boundaries.
+- [Transfer commands](docs/transfer.md): paused snapshots, not active-work handoff.
+- [Portable environments](docs/portable-environments.md): selected handoff contract.

@@ -72,8 +72,69 @@ enum Command {
         #[arg(last = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Inspect declared handoff scope. No capture, network connection, or runtime changes.
+    Transfer {
+        #[command(subcommand)]
+        command: TransferCommand,
+    },
     /// Print recorded lifecycle intent; never infer live health from durable metadata.
     Status,
+}
+#[derive(Subcommand)]
+enum TransferCommand {
+    /// Stream a consistent SQLite snapshot into a new private Tower file.
+    StreamSqlite {
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long)]
+        to: String,
+        #[arg(long, default_value = "parcela")]
+        receiver: String,
+        #[arg(long)]
+        output: String,
+    },
+    #[command(hide = true)]
+    ReceiveSqlite {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        max_bytes: u64,
+    },
+    /// Capture pinned jj history and declared resources. No ownership handoff.
+    Capture {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        runtime_dir: Option<PathBuf>,
+        /// Assert all selected file writers are paused. SQLite uses online backup regardless.
+        #[arg(long)]
+        source_quiescent: bool,
+        /// Capture only source/history; data and profiles remain explicitly uncaptured.
+        #[arg(long)]
+        source_only: bool,
+    },
+    /// Validate a private checkpoint without creating absent state.
+    Verify { checkpoint: PathBuf },
+    /// Restore to a new directory, with agents and services not started.
+    Restore {
+        checkpoint: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    Plan {
+        /// Destination SSH target. Recorded only; this command never connects.
+        #[arg(long)]
+        to: String,
+        /// Explicit root for declared runtime data. No registry or home discovery.
+        #[arg(long)]
+        runtime_dir: Option<PathBuf>,
+        /// Explicit named profile root, NAME=PATH. Include paths come from the manifest.
+        #[arg(long = "profile")]
+        profiles: Vec<parcela::transfer::ProfileRoot>,
+        /// Native thread selection, yuke|codex|claude=SESSION_ID. No thread capture yet.
+        #[arg(long = "agent")]
+        agents: Vec<parcela::transfer::AgentSession>,
+    },
 }
 #[derive(Subcommand)]
 enum ProxyCommand {
@@ -175,10 +236,29 @@ fn inspect(cli: Cli) -> Result<()> {
             json(&serde_json::json!({
                 "implementation":"rust", "planned_architecture":{"http_tls":"managed Caddy","supervision":"managed Process Compose"},
                 "backend_probes":{"caddy":probe(caddy,"version"),"process_compose":probe(process_compose,"version")},
-                "supported":["config check","workspace adopt/list/inspect","context","status","proxy run/status","run","up (one routed service)","task"],
+                "supported":["config check","workspace adopt/list/inspect","context","status","proxy run/status","run","up (one routed service)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
                 "unsupported":["detached mode","cross-process stop/recovery","automatic backend installation","privilege/trust setup","sharing","boot service"],
                 "data_isolation_verified":false,"host_configuration_modified":false
             }))
+        }
+        Command::Transfer {
+            command:
+                TransferCommand::Plan {
+                    to,
+                    runtime_dir,
+                    profiles,
+                    agents,
+                },
+        } => {
+            let (source, manifest) = project(&cli.path)?;
+            json(&parcela::transfer::plan(
+                &source,
+                &manifest,
+                &to,
+                runtime_dir.as_deref(),
+                &profiles,
+                &agents,
+            )?)
         }
         Command::Status => {
             let (source, manifest) = project(&cli.path)?;
@@ -249,6 +329,66 @@ fn inspect(cli: Cli) -> Result<()> {
 }
 fn run(cli: Cli) -> Result<i32> {
     match cli.command {
+        Command::Transfer {
+            command:
+                TransferCommand::StreamSqlite {
+                    database,
+                    to,
+                    receiver,
+                    output,
+                },
+        } => {
+            json(&parcela::sqlite_stream::stream(
+                &database, &to, &receiver, &output,
+            )?)?;
+            Ok(0)
+        }
+        Command::Transfer {
+            command: TransferCommand::ReceiveSqlite { output, max_bytes },
+        } => {
+            parcela::sqlite_stream::receive(&output, max_bytes)?;
+            Ok(0)
+        }
+        Command::Transfer {
+            command:
+                TransferCommand::Capture {
+                    output,
+                    runtime_dir,
+                    source_quiescent,
+                    source_only,
+                },
+        } => {
+            let (source, manifest) = project(&cli.path)?;
+            json(&parcela::checkpoint::create(
+                &source,
+                &manifest,
+                &output,
+                runtime_dir.as_deref(),
+                source_quiescent,
+                if source_only {
+                    parcela::checkpoint::CaptureScope::Source
+                } else {
+                    parcela::checkpoint::CaptureScope::DeclaredResources
+                },
+            )?)?;
+            Ok(0)
+        }
+        Command::Transfer {
+            command: TransferCommand::Verify { checkpoint },
+        } => {
+            json(&parcela::checkpoint::verify(&checkpoint)?)?;
+            Ok(0)
+        }
+        Command::Transfer {
+            command:
+                TransferCommand::Restore {
+                    checkpoint,
+                    destination,
+                },
+        } => {
+            json(&parcela::checkpoint::restore(&checkpoint, &destination)?)?;
+            Ok(0)
+        }
         Command::Proxy {
             command:
                 ProxyCommand::Run {

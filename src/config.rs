@@ -23,6 +23,8 @@ pub struct Manifest {
     pub environment: BTreeMap<String, String>,
     #[serde(default = "yes")]
     pub inherit_environment: bool,
+    #[serde(default)]
+    pub transfer: Option<crate::transfer::Policy>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -164,6 +166,9 @@ impl Manifest {
                 graph.is_object(),
                 "process_compose must be a native graph mapping"
             );
+        }
+        if let Some(policy) = &self.transfer {
+            policy.validate(self)?;
         }
         Ok(())
     }
