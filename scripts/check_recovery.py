@@ -244,6 +244,67 @@ def proxy_outage(f):
         assert f.session(app)['generation'] == old['generation']
     return {'application_owners_preserved': True, 'routes_recovered': 2, 'application_generations_preserved': True}
 
+def lost_stop_reply(f):
+    app = f.app('lost', delay=2)
+    f.start_proxy()
+    owner = f.start(app)
+    session = f.session(app)
+    with socket.socket(socket.AF_UNIX) as client:
+        client.connect(str(app['runtime'] / 'ctl.sock'))
+        client.sendall((json.dumps({'environment_id': app['id'], 'token': session['token'], 'generation': session['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
+    wait_for(lambda: f.session(app)['status'] in ['stopping', 'stopped'])
+    retry = f.cli(app['path'], 'down')
+    assert retry.returncode == 0, retry.stderr
+    assert owner.wait(timeout=5) == 0
+    return {'lost_reply_retry_exit': 0, 'shutdown_completed': (app['runtime'] / 'shutdown-completed').exists()}
+
+def recover_surviving_graph(f):
+    app = f.app('reattach')
+    f.start_proxy()
+    owner = f.start(app)
+    before = f.session(app)
+    service = json.loads(f.request(app)[1])
+    owner.kill()
+    owner.wait(timeout=5)
+    recovered = f.cli(app['path'], 'recover', '--detach')
+    assert recovered.returncode == 0, recovered.stderr
+    after = f.session(app)
+    assert after['token'] == before['token'] and after['generation'] == before['generation']
+    assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'recovery must not replay or replace service processes'
+    return {'controller_recovered': True, 'service_pid_preserved': True, 'generation_preserved': True}
+
+def guardian_death(f):
+    app = f.app('guardian')
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    f.proxy.kill()
+    f.proxy.wait(timeout=5)
+    wait_for(lambda: f.request(app)[0] == 503, timeout=10)
+    assert owner.poll() is None and listening(app['port'])
+    status = json.loads(f.cli(app['path'], 'status').stdout)
+    assert status['state'] == 'unhealthy' and not status['live']['route_published']
+    f.start_proxy()
+    wait_for(lambda: f.request(app)[0] == 200)
+    assert f.session(app)['token'] == original['token']
+    return {'lease_expired_without_guardian': True, 'existing_caddy_recovered': True, 'application_preserved': True}
+
+def wrong_native_token(f):
+    app = f.app('auth')
+    f.start_proxy()
+    owner = f.start(app)
+    owner.kill()
+    owner.wait(timeout=5)
+    token = app['runtime'] / 'pc.token'
+    original = token.read_text()
+    try:
+        token.write_text('wrong-test-token')
+        down = f.cli(app['path'], 'down')
+        assert down.returncode != 0 and listening(app['port']), 'failed authentication must not stop or adopt the graph'
+    finally:
+        token.write_text(original)
+    return {'unauthenticated_recovery_refused': True, 'service_preserved': True}
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True)
@@ -253,7 +314,7 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     report = {'mode': 'recovery-acceptance', 'cases': []}
-    for case in [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage]:
+    for case in [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply, recover_surviving_graph, guardian_death, wrong_native_token]:
         fixture = Fixture(args, case.__name__)
         record = {'case': case.__name__, **fixture.details()}
         try:

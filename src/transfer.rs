@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 const ENTRY_LIMIT: usize = 10_000;
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
     #[serde(default)]
@@ -24,7 +24,7 @@ pub struct Policy {
     pub required_credentials: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Resource {
     pub location: Location,
@@ -41,7 +41,7 @@ pub enum Location {
     Runtime,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "method", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Snapshot {
     QuiescentFiles {},
@@ -49,7 +49,7 @@ pub enum Snapshot {
     Task { capture: String, restore: String },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
     pub include: Vec<PathBuf>,

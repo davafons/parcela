@@ -44,7 +44,7 @@ fn file(path: &Path) -> Result<File> {
         .create(true)
         .truncate(false)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     let metadata = file.metadata()?;
     // SAFETY: getuid has no pointers or failure case.
@@ -62,6 +62,9 @@ pub struct Lock {
     _file: File,
 }
 impl Lock {
+    pub fn identity(&self) -> Result<Identity> {
+        Ok(Identity::from_metadata(&self._file.metadata()?))
+    }
     pub fn acquire(path: &Path) -> Result<Self> {
         let file = file(path)?;
         // SAFETY: fd is held by file; flock does not retain a pointer.
@@ -84,6 +87,9 @@ impl Lock {
     }
 }
 pub fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
+    write_bytes(path, &serde_json::to_vec_pretty(value)?)
+}
+pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("file needs a parent directory")?;
     directory(parent)?;
     if path.exists() {
@@ -96,7 +102,7 @@ pub fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
             .create_new(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(&serde_json::to_vec_pretty(value)?)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         fs::rename(&temporary, path)?;
         File::open(parent)?.sync_all()?;
@@ -110,7 +116,7 @@ pub fn write_json(path: &Path, value: &impl serde::Serialize) -> Result<()> {
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let mut file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
     let metadata = file.metadata()?;
     // SAFETY: getuid has no pointers or failure case.
@@ -155,4 +161,70 @@ pub fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
         std::io::Error::last_os_error()
     );
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Identity {
+    device: u64,
+    inode: u64,
+}
+impl Identity {
+    fn from_metadata(metadata: &fs::Metadata) -> Self {
+        Self {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }
+    }
+    pub fn read(path: &Path) -> Result<Self> {
+        let metadata = fs::symlink_metadata(path)?;
+        ensure!(
+            !metadata.file_type().is_symlink(),
+            "identity cannot refer to a symlink"
+        );
+        Ok(Self::from_metadata(&metadata))
+    }
+    pub fn matches(&self, path: &Path) -> bool {
+        Self::read(path).is_ok_and(|actual| actual == *self)
+    }
+    pub fn locked(&self, path: &Path) -> Result<bool> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        ensure!(
+            metadata.is_file() && metadata.mode() & 0o077 == 0,
+            "invalid ownership lock"
+        );
+        ensure!(
+            *self == Self::from_metadata(&metadata),
+            "ownership lock was replaced"
+        );
+        // SAFETY: the file owns the descriptor throughout the nonblocking lock probe.
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+        if result == 0 {
+            return Ok(false);
+        }
+        let error = std::io::Error::last_os_error();
+        ensure!(
+            error.kind() == std::io::ErrorKind::WouldBlock,
+            "cannot inspect ownership lock: {error}"
+        );
+        Ok(true)
+    }
+    pub fn remove_socket(&self, path: &Path) -> Result<()> {
+        use std::os::unix::fs::FileTypeExt;
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        ensure!(
+            metadata.file_type().is_socket() && *self == Self::from_metadata(&metadata),
+            "socket was replaced; preserving {}",
+            path.display()
+        );
+        fs::remove_file(path)?;
+        Ok(())
+    }
 }

@@ -16,7 +16,9 @@ use std::{
 };
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+pub const LEASE_MS: u64 = 3000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Router {
     pub token: String,
@@ -95,7 +97,12 @@ pub fn sync(registry: &Registry, router: &Router) -> Result<()> {
     let state = registry.state_path();
     let _lock = Lock::wait(&proxy_dir(state).join("updates.lock"))?;
     verify(state, router)?;
+    renew_leases(registry, router)?;
     let config = configuration(registry, router)?;
+    let cached: Result<Value> = private::read_json(&proxy_dir(state).join("loaded.json"));
+    if cached.is_ok_and(|cached| cached == config) {
+        return Ok(());
+    }
     let (status, response) = http::admin(
         &socket(state)?,
         "POST",
@@ -107,6 +114,84 @@ pub fn sync(registry: &Registry, router: &Router) -> Result<()> {
         "Caddy rejected owned route update: {}",
         String::from_utf8_lossy(&response)
     );
+    private::write_json(&proxy_dir(state).join("loaded.json"), &config)?;
+    if let Ok(mut evidence) =
+        private::read_json::<ProxyEvidence>(&proxy_dir(state).join("owner.json"))
+    {
+        ensure!(
+            evidence.child.alive() && evidence.router.token == router.token,
+            "proxy recovery evidence changed"
+        );
+        evidence.socket = private::Identity::read(&socket(state)?)?;
+        private::write_json(&proxy_dir(state).join("owner.json"), &evidence)?;
+    }
+    Ok(())
+}
+fn lease_directory(state: &Path, router: &Router, session: &crate::registry::Session) -> PathBuf {
+    proxy_dir(state)
+        .join("leases")
+        .join(&router.token)
+        .join(&session.token)
+}
+pub fn route_published(
+    registry: &Registry,
+    router: &Router,
+    session: &crate::registry::Session,
+) -> bool {
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    let file =
+        lease_directory(registry.state_path(), router, session).join(now.as_secs().to_string());
+    std::fs::read(file).is_ok_and(|bytes| bytes == session.token.as_bytes())
+}
+fn renew_leases(registry: &Registry, router: &Router) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    for session in registry.sessions()? {
+        if session.router_token != router.token {
+            continue;
+        }
+        let path = registry
+            .state_path()
+            .join("environments")
+            .join(&session.environment_id);
+        let directory = lease_directory(registry.state_path(), router, &session);
+        let active = session.status == "ready"
+            && crate::owner::Record::read(&path, &session)
+                .is_ok_and(|record| record.routable(&path));
+        if active {
+            private::directory(&directory)?;
+            for tick in now..now + LEASE_MS / 1000 {
+                let file = directory.join(tick.to_string());
+                if !file.exists() {
+                    private::write_bytes(&file, session.token.as_bytes())?;
+                }
+            }
+        }
+        if directory.exists() {
+            private::existing_directory(&directory)?;
+            for entry in std::fs::read_dir(&directory)? {
+                let entry = entry?;
+                if let Ok(tick) = entry.file_name().to_string_lossy().parse::<u64>()
+                    && (!active || tick < now)
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    let metadata = std::fs::symlink_metadata(entry.path())?;
+                    ensure!(
+                        metadata.is_file() && metadata.mode() & 0o077 == 0,
+                        "foreign lease artifact preserved"
+                    );
+                    ensure!(
+                        std::fs::read(entry.path())? == session.token.as_bytes(),
+                        "foreign lease artifact preserved"
+                    );
+                    std::fs::remove_file(entry.path())?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
@@ -129,6 +214,10 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
         .iter()
         .filter(|s| s.status == "ready" && s.router_token == router.token)
     {
+        let path = state.join("environments").join(&session.environment_id);
+        if !crate::owner::Record::read(&path, session).is_ok_and(|record| record.routable(&path)) {
+            continue;
+        }
         let workspace = workspaces
             .iter()
             .find(|w| w.id == session.environment_id)
@@ -144,7 +233,7 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
                 .context("invalid owned hostname")?,
         )?;
 
-        routes.push(json!({"@id": format!("run-{}", session.token), "match":[{"host":[workspace.hostname]}], "handle":[{
+        routes.push(json!({"@id": format!("run-{}", session.token), "match":[{"host":[workspace.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
             "handler":"reverse_proxy", "upstreams":[{"dial":format!("127.0.0.1:{}",session.backend_port)}],
             "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
         }], "terminal": true}));
@@ -207,13 +296,31 @@ pub fn run(
     let _lifetime = Lock::acquire(&directory.join("owner.lock"))?;
     let _update = Lock::wait(&directory.join("updates.lock"))?;
     let admin_socket = socket(state)?;
-    // An existing socket is never adopted/deleted merely because its pathname is ours.
-    ensure!(
-        !admin_socket.exists(),
-        "existing admin socket requires explicit operator reconciliation; no backend will be taken over"
-    );
-    for port in [https_port, http_port] {
-        let _probe = TcpListener::bind(("127.0.0.1", port)).with_context(|| format!("front-door port {port} unavailable; no listener takeover or fallback (privilege setup is separate)"))?;
+    let mut recovered = None;
+    if admin_socket.exists() {
+        let evidence: ProxyEvidence = private::read_json(&directory.join("owner.json"))
+            .context("existing admin socket has no recovery evidence; no takeover performed")?;
+        ensure!(
+            evidence.socket.matches(&admin_socket),
+            "admin socket was replaced; no takeover performed"
+        );
+        if evidence.child.alive() {
+            verify(state, &evidence.router)?;
+            recovered = Some(evidence.child);
+        } else {
+            ensure!(
+                std::os::unix::net::UnixStream::connect(&admin_socket).is_err(),
+                "unknown live admin socket preserved"
+            );
+            evidence.socket.remove_socket(&admin_socket)?;
+        }
+    }
+    if recovered.is_none() {
+        for port in [https_port, http_port] {
+            let _probe = TcpListener::bind(("127.0.0.1", port)).with_context(|| {
+                format!("front-door port {port} unavailable; no listener takeover or fallback")
+            })?;
+        }
     }
     let router = Router {
         token: Uuid::new_v4().to_string(),
@@ -235,14 +342,36 @@ pub fn run(
         .env("XDG_DATA_HOME", directory.join("data"))
         .env("XDG_CONFIG_HOME", directory.join("config"));
     let signals = Signals::new()?;
-    let mut child = OwnedChild::spawn(&mut command)?;
+    let mut child = if recovered.is_none() {
+        Some(OwnedChild::spawn(&mut command)?)
+    } else {
+        None
+    };
+    if recovered.is_some() {
+        let (status, response) = http::admin(
+            &admin_socket,
+            "POST",
+            "/load",
+            &serde_json::to_vec(&config)?,
+        )?;
+        ensure!(
+            status == 200,
+            "owned Caddy rejected recovery: {}",
+            String::from_utf8_lossy(&response)
+        );
+    }
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if let Some(status) = child.poll()? {
+        if let Some(status) = child.as_mut().map(OwnedChild::poll).transpose()?.flatten() {
             anyhow::bail!("Caddy exited during startup ({})", exit_code(status));
         }
         if signals.received() != 0 {
-            return Ok(exit_code(child.stop(signals.received() as i32)?));
+            return stop_proxy(
+                &mut child,
+                recovered.as_ref(),
+                state,
+                signals.received() as i32,
+            );
         }
         if verify(state, &router).is_ok() {
             break;
@@ -250,21 +379,83 @@ pub fn run(
         ensure!(Instant::now() < deadline, "Caddy admin startup timed out");
         thread::sleep(Duration::from_millis(50));
     }
+    let identity = if let Some(identity) = &recovered {
+        identity.clone()
+    } else {
+        crate::process::Identity::read(child.as_ref().context("proxy child missing")?.id())?
+            .context("proxy birth identity unavailable")?
+    };
+    private::write_json(
+        &directory.join("owner.json"),
+        &ProxyEvidence {
+            child: identity.clone(),
+            socket: private::Identity::read(&admin_socket)?,
+            router: router.clone(),
+        },
+    )?;
     private::write_json(&directory.join("router.json"), &router)?;
+    private::write_json(&directory.join("loaded.json"), &config)?;
     drop(_update);
     eprintln!(
         "parcela: Caddy {backend}, owned loopback front door {} (test_profile={test_profile}); CA trust unchanged",
         router.url("<environment>")
     );
+    let mut refresh = Instant::now();
     let result = loop {
-        if let Some(status) = child.poll()? {
+        if !identity.alive() {
+            break Err(anyhow::anyhow!(
+                "owned Caddy exited; applications remain independently supervised"
+            ));
+        }
+        if let Some(status) = child.as_mut().map(OwnedChild::poll).transpose()?.flatten() {
             break Ok(exit_code(status));
         }
         if signals.received() != 0 {
-            break Ok(exit_code(child.stop(signals.received() as i32)?));
+            break stop_proxy(
+                &mut child,
+                recovered.as_ref(),
+                state,
+                signals.received() as i32,
+            );
+        }
+        if Instant::now() >= refresh {
+            if let Err(error) = sync(registry, &router) {
+                eprintln!("parcela: route lease renewal failed; routes expire: {error:#}");
+            }
+            refresh = Instant::now() + Duration::from_millis(500);
         }
         thread::sleep(Duration::from_millis(100));
     };
     // Caddy normally unlinks its socket itself; no delete/recovery of unknown sockets.
     result
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProxyEvidence {
+    child: crate::process::Identity,
+    socket: private::Identity,
+    router: Router,
+}
+fn stop_proxy(
+    child: &mut Option<OwnedChild>,
+    peer: Option<&crate::process::Identity>,
+    state: &Path,
+    signal: i32,
+) -> Result<i32> {
+    if let Some(child) = child {
+        return Ok(exit_code(child.stop(signal)?));
+    }
+    let peer = peer.context("proxy identity missing")?;
+    ensure!(peer.alive(), "owned Caddy identity unavailable");
+    let router = current(state)?;
+    verify(state, &router)?;
+    let (status, _) = http::admin(&socket(state)?, "POST", "/stop", &[])?;
+    ensure!(status == 200, "owned Caddy rejected stop");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while peer.alive() {
+        ensure!(Instant::now() < deadline, "owned Caddy stop incomplete");
+        thread::sleep(Duration::from_millis(50));
+    }
+    Ok(0)
 }

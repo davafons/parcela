@@ -85,6 +85,18 @@ impl OwnedChild {
         self.ended |= result.is_some();
         Ok(result)
     }
+    pub fn signal(&mut self, signal: i32, group: bool) -> Result<()> {
+        ensure!(self.poll()?.is_none(), "child already exited");
+        let pid = self.child.id() as i32;
+        // SAFETY: an unreaped retained live child cannot have its PID reused.
+        let result = unsafe { libc::kill(if group { -pid } else { pid }, signal) };
+        ensure!(
+            result == 0,
+            "cannot signal retained child: {}",
+            std::io::Error::last_os_error()
+        );
+        Ok(())
+    }
     pub fn stop(&mut self, signal: i32) -> Result<ExitStatus> {
         if let Some(status) = self.poll()? {
             return Ok(status);
@@ -260,4 +272,144 @@ fn descendant(mut pid: u32, owner: u32) -> Result<bool> {
         pid = parent;
     }
     Ok(false)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Identity {
+    pub pid: u32,
+    birth: u64,
+    boot: String,
+}
+impl Identity {
+    pub fn read(pid: u32) -> Result<Option<Self>> {
+        let Some(birth) = birth(pid)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            pid,
+            birth,
+            boot: boot_id()?,
+        }))
+    }
+    pub fn alive(&self) -> bool {
+        Self::read(self.pid).is_ok_and(|current| current.as_ref() == Some(self))
+    }
+}
+#[cfg(target_os = "linux")]
+fn boot_id() -> Result<String> {
+    Ok(std::fs::read_to_string("/proc/sys/kernel/random/boot_id")?
+        .trim()
+        .to_owned())
+}
+#[cfg(target_os = "linux")]
+fn birth(pid: u32) -> Result<Option<u64>> {
+    let text = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let fields: Vec<_> = text
+        .rsplit_once(')')
+        .context("invalid process stat")?
+        .1
+        .split_whitespace()
+        .collect();
+    if fields
+        .first()
+        .is_none_or(|state| ["Z", "X"].contains(state))
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        fields.get(19).context("missing process birth")?.parse()?,
+    ))
+}
+#[cfg(target_os = "macos")]
+fn boot_id() -> Result<String> {
+    let name = std::ffi::CString::new("kern.bootsessionuuid")?;
+    let mut bytes = [0u8; 128];
+    let mut size = bytes.len();
+    // SAFETY: the name and fixed output buffer remain owned through sysctlbyname.
+    let result = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            bytes.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    ensure!(
+        result == 0 && size <= bytes.len(),
+        "cannot identify host boot"
+    );
+    Ok(std::str::from_utf8(&bytes[..size])?
+        .trim_end_matches('\0')
+        .to_owned())
+}
+#[cfg(target_os = "macos")]
+fn birth(pid: u32) -> Result<Option<u64>> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::uninit();
+    let size = std::mem::size_of::<libc::proc_bsdinfo>();
+    // SAFETY: PROC_PIDTBSDINFO (3) fills the supplied proc_bsdinfo buffer.
+    let result =
+        unsafe { libc::proc_pidinfo(pid as i32, 3, 0, info.as_mut_ptr().cast(), size as i32) };
+    if result == 0 {
+        return Ok(None);
+    }
+    ensure!(result as usize == size, "incomplete process birth identity");
+    // SAFETY: proc_pidinfo reported that it initialized the entire buffer.
+    let info = unsafe { info.assume_init() };
+    if info.pbi_status == 5 {
+        return Ok(None);
+    }
+    Ok(Some(
+        info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec,
+    ))
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn boot_id() -> Result<String> {
+    anyhow::bail!("process identity requires macOS or Linux")
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn birth(_: u32) -> Result<Option<u64>> {
+    anyhow::bail!("process identity requires macOS or Linux")
+}
+
+pub fn tree(root: &Identity) -> Result<Vec<Identity>> {
+    if !root.alive() {
+        return Ok(Vec::new());
+    }
+    let output = capture(
+        Command::new("ps").args(["-A", "-o", "pid=,ppid="]),
+        Duration::from_secs(2),
+        1_000_000,
+    )?;
+    ensure!(
+        output.status.success(),
+        "cannot inspect supervised process tree"
+    );
+    let text = String::from_utf8(output.stdout)?;
+    let pairs: Vec<(u32, u32)> = text
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+        })
+        .collect();
+    let mut pids = std::collections::BTreeSet::from([root.pid]);
+    loop {
+        let before = pids.len();
+        for (pid, parent) in &pairs {
+            if pids.contains(parent) {
+                pids.insert(*pid);
+            }
+        }
+        if pids.len() == before {
+            break;
+        }
+    }
+    pids.into_iter()
+        .filter_map(|pid| Identity::read(pid).transpose())
+        .collect()
 }

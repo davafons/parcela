@@ -31,6 +31,7 @@ pub fn status(registry: &Registry, workspace: &Workspace) -> Result<Value> {
                     LiveState::Ready => "ready",
                     LiveState::Unhealthy => "unhealthy",
                     LiveState::Starting => "starting",
+                    LiveState::Stopping => "stopping",
                 };
                 live = Some(value);
             }
@@ -54,8 +55,34 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
             json!({"environment_id": workspace.id, "state": "stopped", "already_stopped": true}),
         );
     }
-    control::request(&registry.runtime_path(workspace), &session, Action::Stop)?;
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let path = registry.runtime_path(workspace);
+    if session.status != "stopping"
+        && let Err(error) = control::request(&path, &session, Action::Stop)
+    {
+        let current = current_session(registry, &session)?;
+        if current.status != "stopping" && current.status != "stopped" {
+            let evidence = crate::owner::Record::read(&path, &session).with_context(|| {
+                format!("{error:#}; authenticated recovery evidence unavailable")
+            })?;
+            ensure!(
+                !evidence.owner.alive(),
+                "owner still exists; retry the same generation after the pending command"
+            );
+            let mut writer =
+                Registry::open(registry.state_path(), true)?.context("registry missing")?;
+            return crate::runtime::recover(&mut writer, workspace, true);
+        }
+    }
+    if session.status == "stopping"
+        && crate::owner::Record::read(&path, &session).is_ok_and(|record| !record.owner.alive())
+    {
+        let mut writer =
+            Registry::open(registry.state_path(), true)?.context("registry missing")?;
+        return crate::runtime::recover(&mut writer, workspace, true);
+    }
+    let budget = crate::owner::Record::read(&path, &session)
+        .map_or(300, |record| record.manifest.shutdown_timeout_seconds);
+    let deadline = Instant::now() + Duration::from_secs(budget + 10);
     loop {
         let current = registry
             .session(&workspace.id)?
@@ -63,6 +90,17 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         ensure!(
             current.token == session.token && current.generation == session.generation,
             "owner changed during stop; successor was not stopped"
+        );
+        if current.status == "stopping"
+            && crate::owner::Record::read(&path, &session).is_ok_and(|record| !record.owner.alive())
+        {
+            let mut writer =
+                Registry::open(registry.state_path(), true)?.context("registry missing")?;
+            return crate::runtime::recover(&mut writer, workspace, true);
+        }
+        ensure!(
+            current.status != "interrupted",
+            "shutdown incomplete; authenticated recovery is required, no PID was signaled"
         );
         if current.status == "stopped" {
             let path = registry.runtime_path(workspace);
@@ -86,6 +124,7 @@ pub fn detached(
     binary: &str,
     port: Option<u16>,
     timeout: u64,
+    manifest: &crate::config::Manifest,
 ) -> Result<Value> {
     ensure!(timeout > 0, "readiness timeout must be positive");
     let path = registry.runtime_path(workspace);
@@ -130,6 +169,15 @@ pub fn detached(
     if let Some(port) = port {
         command.args(["--backend-port", &port.to_string()]);
     }
+    private::write_json(
+        &path.join("launch.json"),
+        &LaunchSnapshot {
+            source: workspace.source.clone(),
+            manifest: manifest.clone(),
+            predecessor: previous.clone(),
+        },
+    )?;
+    command.arg("--launch-file").arg(path.join("launch.json"));
     let signals = Signals::new()?;
     let mut owner = OwnedChild::spawn_logged(&mut command, log)?;
     let deadline = Instant::now() + Duration::from_secs(timeout.saturating_add(5));
@@ -197,4 +245,64 @@ pub fn url(registry: &Registry, workspace: &Workspace) -> Result<String> {
         || format!("https://{}", workspace.hostname),
         |session| session.public_url,
     ))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchSnapshot {
+    pub source: std::path::PathBuf,
+    pub manifest: crate::config::Manifest,
+    pub predecessor: Option<Session>,
+}
+
+pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Value> {
+    let session = registry
+        .session(&workspace.id)?
+        .context("no native session to recover")?;
+    let path = registry.runtime_path(workspace);
+    let evidence = crate::owner::Record::read(&path, &session)?;
+    ensure!(
+        !evidence.owner.alive(),
+        "owner is still alive; use status/down"
+    );
+    evidence.authenticate(&path, workspace)?;
+    let _launch = private::Lock::acquire(&path.join("launch.lock"))?;
+    let log_path = path.join("log/owner.log");
+    let log = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&log_path)?;
+    let metadata = log.metadata()?;
+    ensure!(
+        metadata.is_file() && metadata.mode() & 0o077 == 0,
+        "invalid private owner log"
+    );
+    let mut command = Command::new(std::env::current_exe()?);
+    command
+        .arg("--state-dir")
+        .arg(registry.state_path())
+        .arg("--workspace")
+        .arg(&workspace.id)
+        .arg("recover");
+    let mut owner = OwnedChild::spawn_logged(&mut command, log)?;
+    let deadline = Instant::now() + Duration::from_secs(65);
+    loop {
+        ensure!(
+            owner.poll()?.is_none(),
+            "recovery owner exited; inspect {}",
+            log_path.display()
+        );
+        let current = current_session(registry, &session)?;
+        if let Ok(live) = control::request(&path, &current, Action::Status)
+            && live["state"] == "ready"
+            && live["owner_pid"].as_u64() == Some(u64::from(owner.id()))
+        {
+            owner.detach();
+            return Ok(json!({"session":current,"recovered":true,"detached":true,"live":live}));
+        }
+        ensure!(Instant::now() < deadline, "recovery readiness timed out");
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }

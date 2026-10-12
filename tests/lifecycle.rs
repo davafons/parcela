@@ -108,6 +108,28 @@ fn stale_nonce_or_generation_never_reaches_owner_actions() {
 }
 
 #[test]
+fn disconnected_caller_retains_complete_stop_and_cannot_fail_owner() {
+    use std::{io::Write, os::unix::net::UnixStream};
+
+    let (_temp, registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    let server = Server::bind(&path).unwrap();
+    let request = serde_json::json!({"environment_id": session.environment_id, "token": session.token, "generation": session.generation, "action": {"type": "stop"}});
+    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    writeln!(caller, "{request}").unwrap();
+    drop(caller);
+    let pending = server.receive(&session).unwrap().unwrap();
+    assert!(matches!(pending.action, Action::Stop));
+    assert!(pending.reply(&session, Ok(serde_json::json!({"stop_accepted": true}))).is_err());
+    assert!(server.receive(&session).unwrap().is_none());
+
+    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    caller.write_all(b"{\"action\":").unwrap();
+    drop(caller);
+    assert!(server.receive(&session).unwrap().is_none());
+}
+
+#[test]
 fn control_server_never_replaces_or_removes_foreign_sockets_or_links() {
     let (_temp, registry, workspace, session) = fixture();
     let path = registry.runtime_path(&workspace);

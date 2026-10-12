@@ -31,6 +31,7 @@ pub enum LiveState {
     Starting,
     Ready,
     Unhealthy,
+    Stopping,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LiveStatus {
@@ -38,6 +39,8 @@ pub struct LiveStatus {
     pub http_ready: bool,
     pub listener_owned: bool,
     pub router_owned: bool,
+    #[serde(default)]
+    pub route_published: bool,
     pub owner_pid: u32,
     pub child_pid: u32,
     pub listener_pids: Vec<u32>,

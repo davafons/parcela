@@ -361,7 +361,7 @@ impl Registry {
 
     pub fn session_status(&mut self, session: &Session, status: &str) -> Result<()> {
         ensure!(
-            ["starting", "ready", "stopping", "stopped"].contains(&status),
+            ["starting", "ready", "stopping", "stopped", "interrupted"].contains(&status),
             "invalid session transition"
         );
         let changed = self.connection.execute(
@@ -380,6 +380,15 @@ impl Registry {
         Ok(())
     }
 
+    pub fn rebind_router(&mut self, session: &Session, token: &str) -> Result<()> {
+        ensure!(Uuid::parse_str(token).is_ok(), "invalid router epoch");
+        let changed = self.connection.execute("UPDATE sessions SET router_token=?1 WHERE environment_id=?2 AND token=?3 AND generation=?4 AND status IN ('ready','starting')", params![token, session.environment_id, session.token, session.generation])?;
+        ensure!(
+            changed == 1,
+            "application ownership changed during route recovery"
+        );
+        Ok(())
+    }
     pub fn runtime_path(&self, workspace: &Workspace) -> PathBuf {
         self.state.join("environments").join(&workspace.id)
     }
@@ -443,7 +452,8 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     .iter()
     .any(|id| Uuid::parse_str(id).is_err())
         || session.generation <= 0
-        || !["starting", "ready", "stopping", "stopped"].contains(&session.status.as_str())
+        || !["starting", "ready", "stopping", "stopped", "interrupted"]
+            .contains(&session.status.as_str())
         || session.backend_port < 1024
     {
         return Err(rusqlite::Error::InvalidQuery);

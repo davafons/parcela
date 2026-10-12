@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub version: u32,
@@ -23,11 +23,13 @@ pub struct Manifest {
     pub environment: BTreeMap<String, String>,
     #[serde(default = "yes")]
     pub inherit_environment: bool,
+    #[serde(default = "shutdown_timeout")]
+    pub shutdown_timeout_seconds: u64,
     #[serde(default)]
     pub transfer: Option<crate::transfer::Policy>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
     pub id: String,
@@ -35,7 +37,7 @@ pub struct Project {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Service {
     /// Optional explicit subdomain for non-default services.
@@ -44,13 +46,16 @@ pub struct Service {
     pub readiness_path: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
     pub argv: Vec<String>,
     pub timeout_seconds: Option<u64>,
 }
 
+fn shutdown_timeout() -> u64 {
+    300
+}
 fn yes() -> bool {
     true
 }
@@ -98,6 +103,10 @@ impl Manifest {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)),
             "project.id must be 1–128 ASCII letters, digits, hyphens, underscores or dots"
+        );
+        ensure!(
+            (1..=86400).contains(&self.shutdown_timeout_seconds),
+            "shutdown_timeout_seconds must be between 1 and 86400"
         );
         dns_label(&self.project.name)?;
         ensure!(

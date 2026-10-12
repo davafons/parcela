@@ -76,6 +76,8 @@ enum Command {
         /// Keep an independent owner running after startup readiness.
         #[arg(long)]
         detach: bool,
+        #[arg(long, hide = true)]
+        launch_file: Option<PathBuf>,
     },
     /// Execute an explicit project-defined task, with literal appended arguments.
     Task {
@@ -97,6 +99,11 @@ enum Command {
     /// Stop through the live owner and preserve source/data. Never signal stored PIDs.
     #[command(visible_alias = "stop")]
     Down,
+    /// Recover control of a proven surviving native graph without replaying commands.
+    Recover {
+        #[arg(long)]
+        detach: bool,
+    },
     /// Stop the owned graph, then start the current manifest in a new generation.
     Restart {
         #[arg(long, default_value = "process-compose")]
@@ -107,6 +114,8 @@ enum Command {
         readiness_timeout: u64,
         #[arg(long)]
         detach: bool,
+        #[arg(long, hide = true)]
+        launch_file: Option<PathBuf>,
     },
     /// Inspect services through the verified owner and Process Compose.
     Services,
@@ -637,19 +646,65 @@ fn run(mut cli: Cli) -> Result<i32> {
             backend_port,
             readiness_timeout,
             detach,
+            launch_file,
         }
         | Command::Restart {
             process_compose,
             backend_port,
             readiness_timeout,
             detach,
+            launch_file,
         } => {
             let restart = restarting;
-            let (source, manifest) = project(&cli.path)?;
+            let snapshot: Option<lifecycle::LaunchSnapshot> = launch_file
+                .as_ref()
+                .map(|path| parcela::private::read_json(path))
+                .transpose()?;
+            let (source, manifest) = if let Some(snapshot) = &snapshot {
+                ensure!(
+                    cli.path.canonicalize()? == snapshot.source,
+                    "launch source changed"
+                );
+                (snapshot.source.clone(), snapshot.manifest.clone())
+            } else {
+                project(&cli.path)?
+            };
             let state = state_dir(cli.state_dir)?;
             let mut registry = Registry::open(&state, true)?.context("no registry")?;
             let workspace = registry.current(&source, &manifest)?;
+            if let Some(snapshot) = &snapshot {
+                ensure!(
+                    launch_file.as_ref()
+                        == Some(&registry.runtime_path(&workspace).join("launch.json")),
+                    "unexpected launch snapshot path"
+                );
+                let current = registry.session(&workspace.id)?;
+                ensure!(
+                    current.as_ref().map(|s| (&s.token, s.generation))
+                        == snapshot
+                            .predecessor
+                            .as_ref()
+                            .map(|s| (&s.token, s.generation)),
+                    "launch predecessor changed; successor preserved"
+                );
+            }
+            let operation = if restart {
+                parcela::private::directory(&registry.runtime_path(&workspace))?;
+                Some(parcela::private::Lock::wait(
+                    &registry.runtime_path(&workspace).join("restart.lock"),
+                )?)
+            } else {
+                None
+            };
             if restart {
+                parcela::runtime::preflight(
+                    &registry,
+                    &manifest,
+                    &workspace,
+                    parcela::runtime::Launch::Compose(&process_compose),
+                    backend_port,
+                    readiness_timeout,
+                )?;
                 ensure!(
                     registry
                         .session(&workspace.id)?
@@ -665,9 +720,11 @@ fn run(mut cli: Cli) -> Result<i32> {
                     &process_compose,
                     backend_port,
                     readiness_timeout,
+                    &manifest,
                 )?)?;
                 Ok(0)
             } else {
+                drop(operation);
                 parcela::runtime::run(
                     &mut registry,
                     &manifest,
@@ -677,6 +734,23 @@ fn run(mut cli: Cli) -> Result<i32> {
                     readiness_timeout,
                 )
             }
+        }
+        Command::Recover { detach } => {
+            let state = state_dir(cli.state_dir)?;
+            let existing = Registry::open(&state, false)?.context("no registry")?;
+            let workspace = target_workspace(&existing, &cli.path, cli.workspace)?;
+            if detach {
+                json(&lifecycle::recover_detached(&existing, &workspace)?)?;
+            } else {
+                drop(existing);
+                let mut registry = Registry::open(&state, true)?.context("registry missing")?;
+                json(&parcela::runtime::recover(
+                    &mut registry,
+                    &workspace,
+                    false,
+                )?)?;
+            }
+            Ok(0)
         }
         Command::Down => {
             let state = state_dir(cli.state_dir)?;
