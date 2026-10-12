@@ -1,7 +1,7 @@
 ---
-owner: portable-handoff workspace
+owner: default Parcela workspace
 status: in_progress
-resume: acceptance-05 passed paused full-data Shirabe acceptance on Tower; its report has complete true, health/search 200, preserved queue/snapshots/uploads, and route teardown 503. Code checks pass on macOS/Linux with 54 Rust and 20 Python tests. Next reconcile Yuke's stale workspace while preserving on-disk changes, then finish native profile/context portability and source fencing before Herdr or round-trip acceptance. No active agent execution or ownership transfer has occurred.
+resume: Paused Shirabe acceptance and native Yuke import checks pass on macOS and Tower. Prior timing/allocation checks completed without a stable regression in measured phases. Destination inspection now uses an explicit environment, checks all native store rows and fences, and reports instruction/skill catalog drift without activation. Fourteen Python tests and expanded RPC checks pass on both hosts using the previously built binaries. The default Yuke checkout has a shared upstream rebase with unresolved core conflicts; its current seeded build fails on a conflict marker. Coordinate that rebase before core profile/context or ownership changes. No active agent execution or ownership transfer has occurred.
 ---
 
 # Portable handoff execution plan
@@ -14,8 +14,8 @@ The user authorized continuing toward full environment handoff and actual Shirab
 
 Own jj workspaces:
 
-- Parcela: `/Users/davafons/workspace/parcela-portable-handoff`. `mkrxrxqs` contains the inherited transfer foundations; `sxlwquyo` contains destination acceptance. Both are stacked on current `main`. The default workspace remains unchanged on main.
-- Yuke: `/Users/davafons/workspace/yuke-portable-handoff`, `pvnsrzuy`. Its working copy is stale. Inspect and preserve its on-disk changes before `jj workspace update-stale`; do not restore an older revision over them.
+- Parcela: `/Users/davafons/workspace/parcela`, the only registered workspace. Local `main` now includes transfer foundations (`mkrxrxqs`) and destination acceptance (`sxlwquyo`). The extra workspace/bookmark was removed at the user's request. Its directory, including ignored caches, is preserved at `/Users/davafons/.local/state/parcela/agent-tests/retired-workspaces/parcela-portable-handoff-20261012`; no source or test data was deleted. Nothing was pushed.
+- Yuke: `/Users/davafons/workspace/yuke`. Another session consolidated the prior work into `xwluxpnx` and rebased it onto upstream `main`; unresolved core and documentation conflicts remain. The inspection-tool follow-up is in `prqqrzlt`. Do not resolve or restructure the shared rebase without coordination. The inherited checkpoint tools, immutable/no-replace fixes, docs, RPC inspector and native fence test remain present. Their preserved originals and hashes are at `/Users/davafons/.local/state/parcela/agent-tests/yuke-native-resume-20261012/inherited`. Native store import/export belongs in Yuke core/tooling; the resume plugin can expose and coordinate it.
 - Shirabe: `/Users/davafons/workspace/shirabe-portable-handoff`, `luzvktns`. Own transfer policy and upload helper/tests. Do not alter the user's primary checkout or live data.
 - Herdr: no integration changes yet. Do not implicitly transfer the mixed `multidev` workspace.
 
@@ -44,7 +44,9 @@ Tower's generic live backend acceptance passes with actual Caddy/Process Compose
 
 Shirabe's upload helper passes its 3 tests locally. The earlier `bin/house-rules` failure came from Git-dependent tooling in a linked jj workspace. No Ruby-visible application code changed in this session. The live primary source/data remain untouched.
 
-Inherited Yuke evidence: seeded native Zig tests and 9 Python tests passed on macOS/Tower. Earlier export verification created SQLite sidecars; the on-disk implementation fixed snapshot normalization and immutable verification. These claims need reconciliation with the stale working copy before editing or describing that change.
+Yuke's inherited nine Python tests pass in the default checkout, including normalized WAL snapshots, repeated immutable verification and atomic no-replace publication. Two new tests cover schema-2 queued shell input and unknown schema-version refusal; all 11 pass. The schema-2 regression failed with `Unsupported native store schema` before the fix. The native fence regression failed with `expected error.SessionOwned, found void` before the admission check was integrated, then passed. Seeded and full Zig suites and the Debug build pass locally; the full run reports 1251 passed and one skipped. The isolated built-binary RPC check (`rpc-native-02`) reads imported native shell history, verifies destination roots and unchanged registry/queue, and receives the native session-busy error on attempted execution. It makes no real model request and uses no provider credentials. The prior jobs completed after the last checkpoint. Tower passed 11 Python tests, 859 seeded and 1252 full Zig tests, the build, and the native RPC fixture with `-Duse-lld=true`. Five timing runs per side stayed within the documented 20% noise range. Focused process-I/O samples reproduced allocation variation on both sides; live bytes matched and no stable steady-state regression appeared. The benchmark does not measure filesystem fence admission cost. Evidence is in local `bench-comparison.json` and Tower `yuke-default-20261012` logs.
+
+The resumed inspection slice passes 14 Python tests locally and on Tower. Three regressions failed before the fix: caller HOME/credentials leaked into the subprocess, an unfenced import reached startup, and stored prompt replacement went undetected. The inspector now uses explicit destination HOME/XDG paths and a minimal environment, rejects missing import fences before startup, and compares all native SQLite rows/schema plus fence bytes. It reports native instruction and skill catalog differences with activation readiness always false. The RPC fixture (`rpc-context-02`) proves drift detection, preserved source context, fenced input/context reload, and matching context that remains fenced. Skill body/profile/hook/permission equivalence and the extension writer barrier are not certified. Both-host RPC checks use the previous verified binaries. The current shared Yuke seeded build fails in jsbake on an inherited `<<` conflict marker in `src/js/app/ext.js`; full current-tree Zig tests/build cannot pass until the rebase is resolved.
 
 ## Artifacts and resume point
 
@@ -52,7 +54,7 @@ Tower task root: `/home/davafons/.local/state/parcela/agent-tests/portable-hando
 
 The old stream job's local log and transport receipt are unavailable. Tower retains all four published snapshots at `runs/0314532e14c8491683143d8ea597d891`: primary 871,796,736 bytes, dictionary 17,214,709,760 bytes, queue 34,615,296 bytes, cache 58,933,248 bytes. No transfer processes were running at pickup. acceptance-01 rehashed and validated all four snapshots successfully; its private receipt establishes a new baseline. Do not claim to have recovered the original transport receipt. These snapshots are independently consistent, not an atomic application checkpoint.
 
-Current task directory: `resume-20261012` under the Tower root. Local artifacts: `/Users/davafons/.local/state/parcela/agent-tests/portable-handoff-resume-20261012`.
+Current task directory: `resume-20261012` under the Tower root. Local service artifacts: `/Users/davafons/.local/state/parcela/agent-tests/portable-handoff-resume-20261012`. Native inspection artifacts: local `/Users/davafons/.local/state/parcela/agent-tests/yuke-native-resume-20261012/rpc-context-02` and Tower `resume-20261012/yuke-context-20261012/rpc-context-02`. The latter contains copied checkpoint tools and tests, not a new source checkout or active imported thread.
 
 - `shirabe-code-checkpoint`: source checkpoint `1e786922-fd61-4cc0-a45d-316a59d0e485`, revision `3243a1b425ba60b10bb50f899f2a0f03248c997c`, includes the upload helper/tests. It replaces the old source-only artifact for acceptance, without overwriting it.
 - `uploads-snapshot`: 414 local blobs, 276,803,380 bytes, selected from Tower's captured primary database. Source and captured files matched the database's Active Storage size/MD5 metadata. The snapshot is transferred; the acceptance script also compares captured/restored SHA-256 values.
@@ -82,6 +84,6 @@ No live source execution fence, current-thread handoff, Herdr layout restore, or
 
 ## Next after paused acceptance
 
-Reconcile Yuke's stale workspace, then implement profile/context reconciliation and durable source fencing/target activation. Keep the imported native thread fenced until those checks pass. Validate copied queue policy before enabling any effect-producing worker.
+Coordinate and resolve the shared Yuke rebase, then rerun seeded/full Zig tests and the build against that source. Implement profile/context reconciliation and durable source fencing/target activation after that. Keep the imported native thread fenced until those checks pass. Expose verified native operations through the resume/session UI rather than copying engine state in a plugin. Validate copied queue policy before enabling any effect-producing worker.
 
 The 16 GiB return checkpoint cannot be blindly duplicated on the Mac. Measure task-owned APFS cloning and delta transfer against an immutable Tower artifact, with a final SHA-256 and no writes to the primary source. Then add Herdr selection/layout and prove the complete round trip with interruption, lost acknowledgment, repeated activation, and divergence cases.
