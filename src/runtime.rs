@@ -1,6 +1,8 @@
 use crate::{
     config::Manifest,
+    control::{self, Action, LiveState, LiveStatus},
     http,
+    lifecycle::current_session,
     private::{self, Lock},
     process::{OwnedChild, Signals, exit_code, listener_identity, version},
     registry::{Registry, Session, Workspace},
@@ -89,6 +91,7 @@ fn runtime(registry: &Registry, workspace: &Workspace) -> Result<PathBuf> {
     Ok(path)
 }
 
+#[derive(Clone, Copy)]
 pub enum Launch<'a> {
     Command(&'a [String]),
     Compose(&'a str),
@@ -238,6 +241,13 @@ fn launch_and_monitor(
         }
     };
     let signals = Signals::new()?;
+    let control = match control::Server::bind(path) {
+        Ok(control) => control,
+        Err(error) => {
+            registry.session_status(session, "stopped")?;
+            return Err(error);
+        }
+    };
     // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
     drop(probe);
     let mut child = match OwnedChild::spawn(&mut command) {
@@ -258,6 +268,35 @@ fn launch_and_monitor(
             }
             if signals.received() != 0 {
                 return Ok(128 + signals.received() as i32);
+            }
+            if let Some(pending) = control.receive(session)? {
+                let mut stop = false;
+                let response = (|| -> Result<serde_json::Value> {
+                    current_session(registry, session)?;
+                    match &pending.action {
+                        Action::Status => {
+                            live_status(registry, workspace, session, child.id(), ready_path)
+                        }
+                        Action::Stop => {
+                            stop = true;
+                            Ok(json!({"stop_accepted": true}))
+                        }
+                        Action::Services | Action::Logs { .. } => {
+                            let Launch::Compose(binary) = launch else {
+                                anyhow::bail!(
+                                    "service inspection requires a Process Compose environment"
+                                );
+                            };
+                            compose_read(binary, path, &pending.action, manifest, env)
+                        }
+                    }
+                })();
+                if let Err(error) = pending.reply(session, response) {
+                    eprintln!("parcela: owner reply failed: {error:#}");
+                }
+                if stop {
+                    return Ok(0);
+                }
             }
             ensure!(
                 router::current(registry.state_path())?.token == router.token,
@@ -367,4 +406,101 @@ pub fn task(
         &json!({"task":name,"exit_code":code,"outcome":outcome,"generation":workspace.generation,"environment_id":workspace.id,"automatic_retry":false}),
     )?;
     Ok(code)
+}
+
+fn live_status(
+    registry: &Registry,
+    workspace: &Workspace,
+    session: &Session,
+    child: u32,
+    readiness: &str,
+) -> Result<serde_json::Value> {
+    let current = current_session(registry, session)?;
+    let listeners = listener_identity(session.backend_port, child)?;
+    let http_ready = !listeners.is_empty()
+        && http::readiness(session.backend_port, &workspace.hostname, readiness).unwrap_or(false);
+    let router_owned = router::current(registry.state_path())
+        .is_ok_and(|router| router.token == session.router_token);
+    let state = if current.status == "ready" && http_ready && router_owned {
+        LiveState::Ready
+    } else if current.status == "starting" {
+        LiveState::Starting
+    } else {
+        LiveState::Unhealthy
+    };
+    Ok(serde_json::to_value(LiveStatus {
+        state,
+        http_ready,
+        listener_owned: !listeners.is_empty(),
+        router_owned,
+        owner_pid: std::process::id(),
+        child_pid: child,
+        listener_pids: listeners,
+        checked_at_unix_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_millis(),
+    })?)
+}
+
+fn compose_read(
+    binary: &str,
+    runtime: &std::path::Path,
+    action: &Action,
+    manifest: &Manifest,
+    env: &BTreeMap<String, String>,
+) -> Result<serde_json::Value> {
+    let mut command = Command::new(binary);
+    command
+        .args(["--use-uds", "--unix-socket"])
+        .arg(runtime.join("pc.sock"))
+        .arg("--log-file")
+        .arg(runtime.join("log/control.log"))
+        .arg("--read-only");
+    command_env(&mut command, manifest, env);
+    match action {
+        Action::Services => {
+            command.args(["process", "list", "--output", "json"]);
+        }
+        Action::Logs { service, tail } => {
+            let service = service.as_ref().unwrap_or(&manifest.default_service);
+            ensure!(
+                *tail > 0 && *tail <= 10000,
+                "log tail must be between 1 and 10000"
+            );
+            ensure!(
+                manifest
+                    .process_compose
+                    .as_ref()
+                    .and_then(|graph| graph.get("processes"))
+                    .and_then(|processes| processes.get(service))
+                    .is_some(),
+                "unknown service {service}"
+            );
+            ensure!(
+                !service.starts_with('-') && !service.contains([',', '\n', '\r', '\0']),
+                "invalid service name"
+            );
+            command.args([
+                "process",
+                "logs",
+                "--tail",
+                &tail.to_string(),
+                "--",
+                service,
+            ]);
+        }
+        _ => anyhow::bail!("not a backend inspection action"),
+    }
+    let output = crate::process::capture(&mut command, Duration::from_secs(3), 512000)?;
+    ensure!(
+        output.status.success(),
+        "Process Compose inspection failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    match action {
+        Action::Services => {
+            Ok(json!({"services": serde_json::from_slice::<serde_json::Value>(&output.stdout)?}))
+        }
+        _ => Ok(json!({"logs": String::from_utf8(output.stdout)?})),
+    }
 }

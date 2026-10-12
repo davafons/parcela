@@ -6,10 +6,12 @@ Parcela is a Rust control plane with external Caddy and Process Compose. Project
 
 - Strict manifest validation, immutable identities, private SQLite registry, explicit adoption and inventory/context.
 - Schema 1 -> 2 migration, generation/nonce-protected session and endpoint leases.
-- Foreground `proxy run/status`, literal `run`, native `up`, finite `task`, recorded `status`, optional version probes in `doctor`.
+- Foreground `proxy run/status`, literal `run`, native `up`, finite `task`, live `status`, optional version probes in `doctor`.
 - Dedicated Caddy config/storage/admin socket; serialized exact-host route updates, internal CA, trust installation disabled by default.
 - Private runtime/locks, retained child groups, owned listener ancestry, initial/re-established readiness, route revocation before normal teardown.
 - Native Process Compose graph export, explicit private Unix-socket mode, no dotenv/watch/TUI.
+- Live-owner `down`/`stop`, whole-graph `restart`, explicit `up --detach`, service/log inspection, reserved `url`, UUID targeting and readable tables.
+- Read-only sibling jj/Git discovery with path/revision/ref/adoption metadata. Discovery never adopts or changes source/history.
 - Opt-in project-owned Shirabe Rails integration, preserving primary data while binding previews to private paths and secrets.
 - Explicit macOS operator helper for guarded PF standard-port forwarding, a root-owned forwarding boot job, and CA trust. Not an ordinary-command side effect.
 
@@ -41,6 +43,14 @@ The earlier queue failure was an artifact/runtime distinction: Rails switched th
 
 These snapshots are independently consistent, not an atomic application checkpoint. This proves a paused replica's tested service/data paths, not active agent continuation, complete application regression, or execution handoff.
 
+## Local CLI verification, 2026-10-12
+
+The new local management commands passed full `scripts/check` and expanded `scripts/check-live` on macOS and Tower/Linux using disposable source/state. Current checks include 65 Rust tests and 20 Python tests, formatting, Clippy, schema validation and the Go-artifact guard. Rust is 1.95.0, Caddy is 2.11.7 and Process Compose is 1.122.0. jj discovery tests use 0.40.0 on macOS and 0.45.1 on Linux.
+
+The expanded live check proves foreground-owner stop, detached startup/readiness, restart with new generation/nonce, rejection of stale stop requests, independent teardown/data retention, service/log queries, UUID targeting and aggregate status. A fixture stays listening but returns HTTP 503; status reports unhealthy while recorded intent remains ready. Foreign control sockets survive failed startup, and failed detached startup leaves stopped intent. The detached workspace-generation regression failed before the fix and then passed. Rust checks cover missing-source UUID targeting, no-state-creation inspection, malformed health responses, private/foreign sockets and bounded backend output.
+
+Final disposable test ports were HTTPS 49697 / HTTP 49698 on macOS and HTTPS 44077 / HTTP 39811 on Linux. Tower's exact final code and private `check.log`/`live.log` are under `/home/davafons/.local/state/parcela/agent-tests/cli-20261012-01`. This is local lifecycle acceptance, not standard-port setup, complete Shirabe regression, crash reconciliation or active handoff. Installed binaries and primary services were not upgraded or restarted by this work. Independent review has not run.
+
 ## Real-machine cutover state
 
 User-authorized user-local binaries and the unprivileged `org.parcela.proxy` launch agent are installed. The real Shirabe checkout is adopted as primary; its launcher/manifest use Parcela and Process Compose, without the rb-portless gem/binstub/Procfile. Its existing development databases and uploads remain in `storage`; no preparation/reset/import was run.
@@ -51,6 +61,6 @@ The user retired the shared rb-portless front door, accepting loss of Nadeshiko 
 
 ## Gaps
 
-No cross-process stop/crash recovery, detached application control, alias/tenant routing, sharing, general data-isolation certification, automatic backend packaging or source/data destruction. Daemonized descendants and failed route revocation are not magically reconciled; uncertain leases remain recorded. HTTP readiness is not continuous after listener establishment.
+No automatic crash recovery or takeover of legacy owners, interactive attach, service-specific restart, following logs, alias/tenant routing, sharing, general data-isolation certification, automatic backend packaging or source/data destruction. Daemonized descendants and failed route revocation are not magically reconciled; uncertain leases remain recorded. HTTP readiness is not continuous after listener establishment; status probes it on demand.
 
 Actual Shirabe Cable transport, linked SDK rebuild behavior, full application/searchable-corpus regression, broader application HTTP/2 behavior, active native agent handoff, a Mac-to-Linux-to-Mac round trip, release packaging, browser trust and reboot persistence remain unverified. The privileged PF/trust helper succeeded on this host; custom/conflicting PF ruleset handling has only nonprivileged guard checks. The PRD's P0 goals are not a shipped-feature list.

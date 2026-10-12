@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use signal_hook::{
     consts::{SIGHUP, SIGINT, SIGTERM},
     flag,
@@ -61,6 +61,22 @@ impl OwnedChild {
             ended: false,
         })
     }
+    pub fn spawn_logged(command: &mut Command, log: std::fs::File) -> Result<Self> {
+        command
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log);
+        Ok(Self {
+            child: command
+                .spawn()
+                .context("launch detached environment owner")?,
+            ended: false,
+        })
+    }
+    pub fn detach(mut self) {
+        self.ended = true;
+    }
     pub fn id(&self) -> u32 {
         self.child.id()
     }
@@ -108,19 +124,76 @@ pub fn exit_code(status: ExitStatus) -> i32 {
         .unwrap_or_else(|| 128 + status.signal().unwrap_or(SIGTERM))
 }
 
-pub fn version(binary: &str, argument: &str) -> Result<String> {
-    let mut child = Command::new(binary).arg(argument).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
-        .with_context(|| format!("{binary} unavailable; supply an explicit backend binary (ordinary commands never install tools)"))?;
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while child.try_wait()?.is_none() {
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("backend version probe timed out");
-        }
-        std::thread::sleep(Duration::from_millis(25));
+/// Capture a bounded diagnostic command with a deadline and a retained child identity.
+pub fn capture(
+    command: &mut Command,
+    timeout: Duration,
+    limit: usize,
+) -> Result<std::process::Output> {
+    use std::{io::Read, os::fd::AsRawFd};
+    command
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = OwnedChild {
+        child: command.spawn().context("launch backend control command")?,
+        ended: false,
+    };
+    let mut stdout = child.child.stdout.take().context("missing stdout pipe")?;
+    let mut stderr = child.child.stderr.take().context("missing stderr pipe")?;
+    for fd in [stdout.as_raw_fd(), stderr.as_raw_fd()] {
+        // SAFETY: both descriptors remain owned by their pipe handles through capture.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        ensure!(
+            flags >= 0 && unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == 0,
+            "cannot bound backend output reads"
+        );
     }
-    let output = child.wait_with_output()?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let deadline = Instant::now() + timeout;
+    let mut exited = None;
+    let status = loop {
+        for (pipe, bytes) in [
+            (&mut stdout as &mut dyn Read, &mut out),
+            (&mut stderr as &mut dyn Read, &mut err),
+        ] {
+            let mut buffer = [0u8; 8192];
+            loop {
+                match pipe.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        ensure!(bytes.len() + count <= limit, "backend response too large");
+                        bytes.extend_from_slice(&buffer[..count]);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        if let Some(status) = exited {
+            break status;
+        }
+        exited = child.poll()?;
+        if exited.is_some() {
+            continue;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "backend control command timed out"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: out,
+        stderr: err,
+    })
+}
+pub fn version(binary: &str, argument: &str) -> Result<String> {
+    let output = capture(Command::new(binary).arg(argument), Duration::from_secs(3), 65536)
+        .with_context(|| format!("{binary} unavailable; supply an explicit backend binary (ordinary commands never install tools)"))?;
     ensure!(
         output.status.success(),
         "backend version probe failed: {}",

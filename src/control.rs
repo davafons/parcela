@@ -1,0 +1,208 @@
+//! Bounded, generation-bound commands to the live environment owner. Never signals stored PIDs.
+use crate::{private, registry::Session};
+use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{
+    fs,
+    io::{BufRead, BufReader, Read, Write},
+    os::unix::{
+        fs::{FileTypeExt, MetadataExt, PermissionsExt},
+        net::{UnixListener, UnixStream},
+    },
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Action {
+    Status,
+    Stop,
+    Services,
+    Logs {
+        service: Option<String>,
+        tail: usize,
+    },
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveState {
+    Starting,
+    Ready,
+    Unhealthy,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LiveStatus {
+    pub state: LiveState,
+    pub http_ready: bool,
+    pub listener_owned: bool,
+    pub router_owned: bool,
+    pub owner_pid: u32,
+    pub child_pid: u32,
+    pub listener_pids: Vec<u32>,
+    pub checked_at_unix_ms: u128,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Request {
+    environment_id: String,
+    token: String,
+    generation: i64,
+    action: Action,
+}
+#[derive(Serialize, Deserialize)]
+struct Reply {
+    environment_id: String,
+    token: String,
+    generation: i64,
+    result: Option<Value>,
+    error: Option<String>,
+}
+
+pub struct Pending {
+    pub action: Action,
+    stream: UnixStream,
+}
+impl Pending {
+    pub fn reply(mut self, session: &Session, result: Result<Value>) -> Result<()> {
+        reply(&mut self.stream, session, result)
+    }
+}
+fn reply(stream: &mut UnixStream, session: &Session, result: Result<Value>) -> Result<()> {
+    let (result, error) = match result {
+        Ok(value) => (Some(value), None),
+        Err(error) => (None, Some(format!("{error:#}"))),
+    };
+    serde_json::to_writer(
+        &mut *stream,
+        &Reply {
+            environment_id: session.environment_id.clone(),
+            token: session.token.clone(),
+            generation: session.generation,
+            result,
+            error,
+        },
+    )?;
+    stream.write_all(b"\n")?;
+    Ok(())
+}
+fn line(stream: &UnixStream, limit: usize) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    BufReader::new(stream)
+        .take((limit + 1) as u64)
+        .read_until(b'\n', &mut bytes)?;
+    ensure!(
+        bytes.len() <= limit && bytes.last() == Some(&b'\n'),
+        "invalid or oversized owner message"
+    );
+    Ok(bytes)
+}
+
+pub struct Server {
+    listener: UnixListener,
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+}
+impl Server {
+    pub fn bind(runtime: &Path) -> Result<Self> {
+        private::directory(runtime)?;
+        let path = runtime.join("ctl.sock");
+        ensure!(
+            path.as_os_str().len() < 100,
+            "runtime path too long for owner control socket"
+        );
+        let listener = UnixListener::bind(&path).context(
+            "owner control socket already exists or is unavailable; no takeover performed",
+        )?;
+        let metadata = fs::symlink_metadata(&path)?;
+        let server = Self {
+            listener,
+            path,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        };
+        fs::set_permissions(&server.path, fs::Permissions::from_mode(0o600))?;
+        server.listener.set_nonblocking(true)?;
+        Ok(server)
+    }
+    pub fn receive(&self, session: &Session) -> Result<Option<Pending>> {
+        let (mut stream, _) = match self.listener.accept() {
+            Ok(connection) => connection,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        stream.set_read_timeout(Some(Duration::from_millis(200)))?;
+        stream.set_write_timeout(Some(Duration::from_millis(200)))?;
+        let parsed = (|| -> Result<Request> {
+            let request: Request = serde_json::from_slice(&line(&stream, 8192)?)?;
+            ensure!(
+                request.environment_id == session.environment_id
+                    && request.token == session.token
+                    && request.generation == session.generation,
+                "stale or foreign owner request"
+            );
+            Ok(request)
+        })();
+        match parsed {
+            Ok(request) => Ok(Some(Pending {
+                action: request.action,
+                stream,
+            })),
+            Err(error) => {
+                let _ = reply(&mut stream, session, Err(error));
+                Ok(None)
+            }
+        }
+    }
+}
+impl Drop for Server {
+    fn drop(&mut self) {
+        if fs::symlink_metadata(&self.path).is_ok_and(|metadata| {
+            metadata.dev() == self.device
+                && metadata.ino() == self.inode
+                && metadata.file_type().is_socket()
+        }) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+pub fn request(runtime: &Path, session: &Session, action: Action) -> Result<Value> {
+    private::existing_directory(runtime)?;
+    let path = runtime.join("ctl.sock");
+    let metadata = fs::symlink_metadata(&path).context("live owner unavailable; older or interrupted runs require explicit reconciliation, never PID signaling")?;
+    // SAFETY: getuid has no pointers or failure case.
+    ensure!(
+        metadata.file_type().is_socket()
+            && metadata.uid() == unsafe { libc::getuid() }
+            && metadata.mode() & 0o077 == 0,
+        "invalid private owner socket"
+    );
+    let mut stream =
+        UnixStream::connect(&path).context("live owner unavailable; no process was signaled")?;
+    stream.set_read_timeout(Some(Duration::from_secs(6)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+    serde_json::to_writer(
+        &mut stream,
+        &Request {
+            environment_id: session.environment_id.clone(),
+            token: session.token.clone(),
+            generation: session.generation,
+            action,
+        },
+    )?;
+    stream.write_all(b"\n")?;
+    let reply: Reply = serde_json::from_slice(&line(&stream, 4_000_000)?)?;
+    ensure!(
+        reply.environment_id == session.environment_id
+            && reply.token == session.token
+            && reply.generation == session.generation,
+        "owner response does not match selected generation"
+    );
+    if let Some(error) = reply.error {
+        anyhow::bail!("{error}");
+    }
+    reply.result.context("owner omitted response")
+}

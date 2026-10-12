@@ -9,12 +9,15 @@ Primary URLs are `https://shirabe.localhost`; previews are `https://auth-shirabe
 - Strict `parcela.yaml`, stable UUID identities, explicit primary/preview adoption and a private SQLite registry.
 - `proxy run/status`: dedicated Caddy, private Unix admin socket, exact-host routes and internal TLS. Automatic CA trust installation is disabled.
 - `run -- ARGV`: literal foreground command, owned loopback endpoint, initial HTTP readiness, signal/exit handling and route teardown.
-- `up`: foreground native Process Compose graph, private Unix control socket, one routed HTTP service plus workers.
+- `up` and `up --detach`: native Process Compose graph, private Unix control socket, one routed HTTP service plus workers. Detached startup waits for readiness.
 - `task NAME -- ARGS`: explicit finite project commands, optional timeout, private result record.
 - `transfer plan/capture/verify/restore` and `stream-sqlite`: explicit paused checkpoints and data copies, not execution handoff.
-- `status`: durable intent, not a live health guarantee. `doctor` optionally probes explicitly supplied backend versions.
+- `down`/`stop` and `restart`: commands to the live owner, with route revocation before child teardown and no persisted-PID signaling.
+- `status [--all]`, `services`, `logs [SERVICE] --tail N`, and `url`: live HTTP probes, native service/log inspection, and reserved URLs.
+- `workspace discover`: read-only sibling jj/Git inventory. `--workspace UUID` targets an adopted environment; `--human` prints inventory/status tables.
+- `doctor` optionally probes explicitly supplied backend versions.
 
-The runtime is experimental. No detached application control, persisted-PID stop/recovery, automatic backend installation, sharing, tenant routing or general data-isolation certification. Inspection/adoption do not launch services or prove that a URL is live. A crashed session or unknown socket requires explicit reconciliation.
+The runtime is experimental. No automatic crash reconciliation, persisted-PID signaling, automatic backend installation, sharing, tenant routing or general data-isolation certification. Inspection/adoption do not launch services or prove that a URL is live. A crashed session or unknown socket requires explicit reconciliation.
 
 ## Build and verify
 
@@ -37,12 +40,20 @@ Create a project-owned manifest, then adopt explicitly:
 ```sh
 parcela workspace adopt --role primary --label primary
 parcela proxy run                 # separate foreground front door, prerequisites required
-parcela up                       # or: parcela run -- your-command --literal-argument
+parcela up --detach              # or foreground up / run -- your-command --literal-argument
 parcela task test -- unit
-parcela status
+parcela status --human
+parcela services --human
+parcela logs web --tail 100
+parcela restart --detach
+parcela down
+parcela workspace discover --human
+parcela status --all --human
 ```
 
-`run/up` do not perform preparation or install anything. Each command must consume its assigned endpoint and paths. Core context is routing-only until the project binds its resources. Application child output passes through; inspection commands print JSON and diagnostics use stderr.
+`run/up` do not perform preparation or install anything. Each command must consume its assigned endpoint and paths. Core context is routing-only until the project binds its resources. Foreground child output passes through. Inspection and detached startup print JSON by default; `--human` selects readable inventory/status/service tables. `url` and `logs` print plain text. Diagnostics use stderr.
+
+Control works only for runtimes launched by this build. Older owners without a control socket and interrupted runs report unknown ownership and refuse stop/restart. This does not authorize an upgrade to take over existing services. Detached owner output is in the private runtime `log/owner.log`; it is not a boot service.
 
 State defaults to `PARCELA_STATE_DIR`, `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`; `--state-dir` overrides them. Existing state must be private and user-owned. A short state path is needed for Unix socket limits.
 

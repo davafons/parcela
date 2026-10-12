@@ -89,7 +89,7 @@ process_compose:
       availability:
         restart: 'no'
     worker:
-      command: python3 -c 'import time; time.sleep(600)'
+      command: python3 -c 'import time; print("cli-worker-ready", flush=True); time.sleep(600)'
 ''')
                 adopted = json.loads(cli(path, 'workspace', 'adopt', '--role', role, '--label', name).stdout)
                 copies.append((path, adopted['workspace']['id']))
@@ -127,12 +127,72 @@ process_compose:
             compose = spawn(copies[2][0], 'up', '--process-compose', args.process_compose)
             wait_for(lambda: request('compose-live.localhost'), [proxy, preview, compose])
             assert request('compose-live.localhost')['id'] == copies[2][1]
-            compose.send_signal(signal.SIGTERM)
-            assert compose.wait(timeout=10) == 143
+            status = json.loads(cli(copies[2][0], 'status').stdout)
+            assert status['state'] == 'ready' and status['live_health_verified']
+            assert status['live']['http_ready'] and status['live']['listener_owned']
+            services = json.loads(cli(copies[2][0], 'services').stdout)['services']
+            assert {item['name']: item['status'] for item in services} == {'web': 'Running', 'worker': 'Running'}
+            wait_for(lambda: 'cli-worker-ready' in cli(copies[2][0], 'logs', 'worker', '--tail', '10').stdout, [compose])
+            assert 'SERVICE' in cli(copies[2][0], 'services', '--human').stdout
+            assert cli(copies[2][0], 'logs', 'unknown', check=False).returncode != 0
+            assert cli(copies[1][0], 'restart', '--detach', '--process-compose', args.process_compose, check=False).returncode != 0
+            assert preview.poll() is None
+            assert cli(copies[2][0], 'restart', '--detach', '--readiness-timeout', '0', check=False).returncode == 2
+            assert cli(copies[2][0], 'restart', '--detach', '--backend-port', '80', check=False).returncode == 2
+            assert compose.poll() is None
+            assert cli(copies[2][0], 'url').stdout.strip() == status['recorded_session']['public_url']
+            runtime = state / 'environments' / copies[2][1]
+            (runtime / 'data' / 'retain.txt').write_text('preserve application data')
+            (runtime / 'unhealthy').touch()
+            unhealthy = json.loads(cli(copies[2][0], 'status').stdout)
+            assert unhealthy['state'] == 'unhealthy' and unhealthy['recorded_session']['status'] == 'ready'
+            assert unhealthy['live_health_verified'] and not unhealthy['live']['http_ready']
+            (runtime / 'unhealthy').unlink()
+            stopped = json.loads(cli(copies[2][0], 'down').stdout)
+            assert stopped['state'] == 'stopped' and compose.wait(timeout=10) == 0
+            assert not (runtime / 'ctl.sock').exists()
+            assert b'503' in request('auth-live.localhost', request_host='compose-live.localhost', raw=True).split(b'\r\n', 1)[0]
+            assert json.loads(cli(copies[2][0], 'down').stdout)['already_stopped']
+            first = json.loads(cli(copies[2][0], 'up', '--detach', '--process-compose', args.process_compose).stdout)
+            assert first['detached'] and first['live']['state'] == 'ready'
+            assert first['workspace']['generation'] == first['session']['generation']
+            duplicate = cli(copies[2][0], 'up', '--detach', '--process-compose', args.process_compose, check=False)
+            assert duplicate.returncode != 0
+            second = json.loads(cli(copies[2][0], 'restart', '--detach', '--process-compose', args.process_compose).stdout)
+            assert second['session']['generation'] > first['session']['generation']
+            assert second['session']['token'] != first['session']['token']
+            assert request('compose-live.localhost')['generation'] == str(second['session']['generation'])
+            with socket.socket(socket.AF_UNIX) as stale:
+                stale.settimeout(3)
+                stale.connect(str(runtime / 'ctl.sock'))
+                stale.sendall((json.dumps({'environment_id': copies[2][1], 'token': first['session']['token'],
+                                          'generation': first['session']['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
+                reply = json.loads(stale.makefile().readline())
+                assert 'stale' in reply['error']
+            assert request('compose-live.localhost')['id'] == copies[2][1]
+            inventory = json.loads(cli(root, 'status', '--all').stdout)['workspaces']
+            assert {row['workspace']['label']: row['state'] for row in inventory} == {'primary': 'stopped', 'auth': 'ready', 'compose': 'ready'}
+            assert 'compose' in cli(root, 'status', '--all', '--human').stdout
+            selected = subprocess.run([str(BINARY), '--state-dir', str(state), '--workspace', copies[2][1], 'status'],
+                                      capture_output=True, text=True, check=True, timeout=15)
+            assert json.loads(selected.stdout)['workspace']['id'] == copies[2][1]
+            assert json.loads(cli(copies[2][0], 'stop').stdout)['state'] == 'stopped'
+            assert (runtime / 'data' / 'retain.txt').read_text() == 'preserve application data'
+            with socket.socket(socket.AF_UNIX) as foreign_control:
+                foreign_control.bind(str(runtime / 'ctl.sock'))
+                failed = cli(copies[2][0], 'up', '--process-compose', args.process_compose, check=False)
+                assert failed.returncode != 0 and (runtime / 'ctl.sock').exists()
+            (runtime / 'ctl.sock').unlink()
+            failed = cli(copies[2][0], 'up', '--detach', '--process-compose', '/nonexistent/parcela-test-compose', check=False)
+            assert failed.returncode != 0
+            assert json.loads(cli(copies[2][0], 'status').stdout)['state'] == 'stopped'
+            assert not (runtime / 'ctl.sock').exists()
             assert request('auth-live.localhost')['id'] == copies[1][1]
             print(json.dumps({'verified': ['owned Caddy TLS/CA without trust', 'two simultaneous routes', 'literal argv', 'forwarded scheme/host spoof rejection',
                           'SSE', 'WebSocket upgrade', 'unknown host rejection', 'duplicate ownership', 'SIGTERM', 'exit status', 'foreign port safety',
-                          'Process Compose web+worker private UDS', 'independent teardown'], 'test_ports': {'https': https, 'http': http}, 'standard_ports_verified': False}))
+                          'Process Compose web+worker private UDS', 'independent teardown', 'owner-mediated down/stop', 'detached startup/readiness',
+                           'restart generation', 'unhealthy probe separate from recorded ready', 'stale command rejection', 'live/aggregate status and UUID targeting', 'service/log inspection',
+                           'data retention', 'foreign control socket refusal', 'failed detached startup cleanup'], 'test_ports': {'https': https, 'http': http}, 'standard_ports_verified': False}))
         except Exception:
             for handle in handles:
                 handle.flush()
@@ -140,6 +200,8 @@ process_compose:
                 print(handle.read())
             raise
         finally:
+            for path, _ in locals().get('copies', []):
+                cli(path, 'down', check=False)
             for process in reversed(children):
                 if process.poll() is None:
                     process.send_signal(signal.SIGTERM)

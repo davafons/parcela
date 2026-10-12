@@ -23,6 +23,9 @@ pub fn directory(path: &Path) -> Result<()> {
             .create(path)?,
         Err(e) => return Err(e.into()),
     }
+    existing_directory(path)
+}
+pub fn existing_directory(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     // SAFETY: getuid has no pointers or failure case.
     ensure!(

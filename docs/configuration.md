@@ -1,6 +1,6 @@
 # Configuration and CLI
 
-Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. Use the same project identity across checkouts; adoption supplies machine-local roles and labels.
+Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects an adopted source instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; adoption supplies machine-local roles and labels.
 
 ```yaml
 version: 1
@@ -43,19 +43,25 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 |---|---|
 | `config check` | Strict organizer validation, no state creation |
 | `workspace adopt --role primary\|preview --label LABEL` | Explicit source identity and hostname reservation |
-| `workspace list [--all]` | Current project or explicit registry-wide inventory |
+| `workspace list [--all] [--human]` | Registered inventory plus live owner probes, scoped to the current project or explicit machine-wide view |
+| `workspace discover [--human]` | Read-only sibling jj/Git checkout paths, revisions, refs and adoption IDs; no manifest or registry required |
 | `context` / `workspace inspect` | Planned context; no live-health guarantees |
 | `proxy run [--caddy PATH]` | Dedicated foreground Caddy; default 80/443; no sudo/trust/takeover |
 | `proxy run --test-profile --http-port N --https-port N` | Explicit disposable high-port profile |
 | `proxy run --forwarded-standard-ports --http-port 8080 --https-port 8443` | Explicit external 80/443 forwarding, canonical port-free URL |
 | `proxy status` | Verify owned Caddy admin marker; mapped profile also verifies port-80 front door |
 | `run [--backend-port N] [--readiness-timeout SEC] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
-| `up [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Native foreground graph with explicit private Unix-socket mode, dotenv/watch/TUI disabled |
+| `up [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Native graph, foreground by default; detached startup returns only after live readiness |
+| `down` / `stop` | Ask the selected live owner to revoke its routes and stop its retained child; preserve source/data; repeated completed stop is a no-op |
+| `restart [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Stop an owned graph, then launch the current manifest in a fresh generation; does not replay arbitrary `run` argv |
+| `services [--human]` | Native Process Compose service state through the selected live owner |
+| `logs [SERVICE] --tail N` | Plain-text log tail from Process Compose; default service is the owner's routed service; 1–10,000 lines, bounded response size |
+| `url` | Plain-text recorded URL, or the planned standard HTTPS URL before the first launch; does not certify reachability |
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
-| `status` | Recorded session intent, explicitly not live health |
+| `status [--all] [--human]` | Live owner/loopback HTTP/router probes, with durable intent reported separately; explicit machine-wide view works outside a project |
 | `doctor [--caddy PATH] [--process-compose PATH]` | Capability report plus requested bounded version probes |
 
-Inspection prints JSON; child output from lifecycle commands passes through. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No `stop`, detached operation, sharing or arbitrary persisted-PID signaling.
+Inspection and detached startup print JSON by default. `--human` selects inventory/status/service tables. `url` and `logs` print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, bulk stop, arbitrary persisted-PID signaling, or replay of an uncertain command.
 
 ## Transfer policy and checkpoints
 
@@ -65,6 +71,16 @@ The optional strict `transfer` policy and paused capture/restore commands are do
 
 Registry schema 2 adds session/port leases; writable opening migrates schema 1 explicitly, preserving identities. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.
 
-Kernel lifetime locks protect each environment and the dedicated proxy. Session updates require nonce/generation identity. Full Caddy configuration updates are serialized. Backend listener PID ancestry is checked while the retained child is live; probe-and-release is not an atomic socket handoff. Changed listener identity withdraws the route and requires readiness again. HTTP readiness is not continuously polled after establishment.
+Kernel lifetime locks protect each environment and the dedicated proxy. Session updates require nonce/generation identity. Full Caddy configuration updates are serialized. Backend listener PID ancestry is checked while the retained child is live; probe-and-release is not an atomic socket handoff. Changed listener identity withdraws the route and requires readiness again. The owner does not continuously poll HTTP readiness after establishment; `status` performs a fresh HTTP probe. A failed probe can report `unhealthy` while `recorded_session.status` still says `ready`. Native Process Compose remains authoritative for individual workers.
 
 Stopped/unready registered hostnames answer unavailable; unknown hosts do not fall through to another owner. Route revocation precedes normal child teardown. Failed revocation retains the lease and reports failure. Crash recovery, daemonized descendants and unknown stale sockets are not automatically reconciled. Private paths are operational ownership boundaries, not containment against hostile same-user programs.
+
+## Local control and discovery
+
+Each new runtime owner holds `owner.lock` and binds private `ctl.sock`. Requests and replies carry the environment ID, generation and nonce. Stop requests run inside that owner, which retains the actual child handle. The client waits for stopped intent and released ownership. Socket cleanup removes only the socket inode this owner created; existing/foreign sockets are never replaced. Malformed or stale requests cannot trigger an operation. Malformed health replies remain unknown.
+
+Detached startup verifies that the answering owner is the retained child it just launched. Its output includes the launch generation and private log path. `up --detach` is explicit; it does not install a launch agent or boot service. `restart` restarts the whole graph, not one named service, and requires the selected backend to be available. No arbitrary command replay or automatic restart policy is added to `run`.
+
+`status` separates `recorded_session`, `state`, `live`, and `live_health_verified`. The verification flag means an owner answered a fresh health probe, not that its HTTP probe passed or all workers are healthy. Missing, legacy or interrupted owners report `unknown` with a diagnostic. Stopped/never-started sessions have no live verification. These commands do not reconcile an uncertain lease or adopt surviving descendants after a crash.
+
+`workspace discover` finds the nearest VCS root and prefers jj over Git in a colocated root. jj uses `--ignore-working-copy --at-op=@`, so inventory neither snapshots edits nor merges operations. Its revisions/bookmarks describe the recorded operation, not unsnapshotted file contents. Git uses NUL-delimited read-only worktree inventory, including detached checkouts. Discovery never adopts a sibling or infers its primary/preview role. Plain directories remain valid. jj workspace-root templates were tested with 0.40.0 on macOS and 0.45.1 on Linux; unavailable capabilities produce an error, never a Git fallback.

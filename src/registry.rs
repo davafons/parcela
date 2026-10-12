@@ -28,7 +28,7 @@ impl Role {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Workspace {
     pub id: String,
     pub project_id: String,

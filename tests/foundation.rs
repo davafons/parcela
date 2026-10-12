@@ -437,3 +437,52 @@ fn foreign_database_is_not_initialized_or_modified() {
     assert!(Registry::open(&state, true).is_err());
     assert_eq!(fs::read(&db).unwrap(), before);
 }
+
+#[test]
+fn uuid_target_inspection_and_stop_survive_missing_source() {
+    let temp = TempDir::new().unwrap();
+    let path = checkout(temp.path(), "app");
+    let state = temp.path().join("state");
+    let adopted = value(&cli(
+        &path,
+        &state,
+        &["workspace", "adopt", "--role", "preview", "--label", "auth"],
+    ));
+    let id = adopted["workspace"]["id"].as_str().unwrap();
+    fs::remove_file(path.join("parcela.yaml")).unwrap();
+    fs::remove_dir(&path).unwrap();
+    for command in ["status", "down", "url"] {
+        let result = Command::new(env!("CARGO_BIN_EXE_parcela"))
+            .arg("--state-dir")
+            .arg(&state)
+            .args(["--workspace", id, command])
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        if command == "status" {
+            assert_eq!(value(&result)["source_exists"], false);
+            assert_eq!(value(&result)["state"], "stopped");
+        }
+    }
+    assert!(!state.join("environments").exists());
+    assert!(
+        !Command::new(env!("CARGO_BIN_EXE_parcela"))
+            .arg("--state-dir")
+            .arg(&state)
+            .args([
+                "--workspace",
+                id,
+                "--path",
+                temp.path().to_str().unwrap(),
+                "status"
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}

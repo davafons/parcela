@@ -3,6 +3,8 @@ use clap::{Parser, Subcommand};
 use parcela::{
     config::{Manifest, locate},
     context::ResolvedContext,
+    control::Action,
+    lifecycle,
     registry::{Registry, Role},
 };
 use std::path::{Path, PathBuf};
@@ -10,7 +12,7 @@ use std::path::{Path, PathBuf};
 #[derive(Parser)]
 #[command(
     version,
-    about = "Workspace organizer with owned foreground runtimes (experimental)"
+    about = "Workspace organizer with owned local runtimes (experimental)"
 )]
 struct Cli {
     /// Checkout directory; defaults to the current directory.
@@ -19,6 +21,12 @@ struct Cli {
     /// Private registry directory; defaults to PARCELA_STATE_DIR, XDG_STATE_HOME/parcela or ~/.local/state/parcela.
     #[arg(long, global = true)]
     state_dir: Option<PathBuf>,
+    /// Select an adopted environment by UUID instead of a checkout path.
+    #[arg(long, global = true, conflicts_with = "path")]
+    workspace: Option<uuid::Uuid>,
+    /// Print readable status/inventory tables instead of JSON.
+    #[arg(long, global = true)]
+    human: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -50,9 +58,9 @@ enum Command {
     },
     /// Run literal argv under the current adopted environment; foreground, one HTTP service.
     Run {
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
-        #[arg(long, default_value_t = 30)]
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=86400))]
         readiness_timeout: u64,
         #[arg(last = true, required = true, allow_hyphen_values = true)]
         argv: Vec<String>,
@@ -61,10 +69,13 @@ enum Command {
     Up {
         #[arg(long, default_value = "process-compose")]
         process_compose: String,
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
-        #[arg(long, default_value_t = 60)]
+        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400))]
         readiness_timeout: u64,
+        /// Keep an independent owner running after startup readiness.
+        #[arg(long)]
+        detach: bool,
     },
     /// Execute an explicit project-defined task, with literal appended arguments.
     Task {
@@ -77,8 +88,36 @@ enum Command {
         #[command(subcommand)]
         command: TransferCommand,
     },
-    /// Print recorded lifecycle intent; never infer live health from durable metadata.
-    Status,
+    /// Inspect live ownership and HTTP readiness; retain recorded state separately.
+    Status {
+        /// Explicit machine-wide runtime inventory.
+        #[arg(long, conflicts_with = "workspace")]
+        all: bool,
+    },
+    /// Stop through the live owner and preserve source/data. Never signal stored PIDs.
+    #[command(visible_alias = "stop")]
+    Down,
+    /// Stop the owned graph, then start the current manifest in a new generation.
+    Restart {
+        #[arg(long, default_value = "process-compose")]
+        process_compose: String,
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
+        backend_port: Option<u16>,
+        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400))]
+        readiness_timeout: u64,
+        #[arg(long)]
+        detach: bool,
+    },
+    /// Inspect services through the verified owner and Process Compose.
+    Services,
+    /// Print a bounded log tail for one service (default: the routed service).
+    Logs {
+        service: Option<String>,
+        #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=10000))]
+        tail: u32,
+    },
+    /// Print the reserved environment URL. Does not certify readiness.
+    Url,
 }
 #[derive(Subcommand)]
 enum TransferCommand {
@@ -159,6 +198,8 @@ enum ConfigCommand {
 }
 #[derive(Subcommand)]
 enum WorkspaceCommand {
+    /// Discover sibling jj workspaces/Git worktrees without adopting or editing them.
+    Discover,
     Adopt {
         #[arg(long, value_enum)]
         role: Role,
@@ -205,6 +246,75 @@ fn json(value: &impl serde::Serialize) -> Result<()> {
     writeln!(out)?;
     Ok(())
 }
+fn target_workspace(
+    registry: &Registry,
+    path: &Path,
+    id: Option<uuid::Uuid>,
+) -> Result<parcela::registry::Workspace> {
+    if let Some(id) = id {
+        registry
+            .list(None)?
+            .into_iter()
+            .find(|workspace| workspace.id == id.to_string())
+            .context("unknown adopted workspace ID")
+    } else {
+        let (source, manifest) = project(path)?;
+        registry.current(&source, &manifest)
+    }
+}
+fn cell(value: &serde_json::Value) -> String {
+    let text = value
+        .as_str()
+        .map_or_else(|| value.to_string(), str::to_owned);
+    text.chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+fn print_status_rows(rows: &[serde_json::Value]) {
+    println!("PROJECT\tLABEL\tROLE\tSTATE\tVCS\tURL\tSOURCE");
+    for row in rows {
+        let workspace = &row["workspace"];
+        let url = row["recorded_session"]["public_url"].as_str().map_or_else(
+            || format!("https://{}", workspace["hostname"].as_str().unwrap_or("?")),
+            str::to_owned,
+        );
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            cell(&workspace["project_id"]),
+            cell(&workspace["label"]),
+            cell(&workspace["role"]),
+            cell(&row["state"]),
+            cell(&workspace["vcs"]),
+            cell(&serde_json::Value::String(url)),
+            cell(&workspace["source"])
+        );
+        if let Some(diagnostic) = row["diagnostic"].as_str() {
+            eprintln!("parcela: {}: {diagnostic}", cell(&workspace["label"]));
+        }
+    }
+}
+fn inventory(state: &Path, project: Option<&str>, human: bool) -> Result<()> {
+    let mut rows = Vec::new();
+    if let Some(registry) = Registry::open(state, false)? {
+        for workspace in registry.list(project)? {
+            rows.push(lifecycle::status(&registry, &workspace)?);
+        }
+    }
+    if human {
+        print_status_rows(&rows);
+        Ok(())
+    } else {
+        json(
+            &serde_json::json!({"runtime_verified": !rows.is_empty() && rows.iter().all(|row| row["live_health_verified"] == true), "workspaces": rows}),
+        )
+    }
+}
 fn inspect(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Config {
@@ -236,8 +346,8 @@ fn inspect(cli: Cli) -> Result<()> {
             json(&serde_json::json!({
                 "implementation":"rust", "planned_architecture":{"http_tls":"managed Caddy","supervision":"managed Process Compose"},
                 "backend_probes":{"caddy":probe(caddy,"version"),"process_compose":probe(process_compose,"version")},
-                "supported":["config check","workspace adopt/list/inspect","context","status","proxy run/status","run","up (one routed service)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
-                "unsupported":["detached mode","cross-process stop/recovery","automatic backend installation","privilege/trust setup","sharing","boot service"],
+                "supported":["config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, one routed service)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
+                "unsupported":["automatic crash reconciliation","control of older ownerless runs","automatic backend installation","privilege/trust setup","sharing","boot service"],
                 "data_isolation_verified":false,"host_configuration_modified":false
             }))
         }
@@ -260,15 +370,73 @@ fn inspect(cli: Cli) -> Result<()> {
                 &agents,
             )?)
         }
-        Command::Status => {
-            let (source, manifest) = project(&cli.path)?;
+        Command::Status { all } => {
+            let state = state_dir(cli.state_dir)?;
+            if all {
+                inventory(&state, None, cli.human)
+            } else {
+                let registry =
+                    Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+                let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
+                let status = lifecycle::status(&registry, &workspace)?;
+                if cli.human {
+                    print_status_rows(&[status]);
+                    Ok(())
+                } else {
+                    json(&status)
+                }
+            }
+        }
+        Command::Services | Command::Logs { .. } | Command::Url => {
             let state = state_dir(cli.state_dir)?;
             let registry =
                 Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
-            let workspace = registry.current(&source, &manifest)?;
-            json(
-                &serde_json::json!({"workspace":workspace,"recorded_session":registry.session(&workspace.id)?,"live_health_verified":false}),
-            )
+            let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
+            match cli.command {
+                Command::Services => {
+                    let result =
+                        lifecycle::service_request(&registry, &workspace, Action::Services)?;
+                    if cli.human {
+                        println!("SERVICE\tSTATE\tPID");
+                        for service in result["services"]
+                            .as_array()
+                            .context("invalid backend service list")?
+                        {
+                            println!(
+                                "{}\t{}\t{}",
+                                cell(&service["name"]),
+                                cell(&service["status"]),
+                                cell(&service["pid"])
+                            );
+                        }
+                        Ok(())
+                    } else {
+                        json(&result)
+                    }
+                }
+                Command::Logs { service, tail } => {
+                    let result = lifecycle::service_request(
+                        &registry,
+                        &workspace,
+                        Action::Logs {
+                            service,
+                            tail: tail as usize,
+                        },
+                    )?;
+                    use std::io::Write;
+                    std::io::stdout().lock().write_all(
+                        result["logs"]
+                            .as_str()
+                            .context("invalid backend log response")?
+                            .as_bytes(),
+                    )?;
+                    Ok(())
+                }
+                _ => {
+                    println!("{}", lifecycle::url(&registry, &workspace)?);
+                    Ok(())
+                }
+            }
         }
         Command::Proxy {
             command: ProxyCommand::Status,
@@ -282,6 +450,33 @@ fn inspect(cli: Cli) -> Result<()> {
             )
         }
         Command::Workspace {
+            command: WorkspaceCommand::Discover,
+        } => {
+            let source = cli
+                .path
+                .canonicalize()
+                .context("discovery requires an existing directory")?;
+            let state = state_dir(cli.state_dir)?;
+            let registry = Registry::open(&state, false)?;
+            let rows = parcela::discovery::discover(&source, registry.as_ref())?;
+            if cli.human {
+                println!("VCS\tNAME\tREFS\tADOPTED ID\tSOURCE");
+                for row in &rows {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        row.vcs,
+                        cell(&serde_json::json!(row.name)),
+                        cell(&serde_json::json!(row.refs.join(","))),
+                        row.adopted_environment_id.as_deref().unwrap_or("-"),
+                        cell(&serde_json::json!(row.source))
+                    );
+                }
+                Ok(())
+            } else {
+                json(&serde_json::json!({"checkouts": rows, "automatic_adoption": false}))
+            }
+        }
+        Command::Workspace {
             command: WorkspaceCommand::List { all },
         } => {
             let manifest = if all {
@@ -290,16 +485,13 @@ fn inspect(cli: Cli) -> Result<()> {
                 Some(project(&cli.path)?.1)
             };
             let state = state_dir(cli.state_dir)?;
-            let rows = match Registry::open(&state, false)? {
-                Some(registry) => {
-                    registry.list(manifest.as_ref().map(|m| m.project.id.as_str()))?
-                }
-                None => Vec::new(),
-            };
-            let inventory: Vec<_> = rows.into_iter().map(|workspace| {
-                serde_json::json!({"source_exists": workspace.source.is_dir(), "workspace": workspace})
-            }).collect();
-            json(&serde_json::json!({"workspaces": inventory, "runtime_verified": false}))
+            inventory(
+                &state,
+                manifest
+                    .as_ref()
+                    .map(|manifest| manifest.project.id.as_str()),
+                cli.human,
+            )
         }
         Command::Workspace {
             command: WorkspaceCommand::Adopt { role, label },
@@ -327,7 +519,19 @@ fn inspect(cli: Cli) -> Result<()> {
         _ => bail!("runtime command reached inspection dispatcher"),
     }
 }
-fn run(cli: Cli) -> Result<i32> {
+fn run(mut cli: Cli) -> Result<i32> {
+    if let Some(id) = cli.workspace {
+        let state = state_dir(cli.state_dir.clone())?;
+        let registry =
+            Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+        cli.path = registry
+            .list(None)?
+            .into_iter()
+            .find(|workspace| workspace.id == id.to_string())
+            .context("unknown adopted workspace ID")?
+            .source;
+    }
+    let restarting = matches!(cli.command, Command::Restart { .. });
     match cli.command {
         Command::Transfer {
             command:
@@ -432,19 +636,55 @@ fn run(cli: Cli) -> Result<i32> {
             process_compose,
             backend_port,
             readiness_timeout,
+            detach,
+        }
+        | Command::Restart {
+            process_compose,
+            backend_port,
+            readiness_timeout,
+            detach,
         } => {
+            let restart = restarting;
             let (source, manifest) = project(&cli.path)?;
             let state = state_dir(cli.state_dir)?;
             let mut registry = Registry::open(&state, true)?.context("no registry")?;
             let workspace = registry.current(&source, &manifest)?;
-            parcela::runtime::run(
-                &mut registry,
-                &manifest,
-                &workspace,
-                parcela::runtime::Launch::Compose(&process_compose),
-                backend_port,
-                readiness_timeout,
-            )
+            if restart {
+                ensure!(
+                    registry
+                        .session(&workspace.id)?
+                        .is_none_or(|session| session.kind == "compose"),
+                    "restart does not replay arbitrary run commands; use down then an explicit run"
+                );
+                lifecycle::down(&registry, &workspace)?;
+            }
+            if detach {
+                json(&lifecycle::detached(
+                    &registry,
+                    &workspace,
+                    &process_compose,
+                    backend_port,
+                    readiness_timeout,
+                )?)?;
+                Ok(0)
+            } else {
+                parcela::runtime::run(
+                    &mut registry,
+                    &manifest,
+                    &workspace,
+                    parcela::runtime::Launch::Compose(&process_compose),
+                    backend_port,
+                    readiness_timeout,
+                )
+            }
+        }
+        Command::Down => {
+            let state = state_dir(cli.state_dir)?;
+            let registry =
+                Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+            let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
+            json(&lifecycle::down(&registry, &workspace)?)?;
+            Ok(0)
         }
         Command::Task { name, args } => {
             let (source, manifest) = project(&cli.path)?;
