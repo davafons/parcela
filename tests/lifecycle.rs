@@ -123,7 +123,10 @@ fn disconnected_caller_retains_complete_stop_and_cannot_fail_owner() {
     assert!(matches!(pending.action, Action::Stop));
     assert!(
         pending
-            .reply(&session, Ok(serde_json::json!({"stop_accepted": true})))
+            .reply(
+                &session,
+                Ok(serde_json::json!({"stop_accepted": true, "unread": "x".repeat(1_000_000)})),
+            )
             .is_err()
     );
     assert!(server.receive(&session).unwrap().is_none());
@@ -189,10 +192,15 @@ fn malformed_owner_health_response_stays_unknown() {
     let (_temp, registry, workspace, session) = fixture();
     let server = Server::bind(&registry.runtime_path(&workspace)).unwrap();
     let owner = thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
         let pending = loop {
             if let Some(pending) = server.receive(&session).unwrap() {
                 break pending;
             }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "malformed-response fixture received no request"
+            );
             thread::sleep(Duration::from_millis(10));
         };
         pending
