@@ -265,7 +265,13 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
         !evidence.owner.alive(),
         "owner is still alive; use status/down"
     );
-    evidence.authenticate(&path, workspace)?;
+    if !matches!(
+        evidence.phase,
+        crate::owner::Phase::Stopping | crate::owner::Phase::Stopped
+    ) || !evidence.quiescent()
+    {
+        evidence.authenticate(&path, workspace)?;
+    }
     let _launch = private::Lock::acquire(&path.join("launch.lock"))?;
     let log_path = path.join("log/owner.log");
     let log = OpenOptions::new()
@@ -289,11 +295,23 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
     let mut owner = OwnedChild::spawn_logged(&mut command, log)?;
     let deadline = Instant::now() + Duration::from_secs(65);
     loop {
-        ensure!(
-            owner.poll()?.is_none(),
-            "recovery owner exited; inspect {}",
-            log_path.display()
-        );
+        if let Some(exit) = owner.poll()? {
+            let current = current_session(registry, &session)?;
+            ensure!(
+                exit.success() && current.status == "stopped",
+                "recovery owner exited; inspect {}",
+                log_path.display()
+            );
+            let completed = crate::owner::Record::read(&path, &current)?;
+            ensure!(
+                completed.phase == crate::owner::Phase::Stopped && completed.quiescent(),
+                "recovery stopped receipt is incomplete; inspect {}",
+                log_path.display()
+            );
+            return Ok(
+                json!({"session":current,"environment_id":workspace.id,"generation":session.generation,"state":"stopped","recovered":true,"detached":true}),
+            );
+        }
         let current = current_session(registry, &session)?;
         if let Ok(live) = control::request(&path, &current, Action::Status)
             && live["state"] == "ready"

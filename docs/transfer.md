@@ -46,7 +46,7 @@ parcela transfer verify /private/checkpoint
 parcela transfer restore /private/checkpoint --destination /private/new-replica
 ```
 
-The output parent must exist. Existing output/restore paths are never overwritten, including empty paths created concurrently. Checkpoint directories use mode 700. Payloads and metadata use mode 600; executable file resources use mode 700. Verification rejects undeclared payloads, links, checksum changes, and executable-mode changes.
+The output parent must exist. Capture output must be outside the source checkout. For declared-resource capture, the output and its staging parent must not overlap a selected resource. Source-only capture does not copy or check declared resource inputs. Existing output/restore paths are never overwritten, including empty paths created concurrently. Checkpoint directories use mode 700. Payloads and metadata use mode 600; executable file resources use mode 700. Verification rejects undeclared payloads, links, checksum changes, and executable-mode changes.
 
 Source capture currently requires Git-backed jj. It pins `@`, exports reachable objects through read-only Git plumbing, and restores through jj into an independent colocated repository. Linked workspace pointers are not copied. Source commands disable commit signing for that invocation; they do not change signing configuration or source bookmarks. Known credential-like tracked filenames are rejected, not silently removed from exact source. Filename checks do not establish that arbitrary source/history content is secret-free.
 

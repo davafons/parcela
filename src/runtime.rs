@@ -337,10 +337,45 @@ pub fn preflight(
         "readiness timeout must be between 1 and 86400"
     );
     let path = registry.runtime_path(workspace);
-    let probe = TcpListener::bind(("127.0.0.1", 0))?;
     let mut resolved = workspace.clone();
     resolved.generation += 1;
     let active_router = router::current(registry.state_path())?;
+    let probe = if let Some(port) = port {
+        ensure!(
+            port >= 1024 && port != active_router.https_port && port != active_router.http_port,
+            "backend endpoint conflicts with privileged/router ports"
+        );
+        ensure!(
+            !registry
+                .sessions()?
+                .iter()
+                .any(|session| session.backend_port == port
+                    && session.environment_id != workspace.id
+                    && session.status != "stopped"),
+            "backend endpoint reserved by another environment"
+        );
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(probe) => probe,
+            Err(_) => {
+                let session = registry
+                    .session(&workspace.id)?
+                    .context("backend endpoint unavailable; foreign listeners are never stopped")?;
+                ensure!(
+                    session.backend_port == port && session.status != "stopped",
+                    "backend endpoint unavailable; foreign listeners are never stopped"
+                );
+                let record = crate::owner::Record::read(&path, &session)?;
+                ensure!(
+                    record.routable(&path),
+                    "backend endpoint is not owned by the current routable generation"
+                );
+                record.authenticate(&path, workspace)?;
+                TcpListener::bind(("127.0.0.1", 0))?
+            }
+        }
+    } else {
+        TcpListener::bind(("127.0.0.1", 0))?
+    };
     let env = environment(
         manifest,
         &resolved,

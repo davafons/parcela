@@ -83,13 +83,19 @@ The real mixed race now verifies two successful exits, exactly one native shutdo
 
 Automatic reconciliation without launch evidence remains unsupported. Concurrent startup and restart, immutable launch snapshots, stale successor cleanup, qualified reboot recovery, and active environment handoff remain unverified. Independent review remains open. Installed binaries, primary services, Yuke state, trust, and exposure were unchanged.
 
-## Real-machine cutover state
+## Real-machine cutover observations
 
 User-authorized user-local binaries and the unprivileged `org.parcela.proxy` launch agent are installed. The real Shirabe checkout is adopted as primary; its launcher/manifest use Parcela and Process Compose, without the rb-portless gem/binstub/Procfile. Its existing development databases and uploads remain in `storage`; no preparation/reset/import was run.
 
-The user retired the shared rb-portless front door, accepting loss of Nadeshiko routing, and authorized PF forwarding, the boot job and System-keychain CA trust. The operator setup helper completed successfully. `parcela proxy status` verifies the owned admin endpoint and standard-port forwarding. After the user started `bin/dev`, `/usr/bin/curl -q --noproxy '*' -D - https://shirabe.localhost/up` returns HTTP/2 200 with system trust, without a custom CA or hostname override. HTTP port 80 redirects the same path to HTTPS with status 308. Process Compose's `process list --output json` over the environment's private `pc.sock` reports web, CSS, jobs and SDK as Running. This proves startup and the health route, not full application or watcher acceptance.
+During the earlier cutover, the user retired the shared rb-portless front door, accepting loss of Nadeshiko routing, and authorized PF forwarding, the boot job and System-keychain CA trust. The operator setup helper completed successfully. `parcela proxy status` then verified the owned admin endpoint and standard-port forwarding. After the user started `bin/dev`, `/usr/bin/curl -q --noproxy '*' -D - https://shirabe.localhost/up` returned HTTP/2 200 with system trust, without a custom CA or hostname override. HTTP port 80 redirected the same path to HTTPS with status 308. Process Compose's `process list --output json` over the environment's private `pc.sock` reported web, CSS, jobs and SDK as Running. This proves startup and the health route, not full application or watcher acceptance.
 
 `launchctl print system/org.parcela.pf` shows the forwarding job loaded with last exit code 0. The installed privileged helper matches `scripts/setup_macos.py`. Reboot persistence and browser trust remain unverified. No primary application services, jobs, migrations or imports were launched during this host setup.
+
+### Failed front door on 2026-10-13
+
+A fresh installed `parcela proxy status` fails with `standard-port forwarding is not active` and connection refusal. The owned Caddy still listens on `127.0.0.1:8080` and `127.0.0.1:8443`; neither standard port is listening. Earlier approved PF diagnostics reported enabled PF, the Apple redirect anchor, and `lo0 (skip)`. The owned `--forward-only` reload returned zero but actual standard-port checks still failed. That command proves rule loading, not effective forwarding or host readiness.
+
+No global PF skip setting, CA trust, installed binary, or primary application state changed during this follow-up. Forwarding repair and the authorized app cutover remain pending. The earlier successful observations above are not current readiness proof. Disposable high-port acceptance does not test this installed front door.
 
 ## Gaps
 

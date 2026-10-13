@@ -13,7 +13,7 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
@@ -392,6 +392,41 @@ pub fn create(
         !output.starts_with(&source),
         "checkpoint output must be outside its source checkout"
     );
+    let mut inputs = BTreeMap::new();
+    if scope == CaptureScope::DeclaredResources {
+        for (name, resource) in &policy.data {
+            let root = match resource.location {
+                Location::Source => source.as_path(),
+                Location::Runtime => {
+                    runtime.context("runtime data requires an explicit --runtime-dir")?
+                }
+            }
+            .canonicalize()?;
+            let input = match real_path(&root, &resource.path) {
+                Ok(input) => Some(input),
+                Err(error)
+                    if !resource.required
+                        && error
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+                {
+                    None
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(input) = &input {
+                ensure!(
+                    !input.starts_with(&output)
+                        && !output
+                            .parent()
+                            .context("destination needs a parent")?
+                            .starts_with(input),
+                    "checkpoint output/staging overlaps selected resource {name}"
+                );
+            }
+            inputs.insert(name.clone(), input);
+        }
+    }
     let stage = stage(&output)?;
     let revision = run(jj_command()
         .current_dir(&source)
@@ -425,26 +460,8 @@ pub fn create(
             });
             continue;
         }
-        let root = match resource.location {
-            Location::Source => source.as_path(),
-            Location::Runtime => {
-                runtime.context("runtime data requires an explicit --runtime-dir")?
-            }
-        }
-        .canonicalize()?;
-        let input = match real_path(&root, &resource.path) {
-            Ok(input) => Some(input),
-            Err(error)
-                if !resource.required
-                    && error
-                        .downcast_ref::<std::io::Error>()
-                        .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
-            {
-                None
-            }
-            Err(error) => return Err(error),
-        };
-        if let Some(input) = &input {
+        let input = &inputs[name];
+        if let Some(input) = input {
             let directory = stage.path().join("resources").join(name);
             private::directory(&directory)?;
             match resource.snapshot {

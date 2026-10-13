@@ -220,7 +220,7 @@ def interrupted(signum, _frame):
 
 def processes(process_compose, runtime, log_path, environment):
     output = subprocess.check_output([process_compose, "--use-uds", "--unix-socket", str(runtime / "pc.sock"),
-                                      "--log-file", str(log_path), "process", "list", "--output", "json"],
+                                      "--token-file", str(runtime / "pc.token"), "--log-file", str(log_path), "process", "list", "--output", "json"],
                                      env=environment, text=True, stderr=subprocess.DEVNULL, timeout=15)
     records = json.loads(output)
     if isinstance(records, dict):
@@ -231,6 +231,7 @@ def processes(process_compose, runtime, log_path, environment):
     if set(selected) != {"web", "css"}:
         raise ValueError(f"Unexpected graph processes: {selected}")
     return selected if all(status == "Running" for status in selected.values()) else False
+
 
 def main():
     os.umask(0o077)
