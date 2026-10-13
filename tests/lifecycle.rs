@@ -452,3 +452,68 @@ fn waiting_stop(replace_control: bool) {
         session.token
     );
 }
+
+#[test]
+fn fragmented_owner_request_waits_for_the_complete_frame() {
+    use std::{
+        io::{Read, Write},
+        os::unix::net::UnixStream,
+    };
+
+    let (_temp, registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    let server = Server::bind(&path).unwrap();
+    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    caller
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let mut frame = serde_json::to_vec(&serde_json::json!({"environment_id": session.environment_id, "token": session.token, "generation": session.generation, "action": {"type": "status"}})).unwrap();
+    frame.push(b'\n');
+    let split = frame.len() / 2;
+    caller.write_all(&frame[..split]).unwrap();
+    let writer = thread::spawn(move || -> anyhow::Result<serde_json::Value> {
+        thread::sleep(Duration::from_millis(40));
+        caller.write_all(&frame[split..])?;
+        let mut response = String::new();
+        caller.read_to_string(&mut response)?;
+        Ok(serde_json::from_str(&response)?)
+    });
+    let received = server.receive(&session).unwrap();
+    if let Some(pending) = received {
+        assert!(matches!(pending.action, Action::Status));
+        pending
+            .reply(&session, Ok(serde_json::json!({"accepted": true})))
+            .unwrap();
+    } else {
+        let _ = writer.join();
+        panic!("complete owner request arriving within the read budget must be admitted");
+    }
+    let response = writer.join().unwrap().unwrap();
+    assert_eq!(response["result"], serde_json::json!({"accepted": true}));
+    assert_eq!(response["error"], serde_json::Value::Null);
+}
+
+#[test]
+fn unfinished_open_owner_request_is_rejected_within_a_bounded_wait() {
+    use std::{
+        io::{Read, Write},
+        os::unix::net::UnixStream,
+    };
+
+    let (_temp, registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    let server = Server::bind(&path).unwrap();
+    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    caller
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    caller.write_all(b"{\"action\":").unwrap();
+    let started = std::time::Instant::now();
+    assert!(server.receive(&session).unwrap().is_none());
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let mut response = String::new();
+    caller.read_to_string(&mut response).unwrap();
+    let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+    assert!(response["error"].is_string());
+    assert_eq!(response["result"], serde_json::Value::Null);
+}
