@@ -241,9 +241,19 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         "stopped"
     );
 
+    let mut survivor = process::OwnedChild::spawn(Command::new("sleep").arg("60")).unwrap();
+    let survivor_identity = process::Identity::read(survivor.id()).unwrap().unwrap();
+    record.processes.push(survivor_identity.clone());
     record.phase = Phase::Stopping;
     record.save(&path).unwrap();
     registry.session_status(&session, "stopping").unwrap();
+    assert!(lifecycle::down(&registry, &workspace).is_err());
+    assert!(survivor_identity.alive());
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().status,
+        "stopping"
+    );
+    survivor.stop(libc::SIGTERM).unwrap();
     assert_eq!(
         lifecycle::down(&registry, &workspace).unwrap()["state"],
         "stopped"

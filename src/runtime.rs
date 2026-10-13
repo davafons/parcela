@@ -653,7 +653,13 @@ pub fn recover(
         !record.owner.alive() && lock.identity()? == record.lock,
         "original owner or ownership lock is not safely recoverable"
     );
-    if record.phase == crate::owner::Phase::Stopped && record.quiescent() {
+    if matches!(
+        record.phase,
+        crate::owner::Phase::Stopping | crate::owner::Phase::Stopped
+    ) && record.quiescent()
+    {
+        record.phase = crate::owner::Phase::Stopped;
+        record.save(&path)?;
         record.control.remove_socket(&path.join("ctl.sock"))?;
         if let Some(native) = &record.native
             && let Some(socket) = &native.socket

@@ -12,6 +12,7 @@ import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.client import HTTPResponse
 
 SERVICE = '''import json, os, signal, time
 from pathlib import Path
@@ -136,6 +137,15 @@ class Fixture:
                 data += chunk
         head, body = data.split(b'\r\n\r\n', 1)
         return int(head.split(b' ', 2)[1]), body.decode()
+    def caddy_config(self):
+        with socket.socket(socket.AF_UNIX) as stream:
+            stream.settimeout(3)
+            stream.connect(str(self.state / 'proxy/admin.sock'))
+            stream.sendall(b'GET /config/ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+            with HTTPResponse(stream) as response:
+                response.begin()
+                assert response.status == 200
+                return json.loads(response.read())
     def pc_down(self, app):
         context = json.loads((app['runtime'] / 'context.json').read_text())
         assert context['session']['environment_id'] == app['id']
@@ -403,15 +413,18 @@ def long_stream_lease(f):
     app = f.app('stream')
     f.start_proxy()
     owner = f.start(app)
-    loaded = (f.state / 'proxy/loaded.json').read_bytes()
+    loaded = f.caddy_config()
     context = ssl.create_default_context(cafile=str(f.state / 'proxy/data/pki/authorities/local/root.crt'))
     with context.wrap_socket(socket.create_connection(('127.0.0.1', f.https), timeout=3), server_hostname=app['host']) as stream:
         stream.settimeout(3)
         stream.sendall(f'GET /stream HTTP/1.1\r\nHost: {app["host"]}\r\nConnection: close\r\n\r\n'.encode())
         with stream.makefile('rb') as response:
             assert response.readline().startswith(b'HTTP/1.1 200')
-            while response.readline() != b'\r\n':
-                pass
+            while True:
+                header = response.readline()
+                assert header, 'stream closed before response headers'
+                if header == b'\r\n':
+                    break
             for tick in range(12):
                 line = response.readline()
                 while not line.startswith(b'data: '):
@@ -420,7 +433,7 @@ def long_stream_lease(f):
                 assert line.strip() == f'data: {tick}'.encode()
                 assert f.request(app)[0] == 200, 'lease renewal must keep new requests routed'
     assert owner.poll() is None
-    assert (f.state / 'proxy/loaded.json').read_bytes() == loaded, 'lease renewal must not reload Caddy config'
+    assert f.caddy_config() == loaded, 'lease renewal must not change actual Caddy config'
     return {'stream_events': 12, 'lease_windows_crossed': True, 'config_unchanged': True}
 
 
