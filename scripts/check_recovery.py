@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import sqlite3
 import ssl
@@ -93,10 +94,10 @@ class Fixture:
         self.name = name
     def cli(self, path, *args, timeout=25):
         return subprocess.run([self.args.binary, '--path', str(path), '--state-dir', str(self.state), *args], capture_output=True, text=True, timeout=timeout)
-    def spawn(self, path, *args):
+    def spawn(self, path, *args, env=None):
         log = open(self.root / f'child-{len(self.owners)}.log', 'w')
         self.logs.append(log)
-        child = subprocess.Popen([self.args.binary, '--path', str(path), '--state-dir', str(self.state), *args], stdout=log, stderr=log)
+        child = subprocess.Popen([self.args.binary, '--path', str(path), '--state-dir', str(self.state), *args], stdout=log, stderr=log, env=env)
         self.owners.append(child)
         return child
     def app(self, label, delay=0):
@@ -739,6 +740,40 @@ def detached_recover_running(f):
     assert not listening(app['port'])
     return {'recover_exit': 0, 'state': 'ready', 'service_pid_preserved': True, 'same_generation': True}
 
+def recovered_owner_initialization(f):
+    app = f.app('initialize')
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    owner.kill()
+    owner.wait(timeout=5)
+    tools = f.root / 'tools'
+    tools.mkdir()
+    ps = tools / 'ps'
+    ps.write_text(f"""#!/usr/bin/env python3
+import json, os, sys, time
+from pathlib import Path
+root = Path({str(f.root)!r})
+record_path = Path({str(app['runtime'] / 'owner.json')!r})
+if '-A' in sys.argv and not (root / 'refresh-paused').exists():
+    record = json.loads(record_path.read_text())
+    if record['phase'] == 'starting' and record['owner']['pid'] != {owner.pid}:
+        (root / 'refresh-paused').write_text('paused before recovered control admission')
+        time.sleep(1)
+os.execv({shutil.which('ps')!r}, ['ps', *sys.argv[1:]])
+""")
+    ps.chmod(0o700)
+    recovery = f.spawn(app['path'], 'recover', '--detach', env={**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH']})
+    wait_for(lambda: (f.root / 'refresh-paused').exists())
+    record = json.loads((app['runtime'] / 'owner.json').read_text())
+    assert record['phase'] == 'starting'
+    current = f.session(app)
+    assert current['status'] == 'starting', 'new recovered owner must not inherit former ready intent before initialization'
+    assert current['token'] == original['token'] and current['generation'] == original['generation']
+    assert recovery.wait(timeout=20) == 0
+    assert f.request(app)[0] == 200
+    return {'initializing_state': 'starting', 'same_generation': True, 'https_code': 200}
+
 def detached_recover_stopping(f):
     return detached_stopped_recovery(f, False)
 
@@ -780,9 +815,8 @@ CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_ou
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
          replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
          recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop, shirabe_native_inspection, portable_native_inspection,
-         occupied_replacement_port,
-         invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
-         detached_recover_stopping, detached_recover_quiescent]
+         occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
+         detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization]
 
 
 def main():
