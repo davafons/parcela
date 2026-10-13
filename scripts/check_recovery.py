@@ -116,8 +116,8 @@ class Fixture:
     def start_proxy(self):
         self.proxy = self.spawn(self.root, 'proxy', 'run', '--caddy', self.args.caddy, '--test-profile', '--https-port', str(self.https), '--http-port', str(self.http))
         wait_for(lambda: self.cli(self.root, 'proxy', 'status').returncode == 0)
-    def start(self, app):
-        owner = self.spawn(app['path'], 'up', '--process-compose', self.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    def start(self, app, compose=None):
+        owner = self.spawn(app['path'], 'up', '--process-compose', compose or self.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
         app['owner'] = owner
         wait_for(lambda: self.request(app)[0] == 200)
         return owner
@@ -344,6 +344,64 @@ def interrupted_stop(f):
     return {'interrupted_down_retry_exit': 0, 'shutdown_completed': True, 'route_withdrawn': True}
 
 
+def ongoing_stop_retry(f):
+    app = f.app('ongoing', delay=7)
+    f.start_proxy()
+    owner = f.start(app)
+    session = f.session(app)
+    with socket.socket(socket.AF_UNIX) as client:
+        client.connect(str(app['runtime'] / 'ctl.sock'))
+        client.sendall((json.dumps({'environment_id': app['id'], 'token': session['token'], 'generation': session['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
+    wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
+    owner.kill()
+    owner.wait(timeout=5)
+    assert not (app['runtime'] / 'shutdown-completed').exists(), 'retry must start while native shutdown is ongoing'
+    assert listening(app['port']), 'fixture graph must still be running at retry'
+    retry = f.cli(app['path'], 'down')
+    assert retry.returncode == 0, retry.stderr
+    assert (app['runtime'] / 'shutdown-completed').exists(), 'successful retry must await native shutdown'
+    assert not listening(app['port'])
+    assert f.session(app)['status'] == 'stopped'
+    assert f.session(app)['token'] == session['token']
+    assert f.request(app)[0] == 503
+    return {'retry_during_native_shutdown_exit': 0, 'shutdown_completed': True, 'generation_preserved': True}
+
+
+def concurrent_crash_stop(f):
+    app = f.app('election', delay=2)
+    wrapper = f.root / 'pc-gate'
+    wrapper.write_text('''#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+root = Path(__file__).parent
+if 'list' in sys.argv and (root / 'gate-enabled').exists():
+    (root / 'gate-entered').write_text('entered')
+    time.sleep(1)
+os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *sys.argv[1:]])
+''')
+    wrapper.chmod(0o700)
+    f.start_proxy()
+    owner = f.start(app, str(wrapper))
+    session = f.session(app)
+    owner.kill()
+    owner.wait(timeout=5)
+    (f.root / 'gate-enabled').write_text('enabled')
+    first = f.spawn(app['path'], 'down')
+    wait_for(lambda: (f.root / 'gate-entered').exists())
+    second = f.spawn(app['path'], 'down')
+    first_code = first.wait(timeout=20)
+    second_code = second.wait(timeout=20)
+    first_log = (f.root / f'child-{f.owners.index(first)}.log').read_text()
+    second_log = (f.root / f'child-{f.owners.index(second)}.log').read_text()
+    assert first_code == 0, first_log
+    assert second_code == 0, second_log
+    assert f.session(app)['status'] == 'stopped'
+    assert f.session(app)['token'] == session['token']
+    assert (app['runtime'] / 'shutdown-completed').exists()
+    assert not listening(app['port'])
+    return {'first_recovery_exit': first_code, 'contending_recovery_exit': second_code, 'same_generation_stopped': True}
+
+
 def completed_stop_receipt(f):
     app = f.app('receipt')
     f.start_proxy()
@@ -439,7 +497,7 @@ def long_stream_lease(f):
 
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
-         replaced_native_socket, replaced_process_birth, long_stream_lease]
+         replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop]
 
 
 def main():

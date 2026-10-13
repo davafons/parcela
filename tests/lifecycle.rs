@@ -269,3 +269,52 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         true
     );
 }
+
+#[test]
+fn contending_stop_waits_for_same_generation_completion() {
+    use parcela::owner::{Phase, Record};
+
+    let (_temp, mut registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    private::directory(&path).unwrap();
+    let lock = private::Lock::acquire(&path.join("owner.lock")).unwrap();
+    let control = Server::bind(&path).unwrap();
+    let mut child = process::OwnedChild::spawn(Command::new("sleep").arg("60")).unwrap();
+    let identity = process::Identity::read(child.id()).unwrap().unwrap();
+    child.stop(libc::SIGTERM).unwrap();
+    let mut record = Record {
+        session: session.clone(),
+        phase: Phase::Stopping,
+        owner: identity.clone(),
+        lock: lock.identity().unwrap(),
+        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        supervisor: identity.clone(),
+        processes: vec![identity],
+        native: None,
+        manifest: serde_saphyr::from_str(
+            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        )
+        .unwrap(),
+        diagnostic: None,
+    };
+    record.save(&path).unwrap();
+    drop(control);
+    registry.session_status(&session, "stopping").unwrap();
+    let state = registry.state_path().to_path_buf();
+    let expected = session.clone();
+    let owner = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(200));
+        let mut writer = Registry::open(&state, true).unwrap().unwrap();
+        record.phase = Phase::Stopped;
+        record.save(&path).unwrap();
+        writer.session_status(&expected, "stopped").unwrap();
+        drop(lock);
+    });
+    let result = lifecycle::down(&registry, &workspace);
+    owner.join().unwrap();
+    assert_eq!(result.unwrap()["state"], "stopped");
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().token,
+        session.token
+    );
+}
