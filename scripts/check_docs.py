@@ -213,7 +213,7 @@ def main():
         directory = Path(directory).resolve()
         check_public_sources(directory)
         results = []
-        for base, name in [('/', 'root'), ('/parcela/', 'parcela')]:
+        for base, name in [('/', 'root'), ('/parcela/', 'parcela'), ('/docs/', 'docs')]:
             site = directory / name
             subprocess.run(['npm', 'run', 'build'], cwd=WEBSITE, check=True, timeout=120,
                            env={**os.environ, 'DOCS_BASE': base, 'DOCS_OUTPUT': str(site)})

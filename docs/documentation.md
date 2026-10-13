@@ -33,7 +33,7 @@ python3 scripts/check_docs.py --output target/docs-check.json
 
 The first command writes `target/docs` with `/parcela/` as its hosting base. The default canonical origin is `https://example.invalid`; set `DOCS_SITE` to the intended HTTPS origin for a publication build. Use `DOCS_BASE=/` for root hosting or a slash-delimited project path such as `/parcela/`. These variables configure output, not a deployment.
 
-The checker builds separate temporary sites at `/` and `/parcela/`. It checks actual HTML links, anchors, assets, canonical downloads and Pagefind records for every public page. It also verifies public-source refusal and serves both builds through ephemeral loopback listeners. Every recorded listener must close before the check passes. The checker uses Python's standard library and the installed docs package.
+The checker builds separate temporary sites at `/`, `/parcela/` and `/docs/`. It checks actual HTML links, anchors, assets, canonical downloads and Pagefind records for every public page. It also verifies public-source refusal and serves all three builds through ephemeral loopback listeners. Every recorded listener must close before the check passes. The checker uses Python's standard library and the installed docs package.
 
 For a private root-hosted preview, choose an available explicit test port:
 
@@ -57,7 +57,29 @@ python3 scripts/check_docs_example.py \
 
 The driver copies only the three demo inputs into disposable primary and preview directories. It uses isolated state, unprivileged ports and an explicit test CA. It verifies named frontend and API HTTPS, worker state and logs, generation restart, independent stop, retained source and closed listeners. Failed fixtures and their diagnostics remain for inspection. The driver does not install trust, run preparation, touch real dependencies or prove the installed standard front door.
 
-## Prepare GitHub Pages without implicit publication
+## Publish the custom-domain site explicitly
+
+The publication target is `https://parcela.davafons.cc/docs/`. Cloudflare Workers serves static assets on a dedicated `parcela-docs` Worker in the `davafons` account. `docs/website/wrangler.jsonc` declares its account and custom domain. This deployment does not change repository visibility, the installed Parcela binary or a local Caddy instance.
+
+Use authenticated Wrangler access to the selected account. The docs package pins Wrangler 4.150.0. Check the build without publishing:
+
+```sh
+npm run deploy --prefix docs/website -- --dry-run
+```
+
+The command builds a new artifact directory under `target/docs-deployment-*`. It sets the canonical origin to `https://parcela.davafons.cc` and the base to `/docs/`. Only generated public site output enters the upload. The wrapper redirects `/` to `/docs/` and supplies a real 404 page. Each build uses a new directory, so removed pages cannot survive as stale deployment assets.
+
+After reviewing the public artifact and obtaining deployment authorization:
+
+```sh
+npm run deploy --prefix docs/website
+```
+
+Wrangler uploads static assets and binds the explicitly declared custom domain. It can provision that domain's DNS and certificate. Before the first deployment, confirm that the hostname and Worker do not belong to another service. Do not approve replacement prompts for an unexpected existing binding.
+
+Check the deployed HTTPS page, guide links, assets, search index and canonical downloads after publication. Verify the root redirect and an unknown path's 404 response. Local builds and a successful upload do not prove that public DNS and TLS are ready.
+
+## Prepare optional GitHub Pages without implicit publication
 
 The `Documentation` workflow builds and checks the site on relevant pull requests and main pushes. Its normal result is a downloadable `parcela-docs` artifact, not a deployment. CI uses Node 24 and Python 3.12.
 

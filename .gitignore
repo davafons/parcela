@@ -8,3 +8,4 @@ __pycache__/
 /docs/website/node_modules/
 /docs/website/.astro/
 /docs/website/.generated/
+/docs/website/.wrangler/

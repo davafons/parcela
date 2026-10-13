@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "astro build",
-    "dev": "astro dev --host 127.0.0.1"
+    "dev": "astro dev --host 127.0.0.1",
+    "deploy": "node deploy.mjs"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -16,5 +17,8 @@
   },
   "overrides": {
     "postcss-selector-parser": "7.1.6"
+  },
+  "devDependencies": {
+    "wrangler": "4.150.0"
   }
 }
