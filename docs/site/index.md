@@ -19,7 +19,7 @@ Caddy handles HTTPS. Process Compose handles processes, dependencies, logs and s
 
 > **Experimental.**
 >
-> These guides describe the current source build, not a finished installer. A reserved URL is not proof that a service is reachable. Separate names and runtime directories do not isolate application databases or uploads.
+> These guides describe the [`docs-site` development branch](https://github.com/davafons/parcela/tree/docs-site), not a finished installer. Its service-set and bundled-skill changes are not merged into `main` yet. A reserved URL is not proof that a service is reachable. Separate names and runtime directories do not isolate application databases or uploads.
 
 ## Choose your next task
 
