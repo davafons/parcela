@@ -19,6 +19,20 @@ class LocalHTTPS(http.client.HTTPSConnection):
     def connect(self):
         self.sock = self._context.wrap_socket(socket.create_connection(('127.0.0.1', self.port), timeout=5), server_hostname=self.host)
 
+def compose_processes(process_compose, runtime, log_path):
+    socket_path = runtime / 'pc.sock'
+    output = subprocess.check_output([process_compose, '--use-uds', '--unix-socket', str(socket_path), '--log-file', str(log_path), 'process', 'list', '--output', 'json'], text=True, stderr=subprocess.DEVNULL)
+    records = json.loads(output)
+    if isinstance(records, dict):
+        records = records.get('data', records.get('processes', records))
+    if not isinstance(records, list):
+        raise ValueError(f'Unexpected Process Compose state: {records}')
+    selected = {record['name']: record for record in records}
+    for name in ['web', 'css', 'jobs']:
+        if selected[name]['status'] != 'Running':
+            raise ValueError(f'Native graph component not running: {selected[name]}')
+    return selected
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', required=True)
@@ -59,19 +73,6 @@ def main():
             response_headers = response.getheaders()
             connection.close()
             return response.status, body, response_headers
-        def compose_processes(environment):
-            socket_path = state / 'environments' / environment / 'pc.sock'
-            output = subprocess.check_output([args.process_compose, '--use-uds', '--unix-socket', str(socket_path), '--log-file', str(root / 'pc-client.log'), 'process', 'list', '--output', 'json'], text=True, stderr=subprocess.DEVNULL)
-            records = json.loads(output)
-            if isinstance(records, dict):
-                records = records.get('data', records.get('processes', records))
-            if not isinstance(records, list):
-                raise ValueError(f'Unexpected Process Compose state: {records}')
-            selected = {record['name']: record for record in records}
-            for name in ['web', 'css', 'jobs']:
-                if selected[name]['status'] != 'Running':
-                    raise ValueError(f'Native graph component not running: {selected[name]}')
-            return selected
         try:
             for label, role in [('primary', 'primary'), ('auth', 'preview')]:
                 copy = root / label
@@ -102,7 +103,7 @@ def main():
             native = []
             if args.process_compose:
                 for _, environment, _ in copies:
-                    native.append(wait_for(lambda: compose_processes(environment), [proxy, *servers], timeout=45))
+                    native.append(wait_for(lambda: compose_processes(args.process_compose, state / 'environments' / environment, root / 'pc-client.log'), [proxy, *servers], timeout=45))
             probes = []
             for host, (copy, environment, _) in zip(['shirabe.localhost', 'auth-shirabe.localhost'], copies):
                 wait_for(lambda: request(host, path='/up')[0] == 200, [proxy, *servers], timeout=100)
@@ -151,7 +152,7 @@ def main():
                 copy, environment, _ = copies[0]
                 restarted = spawn(copy, 'up', '--readiness-timeout', '90', '--process-compose', args.process_compose)
                 wait_for(lambda: request('shirabe.localhost', path='/up')[0] == 200, [proxy, servers[1], restarted], timeout=100)
-                compose_processes(environment)
+                compose_processes(args.process_compose, state / 'environments' / environment, root / 'pc-client.log')
                 assert json.loads(request('shirabe.localhost', cookie=probes[0][1])[1])['authenticated']
                 restarted.send_signal(signal.SIGTERM)
                 restarted.wait(timeout=12)

@@ -218,6 +218,20 @@ def interrupted(signum, _frame):
     raise InterruptedError(f"Acceptance interrupted by signal {signum}")
 
 
+def processes(process_compose, runtime, log_path, environment):
+    output = subprocess.check_output([process_compose, "--use-uds", "--unix-socket", str(runtime / "pc.sock"),
+                                      "--log-file", str(log_path), "process", "list", "--output", "json"],
+                                     env=environment, text=True, stderr=subprocess.DEVNULL, timeout=15)
+    records = json.loads(output)
+    if isinstance(records, dict):
+        records = records.get("data", records.get("processes", records))
+    if not isinstance(records, list):
+        raise ValueError("Unexpected Process Compose process list")
+    selected = {record["name"]: record["status"] for record in records}
+    if set(selected) != {"web", "css"}:
+        raise ValueError(f"Unexpected graph processes: {selected}")
+    return selected if all(status == "Running" for status in selected.values()) else False
+
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -282,20 +296,6 @@ def main():
             body = response.read()
             return {"status": response.status, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
 
-    def processes(runtime):
-        output = subprocess.check_output([process_compose, "--use-uds", "--unix-socket", str(runtime / "pc.sock"),
-                                          "--log-file", str(work / "pc-client.log"), "process", "list", "--output", "json"],
-                                         env=environment, text=True, stderr=subprocess.DEVNULL, timeout=15)
-        records = json.loads(output)
-        if isinstance(records, dict):
-            records = records.get("data", records.get("processes", records))
-        if not isinstance(records, list):
-            raise ValueError("Unexpected Process Compose process list")
-        selected = {record["name"]: record["status"] for record in records}
-        if set(selected) != {"web", "css"}:
-            raise ValueError(f"Unexpected graph processes: {selected}")
-        return selected if all(status == "Running" for status in selected.values()) else False
-
     handlers = {signum: signal.signal(signum, interrupted) for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     try:
         save(work / "report.json", report)
@@ -355,7 +355,7 @@ def main():
         wait_for(lambda: cli(work, "proxy", "status", check=False).returncode == 0, [proxy], timeout=30)
         print("Starting isolated web/CSS acceptance; copied jobs remain disabled", flush=True)
         app = spawn(source, "up", "--process-compose", process_compose, "--readiness-timeout", "180")
-        report["processes"] = wait_for(lambda: processes(runtime), [proxy, app], timeout=180)
+        report["processes"] = wait_for(lambda: processes(process_compose, runtime, work / "pc-client.log", environment), [proxy, app], timeout=180)
         host = workspace["hostname"]
         report["health"] = wait_for(lambda: (value if (value := request(host, "/up"))["status"] == 200 else False),
                                     [proxy, app], timeout=180)
