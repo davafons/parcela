@@ -90,9 +90,9 @@ pub fn discover(source: &Path, registry: Option<&Registry>) -> Result<Vec<Checko
 fn parse_jj(bytes: &[u8]) -> Result<Vec<Checkout>> {
     let text = std::str::from_utf8(bytes)?;
     let fields = text.split_terminator('\0').collect::<Vec<_>>();
-    ensure!(fields.len() % 4 == 0, "invalid jj workspace inventory");
-    fields
-        .chunks_exact(4)
+    let (rows, remainder) = fields.as_chunks::<4>();
+    ensure!(remainder.is_empty(), "invalid jj workspace inventory");
+    rows.iter()
         .map(|row| {
             let path = PathBuf::from(row[1]);
             ensure!(
