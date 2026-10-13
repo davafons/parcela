@@ -353,6 +353,15 @@ fn contending_stop(replace_session: bool) {
 
 #[test]
 fn waiting_stop_reaches_the_recovered_same_generation_controller() {
+    waiting_stop(false);
+}
+
+#[test]
+fn waiting_stop_never_reaches_a_replaced_control_socket() {
+    waiting_stop(true);
+}
+
+fn waiting_stop(replace_control: bool) {
     use parcela::owner::{Phase, Record};
     use std::time::Instant;
 
@@ -380,6 +389,13 @@ fn waiting_stop_reaches_the_recovered_same_generation_controller() {
         diagnostic: None,
     };
     record.save(&path).unwrap();
+    let (control, retained_control) = if replace_control {
+        fs::rename(path.join("ctl.sock"), path.join("retained.sock")).unwrap();
+        (Server::bind(&path).unwrap(), Some(control))
+    } else {
+        (control, None)
+    };
+    let retained_path = path.join("retained.sock");
     let state = registry.state_path().to_path_buf();
     let expected = session.clone();
     let owner = thread::spawn(move || {
@@ -409,11 +425,20 @@ fn waiting_stop_reaches_the_recovered_same_generation_controller() {
         admitted
     });
     let result = parcela::runtime::recover(&mut registry, &workspace, &session, true);
-    assert!(
-        owner.join().unwrap(),
-        "stop never reached the recovered controller"
-    );
-    assert_eq!(result.unwrap()["state"], "stopped");
+    let admitted = owner.join().unwrap();
+    if replace_control {
+        assert!(!admitted, "stop reached a replaced control socket");
+        assert!(result.is_err());
+        assert_eq!(
+            registry.session(&workspace.id).unwrap().unwrap().status,
+            "starting"
+        );
+        assert!(retained_path.exists());
+    } else {
+        assert!(admitted, "stop never reached the recovered controller");
+        assert_eq!(result.unwrap()["state"], "stopped");
+    }
+    drop(retained_control);
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().token,
         session.token

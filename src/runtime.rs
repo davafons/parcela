@@ -665,8 +665,18 @@ pub fn recover(
         );
         ensure!(
             Instant::now() < deadline,
-            "same-generation stop recovery did not complete; no process was signaled"
+            "same-generation stop recovery did not complete; ownership retained, inspect owner logs"
         );
+        let record = crate::owner::Record::read(&path, expected)?;
+        if matches!(
+            record.phase,
+            crate::owner::Phase::Starting | crate::owner::Phase::Running
+        ) && record.owner.alive()
+            && record.control.matches(&path.join("ctl.sock"))
+            && record.lock.locked(&path.join("owner.lock"))?
+        {
+            let _ = control::request(&path, expected, Action::Stop);
+        }
         thread::sleep(Duration::from_millis(50));
     };
     let session = current_session(registry, expected)?;
