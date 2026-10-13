@@ -1,72 +1,219 @@
-# Parcela
+<p align="center">
+  <img src="logo.svg" alt="Parcela" width="150">
+</p>
 
-A service-agnostic workspace and local-environment organizer. Rust owns identity, configuration and lifecycle; managed external Caddy owns HTTP/TLS; Process Compose owns service graphs. Projects own commands and data policy.
+<h1 align="center">Parcela</h1>
 
-Primary URLs are `https://shirabe.localhost`; previews are `https://auth-shirabe.localhost`. Flat names, tenants off, loopback only. Standard ports are the normal front door; high-port tests and external forwarding require explicit profiles, never silent fallback.
+<p align="center">
+  <img src="https://img.shields.io/badge/status-experimental-e8b44f" alt="Status: experimental">
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built_with-Rust-b45d3c?logo=rust&amp;logoColor=white" alt="Built with Rust"></a>
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-57966f" alt="Platforms: macOS and Linux">
+  <a href="https://github.com/davafons/parcela/actions/workflows/check.yml"><img src="https://github.com/davafons/parcela/actions/workflows/check.yml/badge.svg" alt="Rust checks"></a>
+</p>
 
-## Current implementation
+<p align="center">
+  Organize local workspaces and run their services at named HTTPS URLs.
+</p>
 
-- Strict `parcela.yaml`, stable UUID identities, explicit primary/preview adoption and a private SQLite registry.
-- `proxy run/status`: dedicated Caddy, private Unix admin socket, exact-host routes and internal TLS. Automatic CA trust installation is disabled.
-- `run -- ARGV`: literal foreground command, owned loopback endpoint, initial HTTP readiness, signal/exit handling and route teardown.
-- `up` and `up --detach`: native Process Compose graph, private Unix control socket, one routed HTTP service plus workers. Detached startup waits for readiness.
-- `task NAME -- ARGS`: explicit finite project commands, optional timeout, private result record.
-- `transfer plan/capture/verify/restore` and `stream-sqlite`: explicit paused checkpoints and data copies, not execution handoff.
-- `down`/`stop` and `restart`: commands to the live owner, with route revocation before child teardown and no persisted-PID signaling.
-- `status [--all]`, `services`, `logs [SERVICE] --tail N`, and `url`: live HTTP probes, native service/log inspection, and reserved URLs.
-- `workspace discover`: read-only sibling jj/Git inventory. `--workspace UUID` targets an adopted environment; `--human` prints inventory/status tables.
-- `doctor` optionally probes explicitly supplied backend versions.
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#documentation">Documentation</a>
+</p>
 
-The runtime is experimental. No automatic crash reconciliation, persisted-PID signaling, automatic backend installation, sharing, tenant routing or general data-isolation certification. Inspection/adoption do not launch services or prove that a URL is live. A crashed session or unknown socket requires explicit reconciliation.
+## Why Parcela?
 
-## Build and verify
+Keep your primary checkout and previews identifiable, with their own service graphs and reserved URLs.
 
-Requires Rust 1.89+ and a C compiler for bundled SQLite; local checks use Rust 1.95.0 on macOS. Runtime needs separately installed Caddy 2.x, Process Compose 1.x and `lsof`/`ps`. A distribution license has not yet been selected.
+| Environment | URL |
+| --- | --- |
+| Primary checkout | `https://notes.localhost` |
+| Preview named `auth` | `https://auth-notes.localhost` |
+
+- **Named HTTPS.** Flat hostnames, standard ports, and exact-host routing through Caddy.
+- **Stable workspace identities.** UUIDs survive bookmark and branch changes. Adopt existing jj, Git, or plain-directory checkouts.
+- **Native service graphs.** Process Compose runs the web service and workers. Each environment gets a private control socket.
+- **Explicit lifecycle control.** Start, stop, restart, inspect, and recover qualified native graphs without guessing which PID to kill.
+- **Project-owned policy.** Your configuration defines commands, preparation, and data bindings. Core does not assume Rails, Node, or a database layout.
+- **Scriptable output.** JSON by default, readable tables with `--human`, and plain-text URLs and log tails.
+
+Parcela is experimental. The tested source build is not a finished installer or a complete environment-handoff system. See [project status](#project-status) for the current limits.
+
+## Build from source
+
+Requirements:
+
+- Rust 1.89 or newer and a C toolchain for bundled SQLite.
+- Caddy 2.x and Process Compose 1.x, available separately.
+- `lsof` and `ps` for process and listener inspection.
+
+From this checkout:
 
 ```sh
-cargo build --locked
-scripts/check
-scripts/check-live --caddy /path/to/caddy --process-compose /path/to/process-compose
-scripts/check-shirabe --source /path/to/shirabe --caddy /path/to/caddy \
-  --process-compose /path/to/process-compose
+cargo build --release --locked
+./target/release/parcela --help
 ```
 
-Live checks use disposable source/state and explicit test ports, without changing system trust. Shirabe checks use fresh schemas and a synthetic user, not a copied live dictionary. Linux CI configuration is not Linux service acceptance.
-
-## Use an existing checkout
-
-Create a project-owned manifest, then adopt explicitly:
+To use the built command in the examples below, add it to your current shell's path:
 
 ```sh
+export PATH="$PWD/target/release:$PATH"
+```
+
+This does not replace an installed binary or upgrade running services. Backends are never installed by an ordinary Parcela command.
+
+### Set up the HTTPS front door
+
+Normal URLs use ports 80 and 443. Listener ownership, forwarding where needed, and CA trust require explicit host setup before starting an application.
+
+Parcela never takes over an occupied listener, silently falls back to a high port, or installs CA trust during startup. The macOS [operator helper](scripts/setup_macos.py) provides guarded loopback forwarding and explicit trust setup. Review the [host setup and verification notes](docs/implementation.md#real-machine-cutover-state) before using it.
+
+High ports are available through an explicit test profile. They are not the normal no-port workflow.
+
+## Quickstart
+
+After building Parcela and completing host setup, add a `parcela.yaml` to your project. This minimal example runs Python's HTTP server and requires Python 3:
+
+```yaml
+version: 1
+project:
+  id: notes
+  name: notes
+
+default_service: web
+services:
+  web:
+    readiness_path: /
+
+process_compose:
+  version: "0.5"
+  processes:
+    web:
+      command: 'python3 -m http.server "${PORT}" --bind 127.0.0.1'
+```
+
+Validate the configuration and adopt the checkout explicitly:
+
+```sh
+parcela config check
 parcela workspace adopt --role primary --label primary
-parcela proxy run                 # separate foreground front door, prerequisites required
-parcela up --detach              # or foreground up / run -- your-command --literal-argument
-parcela task test -- unit
+```
+
+If the dedicated front door is already running, check it with `parcela proxy status`. Otherwise, run it in a separate terminal with the profile selected during host setup.
+
+For direct standard-port listeners:
+
+```sh
+parcela proxy run
+```
+
+For an explicitly configured macOS forwarding setup:
+
+```sh
+parcela proxy run --forwarded-standard-ports --http-port 8080 --https-port 8443
+```
+
+Then start the environment and inspect it:
+
+```sh
+parcela up --detach
 parcela status --human
 parcela services --human
+parcela url
 parcela logs web --tail 100
-parcela restart --detach
-parcela down
-parcela workspace discover --human
-parcela status --all --human
 ```
 
-`run/up` do not perform preparation or install anything. Each command must consume its assigned endpoint and paths. Core context is routing-only until the project binds its resources. Foreground child output passes through. Inspection and detached startup print JSON by default; `--human` selects readable inventory/status/service tables. `url` and `logs` print plain text. Diagnostics use stderr.
+With the standard front door configured, this project's URL is `https://notes.localhost`. `up` stays in the foreground by default. `--detach` returns only after the live owner reports readiness.
 
-Control works only for runtimes launched by this build. Older owners without a control socket and interrupted runs report unknown ownership and refuse stop/restart. This does not authorize an upgrade to take over existing services. Detached owner output is in the private runtime `log/owner.log`; it is not a boot service.
+When you finish:
 
-State defaults to `PARCELA_STATE_DIR`, `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`; `--state-dir` overrides them. Existing state must be private and user-owned. A short state path is needed for Unix socket limits.
+```sh
+parcela down
+```
 
-## Explicit macOS standard-port setup
+Stopping preserves source and data. Preparation, migrations, and resets are never an implicit part of `up`. The [configuration reference](docs/configuration.md) covers workers, tasks, environment bindings, and preview adoption.
 
-`scripts/setup_macos.py` is an operator-only helper, never called by normal commands. It configures a guarded loopback PF anchor/boot job and trusts the specified Parcela CA. Caddy remains unprivileged, with an explicitly configured `--forwarded-standard-ports --http-port 8080 --https-port 8443` profile. This preserves canonical port-free URLs and verifies the port-80 router marker before application startup. The helper requires an already running owned front door and root authorization; it refuses incompatible root rules or occupied listeners. Review its prerequisites before using it on another host.
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `up [--detach]` | Start the current environment through Process Compose. |
+| `run -- COMMAND...` | Run a literal command that consumes its assigned endpoint. |
+| `down` or `stop` | Stop the selected owned environment and preserve its data. |
+| `restart [--detach]` | Preflight a replacement, then restart the whole graph in a new generation. |
+| `recover [--detach]` | Reattach to a proven surviving native graph without replaying services. |
+| `status [--all] [--human]` | Inspect live ownership and health, separately from recorded intent. |
+| `services [--human]` | Inspect the native service graph. |
+| `logs [SERVICE] --tail N` | Print a bounded log tail. |
+| `url` | Print the reserved URL, not a guarantee that it is reachable. |
+| `task NAME -- ARGS` | Run a finite command defined by the project. |
+| `workspace discover [--human]` | Discover sibling jj or Git checkouts without adopting or editing them. |
+| `transfer` | Plan, capture, verify, or restore explicit paused checkpoints, not active execution handoff. |
+| `doctor` | Report capabilities and optionally probe supplied backend versions. |
+
+Use `--path DIR` for an existing checkout or `--workspace UUID` for an adopted environment. Inspection does not start services. `url` and `logs` print plain text, while diagnostics go to stderr.
+
+## How it works
+
+Parcela coordinates maintained backends rather than implementing another proxy or supervisor.
+
+| Component | Owns |
+| --- | --- |
+| **Parcela, written in Rust** | Configuration, workspace identity, registry, endpoint ownership, and lifecycle coordination. |
+| **Caddy** | HTTP routing, TLS, and the dedicated front door. |
+| **Process Compose** | Service graphs, dependencies, supervision, and native shutdown. |
+| **Your project** | Commands, writable resources, preparation, and external-effects policy. |
+
+The registry is private and user-owned. State defaults to `PARCELA_STATE_DIR`, then `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`. `--state-dir` overrides those locations. Detached owner output goes to the environment's private `log/owner.log`.
+
+### Safety boundaries
+
+- Loopback only by default. Tenant routing and sharing are off.
+- One routed HTTP service per environment today. Put non-routed workers in the native graph.
+- Stop and recovery require qualified ownership evidence. A saved PID alone never authorizes signaling.
+- Unknown launch evidence retains ownership instead of triggering cleanup or command replay.
+- Private runtime paths do not automatically isolate your database, uploads, credentials, or external effects. The project must bind those resources explicitly.
+- Existing or legacy services are not implicitly adopted by a newer build.
+
+## Project status
+
+Current source passes static checks and actual backend acceptance on macOS and Linux, including crash, retry, stop, route-lease, and recovery cases. The [implementation notes](docs/implementation.md#lifecycle-recovery-verification-2026-10-13) record the tested revisions, results, and limits.
+
+Still incomplete or unverified:
+
+- Automatic reconciliation when launch evidence is missing.
+- Concurrent startup and restart, immutable launch snapshots, stale successor cleanup, and reboot recovery.
+- Interactive attach, following logs, per-service restart, sharing, aliases, and tenant routing.
+- Active agent continuation, complete Mac-to-Linux-to-Mac handoff, and general data-isolation certification.
+- Release packaging and an independent review of the current lifecycle stack.
+
+Parcela is not published to crates.io. A distribution license has not been selected. Passing disposable tests does not prove that an installed host's listeners, forwarding, and trust are configured correctly.
+
+## Development and verification
+
+```sh
+scripts/check
+
+scripts/check-live \
+  --caddy /path/to/caddy \
+  --process-compose /path/to/process-compose
+
+scripts/check-recovery \
+  --caddy /path/to/caddy \
+  --compose /path/to/process-compose \
+  --output /path/to/recovery-report.json
+```
+
+`scripts/check` runs formatting, Clippy, Rust tests, Python tests, and schema checks. Live and recovery checks use disposable source and state, explicit test ports, and a disposable CA without changing system trust.
+
+The opt-in [Shirabe replica check](docs/check-portable-shirabe.md) covers paused destination acceptance. That result is not proof of active environment handoff.
 
 ## Documentation
 
-- [PRD](docs/PRD.md): release goals, not implemented-feature claims.
-- [Implementation status](docs/implementation.md): verification and remaining gaps.
-- [Configuration and CLI](docs/configuration.md): executable contract.
-- [Architecture](docs/architecture.md): ownership and backend boundaries.
-- [Transfer commands](docs/transfer.md): paused snapshots, not active-work handoff.
-- [Portable environments](docs/portable-environments.md): selected handoff contract.
-- [Paused Shirabe replica check](docs/check-portable-shirabe.md): opt-in Linux destination acceptance.
+- [Configuration and CLI](docs/configuration.md) contains the executable manifest and command contract.
+- [Implementation status](docs/implementation.md) records verified behavior and remaining gaps.
+- [Architecture](docs/architecture.md) describes ownership and backend boundaries.
+- [Transfer commands](docs/transfer.md) cover paused capture, integrity checks, and restore.
+- [Portable environments](docs/portable-environments.md) defines the intended handoff contract.
+- [PRD](docs/PRD.md) lists release goals, not shipped-feature claims.
