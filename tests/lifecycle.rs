@@ -350,3 +350,72 @@ fn contending_stop(replace_session: bool) {
         assert_eq!(current.token, session.token);
     }
 }
+
+#[test]
+fn waiting_stop_reaches_the_recovered_same_generation_controller() {
+    use parcela::owner::{Phase, Record};
+    use std::time::Instant;
+
+    let (_temp, mut registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    private::directory(&path).unwrap();
+    let lock = private::Lock::acquire(&path.join("owner.lock")).unwrap();
+    let control = Server::bind(&path).unwrap();
+    let mut child = process::OwnedChild::spawn(Command::new("sleep").arg("60")).unwrap();
+    let identity = process::Identity::read(child.id()).unwrap().unwrap();
+    child.stop(libc::SIGTERM).unwrap();
+    let mut record = Record {
+        session: session.clone(),
+        phase: Phase::Starting,
+        owner: process::Identity::read(std::process::id()).unwrap().unwrap(),
+        lock: lock.identity().unwrap(),
+        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        supervisor: identity.clone(),
+        processes: vec![identity],
+        native: None,
+        manifest: serde_saphyr::from_str(
+            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        )
+        .unwrap(),
+        diagnostic: None,
+    };
+    record.save(&path).unwrap();
+    let state = registry.state_path().to_path_buf();
+    let expected = session.clone();
+    let owner = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let admitted = loop {
+            if let Some(pending) = control.receive(&expected).unwrap() {
+                assert!(matches!(pending.action, Action::Stop));
+                record.phase = Phase::Stopping;
+                record.save(&path).unwrap();
+                let mut writer = Registry::open(&state, true).unwrap().unwrap();
+                writer.session_status(&expected, "stopping").unwrap();
+                pending
+                    .reply(&expected, Ok(serde_json::json!({"stop_accepted":true})))
+                    .unwrap();
+                record.phase = Phase::Stopped;
+                record.save(&path).unwrap();
+                writer.session_status(&expected, "stopped").unwrap();
+                break true;
+            }
+            if Instant::now() >= deadline {
+                break false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        drop(control);
+        drop(lock);
+        admitted
+    });
+    let result = parcela::runtime::recover(&mut registry, &workspace, &session, true);
+    assert!(
+        owner.join().unwrap(),
+        "stop never reached the recovered controller"
+    );
+    assert_eq!(result.unwrap()["state"], "stopped");
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().token,
+        session.token
+    );
+}

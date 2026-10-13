@@ -36,12 +36,15 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(1)
             return
         data = json.dumps({'id': os.environ['PARCELA_ENVIRONMENT_ID'], 'pid': os.getpid(), 'generation': os.environ['PARCELA_GENERATION']}).encode()
-        self.send_response(200)
+        gated = self.path == '/ready' and os.environ.get('READINESS_GATED') == 'yes' and not (root / 'allow-ready').exists()
+        self.send_response(503 if gated else 200)
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
     def log_message(self, *_): pass
-ThreadingHTTPServer(('127.0.0.1', int(os.environ['PORT'])), Handler).serve_forever()
+server = ThreadingHTTPServer(('127.0.0.1', int(os.environ['PORT'])), Handler)
+(root / 'service-started').write_text(str(os.getpid()))
+server.serve_forever()
 '''
 
 def free_port(exclude=()):
@@ -121,6 +124,35 @@ class Fixture:
         app['owner'] = owner
         wait_for(lambda: self.request(app)[0] == 200)
         return owner
+    def start_pending(self, app):
+        app['manifest']['environment']['READINESS_GATED'] = 'yes'
+        (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
+        owner = self.spawn(app['path'], 'up', '--process-compose', self.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '30')
+        app['owner'] = owner
+        def recorded():
+            pid = int((app['runtime'] / 'service-started').read_text())
+            record = json.loads((app['runtime'] / 'owner.json').read_text())
+            return record['phase'] == 'starting' and record['native']['socket'] and any(process['pid'] == pid for process in record['processes'])
+        wait_for(recorded)
+        assert self.session(app)['status'] == 'starting'
+        assert self.request(app)[0] == 503
+        return owner
+    def gated_compose(self):
+        wrapper = self.root / 'pc-gate'
+        wrapper.write_text('''#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+root = Path(__file__).parent
+if sys.argv[-1] == 'down':
+    with (root / 'native-stops').open('a') as log:
+        log.write('down\\n')
+if 'list' in sys.argv and (root / 'gate-enabled').exists():
+    (root / 'gate-entered').write_text('entered')
+    time.sleep(1)
+os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + ''', *sys.argv[1:]])
+''')
+        wrapper.chmod(0o700)
+        return str(wrapper)
     def session(self, app):
         with sqlite3.connect(f'file:{self.state / "registry.sqlite3"}?mode=ro', uri=True) as db:
             db.row_factory = sqlite3.Row
@@ -369,20 +401,7 @@ def ongoing_stop_retry(f):
 
 def concurrent_crash_stop(f):
     app = f.app('election', delay=2)
-    wrapper = f.root / 'pc-gate'
-    wrapper.write_text('''#!/usr/bin/env python3
-import os, sys, time
-from pathlib import Path
-root = Path(__file__).parent
-if sys.argv[-1] == 'down':
-    with (root / 'native-stops').open('a') as log:
-        log.write('down\\n')
-if 'list' in sys.argv and (root / 'gate-enabled').exists():
-    (root / 'gate-entered').write_text('entered')
-    time.sleep(1)
-os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *sys.argv[1:]])
-''')
-    wrapper.chmod(0o700)
+    wrapper = f.gated_compose()
     f.start_proxy()
     owner = f.start(app, str(wrapper))
     session = f.session(app)
@@ -404,6 +423,112 @@ os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *s
     assert not listening(app['port'])
     assert (f.root / 'native-stops').read_text().splitlines() == ['down'], 'only the elected controller may request native shutdown'
     return {'first_recovery_exit': first_code, 'contending_recovery_exit': second_code, 'same_generation_stopped': True, 'native_stop_requests': 1}
+
+
+def recover_before_readiness(f):
+    app = f.app('pending')
+    f.start_proxy()
+    owner = f.start_pending(app)
+    session = f.session(app)
+    pid = int((app['runtime'] / 'service-started').read_text())
+    owner.kill()
+    owner.wait(timeout=5)
+    recovered = f.spawn(app['path'], 'recover')
+    def starting_owner():
+        status = f.cli(app['path'], 'status')
+        live = json.loads(status.stdout).get('live')
+        return live and live['owner_pid'] == recovered.pid and live['state'] == 'starting'
+    wait_for(starting_owner)
+    assert f.request(app)[0] == 503, 'recovery must not advertise an unready service'
+    (app['runtime'] / 'allow-ready').write_text('ready')
+    wait_for(lambda: f.request(app)[0] == 200)
+    assert json.loads(f.request(app)[1])['pid'] == pid, 'recovery must not replay the native service'
+    assert f.session(app)['token'] == session['token']
+    return {'pre_readiness_controller_recovered': True, 'unready_route': 503, 'service_pid_preserved': True}
+
+
+def stop_before_readiness(f):
+    app = f.app('pending-stop')
+    f.start_proxy()
+    owner = f.start_pending(app)
+    session = f.session(app)
+    owner.kill()
+    owner.wait(timeout=5)
+    down = f.cli(app['path'], 'down')
+    assert down.returncode == 0, down.stderr
+    assert f.session(app)['status'] == 'stopped'
+    assert f.session(app)['token'] == session['token']
+    assert (app['runtime'] / 'shutdown-completed').exists()
+    assert not listening(app['port'])
+    assert f.request(app)[0] == 503
+    return {'pre_readiness_stop_exit': 0, 'shutdown_completed': True, 'generation_preserved': True}
+
+
+def allocation_without_launch_evidence(f):
+    app = f.app('allocation')
+    marker = app['path'] / 'owned-source-data'
+    marker.write_text('preserve allocation fixture')
+    wrapper = f.root / 'pc-allocation-gate'
+    wrapper.write_text('''#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+root = Path(__file__).parent
+if sys.argv[1:] == ['version'] and Path(''' + repr(str(app['runtime'] / 'context.json')) + ''').exists() and (root / 'gate-enabled').exists():
+    (root / 'gate-entered').write_text('before graph launch')
+    deadline = time.monotonic() + 2
+    while (root / 'gate-enabled').exists() and time.monotonic() < deadline:
+        time.sleep(.01)
+os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *sys.argv[1:]])
+''')
+    wrapper.chmod(0o700)
+    f.start_proxy()
+    (f.root / 'gate-enabled').write_text('enabled')
+    owner = f.spawn(app['path'], 'up', '--process-compose', str(wrapper), '--backend-port', str(app['port']))
+    wait_for(lambda: (f.root / 'gate-entered').exists())
+    session = f.session(app)
+    assert session['status'] == 'starting' and not (app['runtime'] / 'owner.json').exists()
+    owner.kill()
+    owner.wait(timeout=5)
+    (f.root / 'gate-enabled').unlink()
+    down = f.cli(app['path'], 'down')
+    assert down.returncode != 0, 'missing launch evidence must not authorize lease release'
+    retry = f.cli(app['path'], 'up', '--process-compose', str(wrapper), '--backend-port', str(app['port']))
+    assert retry.returncode != 0, 'uncertain allocation must not be silently replayed'
+    assert f.session(app)['token'] == session['token'] and f.session(app)['status'] == 'starting'
+    assert marker.read_text() == 'preserve allocation fixture'
+    assert not (app['runtime'] / 'pc.sock').exists() and not listening(app['port'])
+    assert f.request(app)[0] == 503
+    return {'unknown_allocation_refused': True, 'lease_retained': True, 'source_data_preserved': True}
+
+
+def recover_racing_stop(f):
+    app = f.app('mixed')
+    app['manifest']['shutdown_timeout_seconds'] = 4
+    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
+    wrapper = f.gated_compose()
+    f.start_proxy()
+    owner = f.start(app, wrapper)
+    session = f.session(app)
+    pid = (app['runtime'] / 'service-started').read_text()
+    owner.kill()
+    owner.wait(timeout=5)
+    (f.root / 'gate-enabled').write_text('enabled')
+    recovered = f.spawn(app['path'], 'recover')
+    wait_for(lambda: (f.root / 'gate-entered').exists())
+    stopper = f.spawn(app['path'], 'down')
+    try:
+        stop_code = stopper.wait(timeout=10)
+        stop_log = (f.root / f'child-{f.owners.index(stopper)}.log').read_text()
+        assert stop_code == 0, stop_log
+        assert recovered.wait(timeout=5) == 0
+        assert f.session(app)['status'] == 'stopped'
+        assert f.session(app)['token'] == session['token']
+        assert (app['runtime'] / 'service-started').read_text() == pid
+        assert (f.root / 'native-stops').read_text().splitlines() == ['down']
+        assert not listening(app['port'])
+    finally:
+        (f.root / 'gate-enabled').unlink()
+    return {'mixed_stop_exit': 0, 'recovery_controller_exit': 0, 'native_stop_requests': 1, 'no_service_replay': True}
 
 
 def completed_stop_receipt(f):
@@ -501,7 +626,8 @@ def long_stream_lease(f):
 
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
-         replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop]
+         replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
+         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop]
 
 
 def main():
