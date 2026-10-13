@@ -40,7 +40,7 @@ pub struct Project {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Service {
-    /// Optional explicit subdomain for non-default services.
+    /// Optional flat hostname prefix for non-default services.
     pub subdomain: Option<String>,
     #[serde(default = "root_path")]
     pub readiness_path: String,
@@ -180,6 +180,25 @@ impl Manifest {
             policy.validate(self)?;
         }
         Ok(())
+    }
+
+    pub fn service_hosts(&self, base: &str) -> Result<BTreeMap<String, String>> {
+        let base = base
+            .strip_suffix(".localhost")
+            .context("invalid environment hostname")?;
+        dns_label(base)?;
+        self.services
+            .iter()
+            .map(|(name, service)| {
+                let label = if name == &self.default_service {
+                    base.to_owned()
+                } else {
+                    format!("{}-{base}", service.subdomain.as_deref().unwrap_or(name))
+                };
+                dns_label(&label)?;
+                Ok((name.clone(), format!("{label}.localhost")))
+            })
+            .collect()
     }
 
     pub fn hostname(&self, primary: bool, label: &str) -> Result<String> {

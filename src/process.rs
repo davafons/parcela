@@ -241,8 +241,15 @@ pub fn listener_identity(port: u16, owner: u32) -> Result<Vec<u32>> {
                 name == format!("127.0.0.1:{port}"),
                 "backend must listen only on 127.0.0.1:{port}, found {name}"
             );
+            let Some(identity) = Identity::read(pid)? else {
+                continue;
+            };
+            let owned = descendant(pid, owner)?;
+            if !identity.alive() {
+                continue;
+            }
             ensure!(
-                descendant(pid, owner)?,
+                owned,
                 "allocated endpoint was acquired by a foreign listener; refusing route registration"
             );
             found.push(pid);

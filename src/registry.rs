@@ -10,7 +10,9 @@ use std::{
 };
 use uuid::Uuid;
 
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
+const SESSION_COLUMNS: &str =
+    "environment_id, token, router_token, generation, backend_port, status, kind, public_url";
 const COLUMNS: &str = "id, project_id, source, role, label, hostname, generation, vcs";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
@@ -145,7 +147,7 @@ impl Registry {
                     PRAGMA user_version = 1;")?;
             } else {
                 ensure!(
-                    version == 1 || version == VERSION,
+                    (1..=VERSION).contains(&version),
                     "unsupported registry schema {version}; no changes made"
                 );
             }
@@ -158,11 +160,20 @@ impl Registry {
                     CREATE UNIQUE INDEX active_port ON sessions(backend_port) WHERE status != 'stopped';
                     PRAGMA user_version = 2;")?;
             }
+            if version <= 2 {
+                transaction.execute_batch("ALTER TABLE sessions ADD COLUMN endpoints TEXT NOT NULL DEFAULT '[]';
+                    CREATE TABLE workspace_hosts (hostname TEXT PRIMARY KEY, environment_id TEXT NOT NULL REFERENCES workspaces(id), service TEXT NOT NULL, UNIQUE(environment_id, service));
+                    INSERT INTO workspace_hosts SELECT hostname, id, '' FROM workspaces;
+                    CREATE TABLE active_ports (port INTEGER PRIMARY KEY CHECK(port >= 1024 AND port <= 65535), environment_id TEXT NOT NULL REFERENCES sessions(environment_id));
+                    INSERT INTO active_ports SELECT backend_port, environment_id FROM sessions WHERE status != 'stopped';
+                    DROP INDEX active_port;
+                    PRAGMA user_version = 3;")?;
+            }
             transaction.commit()?;
         } else {
             let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
             ensure!(
-                version == 1 || version == VERSION,
+                (1..=VERSION).contains(&version),
                 "unsupported registry schema {version}"
             );
         }
@@ -249,6 +260,38 @@ impl Registry {
                 .context("workspace conflict: source, label, primary role or hostname is already owned; no ownership was changed")?;
             workspace
         };
+        let hosts = manifest.service_hosts(&workspace.hostname)?;
+        let old_hosts = {
+            let mut query = transaction
+                .prepare("SELECT service, hostname FROM workspace_hosts WHERE environment_id=?1")?;
+            query
+                .query_map([&workspace.id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()?
+        };
+        if old_hosts != hosts {
+            let active: bool = transaction.query_row("SELECT EXISTS(SELECT 1 FROM sessions WHERE environment_id=?1 AND status != 'stopped')", [&workspace.id], |row| row.get(0))?;
+            ensure!(
+                !active
+                    || (old_hosts.len() == 1
+                        && old_hosts.get("") == Some(&workspace.hostname)
+                        && hosts.len() == 1),
+                "service hostname changes require a stopped environment and explicit adoption"
+            );
+            transaction.execute(
+                "DELETE FROM workspace_hosts WHERE environment_id=?1",
+                [&workspace.id],
+            )?;
+            for (service, host) in hosts {
+                transaction
+                    .execute(
+                        "INSERT INTO workspace_hosts VALUES (?1,?2,?3)",
+                        params![host, workspace.id, service],
+                    )
+                    .context("service hostname already reserved; no ownership was changed")?;
+            }
+        }
         transaction.commit()?;
         Ok(workspace)
     }
@@ -287,24 +330,60 @@ impl Registry {
         &self.state
     }
 
-    pub fn session(&self, environment: &str) -> Result<Option<Session>> {
-        let version: i64 = self
+    fn version(&self) -> Result<i64> {
+        Ok(self
             .connection
-            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+            .pragma_query_value(None, "user_version", |r| r.get(0))?)
+    }
+
+    pub fn hosts(&self, environment: &str) -> Result<std::collections::BTreeMap<String, String>> {
+        if self.version()? < 3 {
+            let host = self.connection.query_row(
+                "SELECT hostname FROM workspaces WHERE id=?1",
+                [environment],
+                |row| row.get::<_, String>(0),
+            )?;
+            return Ok(std::collections::BTreeMap::from([(String::new(), host)]));
+        }
+        let mut query = self.connection.prepare("SELECT service, hostname FROM workspace_hosts WHERE environment_id=?1 ORDER BY service")?;
+        Ok(query
+            .query_map([environment], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn session(&self, environment: &str) -> Result<Option<Session>> {
+        let version = self.version()?;
         if version == 1 {
             return Ok(None);
         }
-        Ok(self.connection.query_row("SELECT environment_id, token, router_token, generation, backend_port, status, kind, public_url FROM sessions WHERE environment_id = ?1", [environment], read_session).optional()?)
+        let extra = if version >= 3 {
+            ", endpoints"
+        } else {
+            ", '[]'"
+        };
+        Ok(self
+            .connection
+            .query_row(
+                &format!("SELECT {SESSION_COLUMNS}{extra} FROM sessions WHERE environment_id=?1"),
+                [environment],
+                read_session,
+            )
+            .optional()?)
     }
 
     pub fn sessions(&self) -> Result<Vec<Session>> {
-        let version: i64 = self
-            .connection
-            .pragma_query_value(None, "user_version", |r| r.get(0))?;
+        let version = self.version()?;
         if version == 1 {
             return Ok(Vec::new());
         }
-        let mut statement = self.connection.prepare("SELECT environment_id, token, router_token, generation, backend_port, status, kind, public_url FROM sessions ORDER BY environment_id")?;
+        let extra = if version >= 3 {
+            ", endpoints"
+        } else {
+            ", '[]'"
+        };
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT {SESSION_COLUMNS}{extra} FROM sessions ORDER BY environment_id"
+        ))?;
         Ok(statement
             .query_map([], read_session)?
             .collect::<rusqlite::Result<_>>()?)
@@ -318,9 +397,57 @@ impl Registry {
         kind: &str,
         public_url: &str,
     ) -> Result<Session> {
+        self.begin_endpoints(workspace, router_token, port, kind, public_url, &[])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_endpoints(
+        &mut self,
+        workspace: &Workspace,
+        router_token: &str,
+        port: u16,
+        kind: &str,
+        public_url: &str,
+        endpoints: &[Endpoint],
+    ) -> Result<Session> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let reserved = {
+            let mut query = transaction
+                .prepare("SELECT service, hostname FROM workspace_hosts WHERE environment_id=?1")?;
+            query
+                .query_map([&workspace.id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()?
+        };
+        let mut ports = std::collections::BTreeSet::from([port]);
+        if !endpoints.is_empty() {
+            ensure!(
+                endpoints
+                    .iter()
+                    .any(|endpoint| endpoint.backend_port == port
+                        && endpoint.public_url == public_url
+                        && endpoint.hostname == workspace.hostname),
+                "default endpoint aliases do not match"
+            );
+            ports.clear();
+            let mut services = std::collections::BTreeSet::new();
+            for endpoint in endpoints {
+                endpoint.validate()?;
+                ensure!(
+                    reserved.get(&endpoint.service) == Some(&endpoint.hostname)
+                        || (endpoints.len() == 1 && reserved.get("") == Some(&endpoint.hostname)),
+                    "service hostname not reserved; explicitly re-adopt the stopped environment"
+                );
+                ensure!(
+                    ports.insert(endpoint.backend_port) && services.insert(&endpoint.service),
+                    "duplicate service or backend endpoint"
+                );
+            }
+        }
+        ensure!(port >= 1024, "backend endpoint must be unprivileged");
         let previous: Option<String> = transaction
             .query_row(
                 "SELECT status FROM sessions WHERE environment_id=?1",
@@ -350,11 +477,24 @@ impl Registry {
             status: "starting".into(),
             kind: kind.into(),
             public_url: public_url.into(),
+            endpoints: endpoints.to_vec(),
         };
-        transaction.execute("INSERT INTO sessions (environment_id, token, router_token, generation, backend_port, status, kind, public_url) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
-            ON CONFLICT(environment_id) DO UPDATE SET token=excluded.token, router_token=excluded.router_token, generation=excluded.generation, backend_port=excluded.backend_port, status=excluded.status, kind=excluded.kind, public_url=excluded.public_url WHERE sessions.status='stopped'",
-            params![session.environment_id, session.token, session.router_token, session.generation, port, session.status, kind, public_url])
+        transaction.execute("INSERT INTO sessions (environment_id, token, router_token, generation, backend_port, status, kind, public_url, endpoints) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+            ON CONFLICT(environment_id) DO UPDATE SET token=excluded.token, router_token=excluded.router_token, generation=excluded.generation, backend_port=excluded.backend_port, status=excluded.status, kind=excluded.kind, public_url=excluded.public_url, endpoints=excluded.endpoints WHERE sessions.status='stopped'",
+            params![session.environment_id, session.token, session.router_token, session.generation, port, session.status, kind, public_url, serde_json::to_string(endpoints)?])
             .context("endpoint lease conflict; no foreign listener was changed")?;
+        transaction.execute(
+            "DELETE FROM active_ports WHERE environment_id=?1",
+            [&workspace.id],
+        )?;
+        for port in ports {
+            transaction
+                .execute(
+                    "INSERT INTO active_ports VALUES (?1,?2)",
+                    params![port, workspace.id],
+                )
+                .context("endpoint lease conflict; no foreign listener was changed")?;
+        }
         transaction.commit()?;
         Ok(session)
     }
@@ -364,8 +504,11 @@ impl Registry {
             ["starting", "ready", "stopping", "stopped", "interrupted"].contains(&status),
             "invalid session transition"
         );
-        let changed = self.connection.execute(
-            "UPDATE sessions SET status=?1 WHERE environment_id=?2 AND token=?3 AND generation=?4",
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
+            "UPDATE sessions SET status=?1 WHERE environment_id=?2 AND token=?3 AND generation=?4 AND (status != 'stopped' OR ?1 = 'stopped')",
             params![
                 status,
                 session.environment_id,
@@ -377,6 +520,13 @@ impl Registry {
             changed == 1,
             "session ownership changed; refusing stale update"
         );
+        if status == "stopped" {
+            transaction.execute(
+                "DELETE FROM active_ports WHERE environment_id=?1",
+                [&session.environment_id],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -422,6 +572,41 @@ fn read_workspace(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Endpoint {
+    pub service: String,
+    pub hostname: String,
+    pub backend_port: u16,
+    pub public_url: String,
+}
+impl Endpoint {
+    pub fn validate(&self) -> Result<()> {
+        crate::config::dns_label(&self.service)?;
+        crate::config::dns_label(
+            self.hostname
+                .strip_suffix(".localhost")
+                .context("invalid service hostname")?,
+        )?;
+        ensure!(
+            self.backend_port >= 1024,
+            "backend endpoint must be unprivileged"
+        );
+        let tail = self
+            .public_url
+            .strip_prefix(&format!("https://{}", self.hostname))
+            .context("invalid service URL")?;
+        ensure!(
+            tail.is_empty()
+                || tail
+                    .strip_prefix(':')
+                    .is_some_and(|port| port.parse::<u16>().is_ok_and(|port| port > 0)),
+            "invalid service URL port"
+        );
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub environment_id: String,
@@ -432,6 +617,38 @@ pub struct Session {
     pub status: String,
     pub kind: String,
     pub public_url: String,
+    #[serde(default)]
+    pub endpoints: Vec<Endpoint>,
+}
+impl Session {
+    pub fn endpoints(&self, default_service: &str) -> Vec<Endpoint> {
+        if self.endpoints.is_empty() {
+            vec![Endpoint {
+                service: default_service.into(),
+                hostname: self
+                    .public_url
+                    .trim_start_matches("https://")
+                    .split(':')
+                    .next()
+                    .unwrap_or_default()
+                    .into(),
+                backend_port: self.backend_port,
+                public_url: self.public_url.clone(),
+            }]
+        } else {
+            self.endpoints.clone()
+        }
+    }
+    pub fn ports(&self) -> Vec<u16> {
+        if self.endpoints.is_empty() {
+            vec![self.backend_port]
+        } else {
+            self.endpoints
+                .iter()
+                .map(|endpoint| endpoint.backend_port)
+                .collect()
+        }
+    }
 }
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     let session = Session {
@@ -443,6 +660,8 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         status: row.get(5)?,
         kind: row.get(6)?,
         public_url: row.get(7)?,
+        endpoints: serde_json::from_str(&row.get::<_, String>(8)?)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
     };
     if [
         &session.environment_id,
@@ -455,6 +674,29 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         || !["starting", "ready", "stopping", "stopped", "interrupted"]
             .contains(&session.status.as_str())
         || session.backend_port < 1024
+        || session
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint.validate().is_err())
+        || session
+            .endpoints
+            .iter()
+            .map(|endpoint| &endpoint.service)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != session.endpoints.len()
+        || session
+            .endpoints
+            .iter()
+            .map(|endpoint| endpoint.backend_port)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != session.endpoints.len()
+        || (!session.endpoints.is_empty()
+            && !session.endpoints.iter().any(|endpoint| {
+                endpoint.backend_port == session.backend_port
+                    && endpoint.public_url == session.public_url
+            }))
     {
         return Err(rusqlite::Error::InvalidQuery);
     }
