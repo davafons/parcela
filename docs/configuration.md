@@ -75,6 +75,7 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 
 | Command | Behavior |
 |---|---|
+| `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
 | `config check` | Strict organizer validation, no state creation |
 | `workspace adopt --role primary\|preview --label LABEL` | Explicit source identity and hostname reservation |
 | `workspace list [--all] [--human]` | Registered inventory plus live owner probes, scoped to the current project or explicit machine-wide view |
@@ -95,6 +96,8 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
 | `status [--all] [--human]` | Live owner/loopback HTTP/router probes, with durable intent reported separately; explicit machine-wide view works outside a project |
 | `doctor [--caddy PATH] [--process-compose PATH]` | Capability report plus requested bounded version probes |
+
+`--skill` is a long-flag alias for the `skill` subcommand. It runs before workspace lookup and cannot be combined with a lifecycle command. Its output is the bundled `.agents/skills/parcela/SKILL.md`, not generated from the current project. An agent can load this output directly; no global profile installation runs.
 
 Inspection and detached startup print JSON by default. `--human` selects inventory/status/service tables. `url` and `logs` print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, bulk stop, arbitrary persisted-PID signaling, or replay of an uncertain command.
 

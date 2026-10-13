@@ -17,15 +17,21 @@ def main():
     parser.add_argument('--caddy', required=True)
     parser.add_argument('--process-compose', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--agent-recipe', action='store_true', help='Exercise the operating skill workflow, including UUID targets and explicit tasks')
     args = parser.parse_args()
     root = Path(tempfile.mkdtemp(prefix='pc-set-', dir='/tmp')).resolve()
     state = root / 'state'
     https, http = free_port(), free_port()
-    report = {'complete': False, 'root': str(root), 'front_ports': [https, http], 'cases': []}
+    report = {'complete': False, 'agent_recipe': args.agent_recipe, 'root': str(root), 'front_ports': [https, http], 'cases': []}
     children, handles, sources, ports = [], [], [], []
 
     def cli(path, *argv, check=True, timeout=20):
-        return subprocess.run([str(BINARY), '--path', str(path), '--state-dir', str(state), *argv],
+        target = ['--path', str(path)]
+        if args.agent_recipe and argv and argv[0] in {'status', 'services', 'url', 'logs', 'restart', 'recover', 'down', 'task'}:
+            workspace = next((workspace for source, workspace in sources if source == path), None)
+            if workspace:
+                target = ['--workspace', workspace['id']]
+        return subprocess.run([str(BINARY), *target, '--state-dir', str(state), *argv],
                               capture_output=True, text=True, check=check, timeout=timeout)
 
     def spawn(path, *argv):
@@ -71,6 +77,10 @@ default_service: frontend
 services:
   frontend: {{readiness_path: /ready}}
   backend: {{subdomain: api, readiness_path: /ready}}
+tasks:
+  probe:
+    argv: [python3, -c, 'import json,sys;print(json.dumps(sys.argv[1:]))']
+    timeout_seconds: 5
 environment:
   API_ORIGIN: '${{PARCELA_SERVICE_BACKEND_URL}}'
 process_compose:
@@ -91,6 +101,14 @@ process_compose:
             sources.append((source, workspace))
         primary, workspace = sources[0]
         preview, _ = sources[1]
+        if args.agent_recipe:
+            assert json.loads(cli(primary, 'config', 'check').stdout)['valid']
+            context = json.loads(cli(primary, 'context').stdout)
+            assert context['workspace']['id'] == workspace['id'] and context['workspace']['role'] == 'primary'
+            assert set(context['planned_urls']) == {'frontend', 'backend'}
+            inventory = json.loads(cli(root, 'workspace', 'list', '--all').stdout)['workspaces']
+            assert {row['workspace']['id'] for row in inventory} == {entry['id'] for _, entry in sources}
+            assert status(primary)['state'] == 'stopped'
         proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--test-profile', '--https-port', str(https), '--http-port', str(http))
         wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
         environments = state / 'environments'
@@ -128,6 +146,11 @@ process_compose:
         assert {entry['name']: entry['status'] for entry in services} == {'frontend': 'Running', 'backend': 'Running', 'worker': 'Running'}, services
         assert cli(primary, 'url', '--service', 'backend').stdout.strip() == f'https://api-sets.localhost:{https}'
         note('two-origins-one-generation-working-directories-and-worker')
+        if args.agent_recipe:
+            wait_for(lambda: 'service-set-worker' in cli(primary, 'logs', 'worker', '--tail', '10').stdout, [proxy])
+            assert json.loads(cli(primary, 'task', 'probe', '--', 'literal argument with spaces').stdout) == ['literal argument with spaces']
+            note('agent-context-inventory-uuid-health-logs-and-explicit-task')
+
         second = json.loads(cli(preview, 'up', '--detach', '--process-compose', args.process_compose).stdout)
         remember(second['session'])
         assert request('review-sets.localhost')['id'] != workspace['id']

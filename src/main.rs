@@ -32,6 +32,9 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Print the bundled agent operating skill without reading project or registry state.
+    #[command(long_flag = "skill")]
+    Skill,
     /// Validate organizer schema (not backend compatibility). Does not create state.
     Config {
         #[command(subcommand)]
@@ -358,7 +361,7 @@ fn inspect(cli: Cli) -> Result<()> {
             json(&serde_json::json!({
                 "implementation":"rust", "planned_architecture":{"http_tls":"managed Caddy","supervision":"managed Process Compose"},
                 "backend_probes":{"caddy":probe(caddy,"version"),"process_compose":probe(process_compose,"version")},
-                "supported":["config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, worktree service sets)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
+                "supported":["skill (--skill)","config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, worktree service sets)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
                 "unsupported":["automatic crash reconciliation","control of older ownerless runs","automatic backend installation","privilege/trust setup","sharing","boot service"],
                 "data_isolation_verified":false,"host_configuration_modified":false
             }))
@@ -538,6 +541,13 @@ fn inspect(cli: Cli) -> Result<()> {
     }
 }
 fn run(mut cli: Cli) -> Result<i32> {
+    if matches!(cli.command, Command::Skill) {
+        use std::io::Write;
+        std::io::stdout()
+            .lock()
+            .write_all(include_bytes!("../.agents/skills/parcela/SKILL.md"))?;
+        return Ok(0);
+    }
     if let Some(id) = cli.workspace {
         let state = state_dir(cli.state_dir.clone())?;
         let registry =

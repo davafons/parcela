@@ -151,8 +151,21 @@ Stopping preserves source and data. Preparation, migrations, and resets are neve
 | `workspace discover [--human]` | Discover sibling jj or Git checkouts without adopting or editing them. |
 | `transfer` | Plan, capture, verify, or restore explicit paused checkpoints, not active execution handoff. |
 | `doctor` | Report capabilities and optionally probe supplied backend versions. |
+| `--skill` / `skill` | Print the bundled agent operating skill without project or registry access. |
 
 Use `--path DIR` for an existing checkout or `--workspace UUID` for an adopted environment. Inspection does not start services. `url` and `logs` print plain text, while diagnostics go to stderr.
+
+## Teach an agent
+
+Print the operating skill from the binary the agent will use:
+
+```sh
+parcela --skill
+```
+
+`parcela skill` prints the same Markdown. Both commands work outside a configured checkout, without Caddy or Process Compose, and do not read or create registry state. Load the output into the agent's context. The source is [`.agents/skills/parcela/SKILL.md`](.agents/skills/parcela/SKILL.md).
+
+The skill covers explicit environment selection, JSON health, detached startup, service URLs/logs, whole-graph restart/stop, qualified recovery and project tasks. It does not grant permission for setup, data changes, host configuration or starting another environment. Parcela does not install the skill into a global agent profile automatically.
 
 ## How it works
 
@@ -170,7 +183,7 @@ The registry is private and user-owned. State defaults to `PARCELA_STATE_DIR`, t
 ### Safety boundaries
 
 - Loopback only by default. Tenant routing and sharing are off.
-- One routed HTTP service per environment today. Put non-routed workers in the native graph.
+- Declared HTTP services share one environment and native graph. Put non-routed workers in that graph without declaring an HTTP route.
 - Stop and recovery require qualified ownership evidence. A saved PID alone never authorizes signaling.
 - Unknown launch evidence retains ownership instead of triggering cleanup or command replay.
 - Private runtime paths do not automatically isolate your database, uploads, credentials, or external effects. The project must bind those resources explicitly.
