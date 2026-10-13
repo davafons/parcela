@@ -59,7 +59,7 @@ The driver copies only the three demo inputs into disposable primary and preview
 
 ## Publish the custom-domain site explicitly
 
-The publication target is `https://parcela.davafons.cc/docs/`. Cloudflare Workers serves static assets on a dedicated `parcela-docs` Worker in the `davafons` account. `docs/website/wrangler.jsonc` declares its account and custom domain. This deployment does not change repository visibility, the installed Parcela binary or a local Caddy instance.
+The publication target is `https://parcela.davafons.com/docs/`. Cloudflare Workers serves static assets on a dedicated `parcela-docs` Worker in the `davafons` account. `docs/website/wrangler.jsonc` declares its account and custom domain. This deployment does not change repository visibility, the installed Parcela binary or a local Caddy instance.
 
 Use authenticated Wrangler access to the selected account. The docs package pins Wrangler 4.150.0. Check the build without publishing:
 
@@ -67,7 +67,7 @@ Use authenticated Wrangler access to the selected account. The docs package pins
 npm run deploy --prefix docs/website -- --dry-run
 ```
 
-The command builds a new artifact directory under `target/docs-deployment-*`. It sets the canonical origin to `https://parcela.davafons.cc` and the base to `/docs/`. Only generated public site output enters the upload. The wrapper redirects `/` to `/docs/` and supplies a real 404 page. Each build uses a new directory, so removed pages cannot survive as stale deployment assets.
+The command builds a new artifact directory under `target/docs-deployment-*`. It sets the canonical origin to `https://parcela.davafons.com` and the base to `/docs/`. Only generated public site output enters the upload. The wrapper redirects `/` to `/docs/` and supplies a real 404 page. Each build uses a new directory, so removed pages cannot survive as stale deployment assets.
 
 After reviewing the public artifact and obtaining deployment authorization:
 

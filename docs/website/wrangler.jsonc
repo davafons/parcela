@@ -6,7 +6,10 @@
   "workers_dev": false,
   "preview_urls": false,
   "routes": [
-    { "pattern": "parcela.davafons.cc", "custom_domain": true }
+    {
+      "pattern": "parcela.davafons.com",
+      "custom_domain": true
+    }
   ],
   "assets": {
     "html_handling": "auto-trailing-slash",

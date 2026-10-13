@@ -15,7 +15,7 @@ const site = join(artifact, 'docs');
 execFileSync('npm', ['run', 'build'], {
   cwd: project,
   stdio: 'inherit',
-  env: { ...process.env, DOCS_SITE: 'https://parcela.davafons.cc', DOCS_BASE: '/docs/', DOCS_OUTPUT: site },
+  env: { ...process.env, DOCS_SITE: 'https://parcela.davafons.com', DOCS_BASE: '/docs/', DOCS_OUTPUT: site },
 });
 copyFileSync(join(site, '404.html'), join(artifact, '404.html'));
 writeFileSync(join(artifact, '_redirects'), '/ /docs/ 302\n');
