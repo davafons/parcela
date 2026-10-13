@@ -70,7 +70,7 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
             );
             let mut writer =
                 Registry::open(registry.state_path(), true)?.context("registry missing")?;
-            return crate::runtime::recover(&mut writer, workspace, true);
+            return crate::runtime::recover(&mut writer, workspace, &session, true);
         }
     }
     if session.status == "stopping"
@@ -78,7 +78,7 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     {
         let mut writer =
             Registry::open(registry.state_path(), true)?.context("registry missing")?;
-        return crate::runtime::recover(&mut writer, workspace, true);
+        return crate::runtime::recover(&mut writer, workspace, &session, true);
     }
     let budget = crate::owner::Record::read(&path, &session)
         .map_or(300, |record| record.manifest.shutdown_timeout_seconds);
@@ -96,7 +96,7 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         {
             let mut writer =
                 Registry::open(registry.state_path(), true)?.context("registry missing")?;
-            return crate::runtime::recover(&mut writer, workspace, true);
+            return crate::runtime::recover(&mut writer, workspace, &session, true);
         }
         ensure!(
             current.status != "interrupted",

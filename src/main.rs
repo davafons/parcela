@@ -742,11 +742,15 @@ fn run(mut cli: Cli) -> Result<i32> {
             if detach {
                 json(&lifecycle::recover_detached(&existing, &workspace)?)?;
             } else {
+                let session = existing
+                    .session(&workspace.id)?
+                    .context("no native session to recover")?;
                 drop(existing);
                 let mut registry = Registry::open(&state, true)?.context("registry missing")?;
                 json(&parcela::runtime::recover(
                     &mut registry,
                     &workspace,
+                    &session,
                     false,
                 )?)?;
             }

@@ -374,6 +374,9 @@ def concurrent_crash_stop(f):
 import os, sys, time
 from pathlib import Path
 root = Path(__file__).parent
+if sys.argv[-1] == 'down':
+    with (root / 'native-stops').open('a') as log:
+        log.write('down\\n')
 if 'list' in sys.argv and (root / 'gate-enabled').exists():
     (root / 'gate-entered').write_text('entered')
     time.sleep(1)
@@ -399,7 +402,8 @@ os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *s
     assert f.session(app)['token'] == session['token']
     assert (app['runtime'] / 'shutdown-completed').exists()
     assert not listening(app['port'])
-    return {'first_recovery_exit': first_code, 'contending_recovery_exit': second_code, 'same_generation_stopped': True}
+    assert (f.root / 'native-stops').read_text().splitlines() == ['down'], 'only the elected controller may request native shutdown'
+    return {'first_recovery_exit': first_code, 'contending_recovery_exit': second_code, 'same_generation_stopped': True, 'native_stop_requests': 1}
 
 
 def completed_stop_receipt(f):

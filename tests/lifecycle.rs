@@ -117,6 +117,7 @@ fn disconnected_caller_retains_complete_stop_and_cannot_fail_owner() {
     let request = serde_json::json!({"environment_id": session.environment_id, "token": session.token, "generation": session.generation, "action": {"type": "stop"}});
     let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
     writeln!(caller, "{request}").unwrap();
+    caller.shutdown(std::net::Shutdown::Both).unwrap();
     drop(caller);
     let pending = server.receive(&session).unwrap().unwrap();
     assert!(matches!(pending.action, Action::Stop));
@@ -272,6 +273,15 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
 
 #[test]
 fn contending_stop_waits_for_same_generation_completion() {
+    contending_stop(false);
+}
+
+#[test]
+fn contending_stop_refuses_a_successor_generation() {
+    contending_stop(true);
+}
+
+fn contending_stop(replace_session: bool) {
     use parcela::owner::{Phase, Record};
 
     let (_temp, mut registry, workspace, session) = fixture();
@@ -302,19 +312,41 @@ fn contending_stop_waits_for_same_generation_completion() {
     registry.session_status(&session, "stopping").unwrap();
     let state = registry.state_path().to_path_buf();
     let expected = session.clone();
+    let target = workspace.clone();
     let owner = thread::spawn(move || {
         thread::sleep(Duration::from_millis(200));
         let mut writer = Registry::open(&state, true).unwrap().unwrap();
         record.phase = Phase::Stopped;
         record.save(&path).unwrap();
         writer.session_status(&expected, "stopped").unwrap();
+        let successor = replace_session.then(|| {
+            writer
+                .begin_session(
+                    &target,
+                    &expected.router_token,
+                    32002,
+                    "compose",
+                    &expected.public_url,
+                )
+                .unwrap()
+        });
         drop(lock);
+        successor
     });
     let result = lifecycle::down(&registry, &workspace);
-    owner.join().unwrap();
-    assert_eq!(result.unwrap()["state"], "stopped");
-    assert_eq!(
-        registry.session(&workspace.id).unwrap().unwrap().token,
-        session.token
-    );
+    let successor = owner.join().unwrap();
+    let current = registry.session(&workspace.id).unwrap().unwrap();
+    if let Some(successor) = successor {
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("generation changed")
+        );
+        assert_eq!(current.token, successor.token);
+        assert_eq!(current.status, "starting");
+    } else {
+        assert_eq!(result.unwrap()["state"], "stopped");
+        assert_eq!(current.token, session.token);
+    }
 }

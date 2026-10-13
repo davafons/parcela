@@ -199,11 +199,13 @@ fn kernel_locks_and_private_files_reject_symlinks() {
     let path = root.join("lock");
     let lock = private::Lock::acquire(&path).unwrap();
     assert!(private::Lock::acquire(&path).is_err());
+    assert!(private::Lock::try_acquire(&path).unwrap().is_none());
     drop(lock);
-    private::Lock::acquire(&path).unwrap();
+    assert!(private::Lock::try_acquire(&path).unwrap().is_some());
     let link = root.join("link");
     symlink(&path, &link).unwrap();
     assert!(private::Lock::acquire(&link).is_err());
+    assert!(private::Lock::try_acquire(&link).is_err());
     let metadata = root.join("metadata.json");
     private::write_json(&metadata, &serde_json::json!({"id":"owned"})).unwrap();
     let value: serde_json::Value = private::read_json(&metadata).unwrap();

@@ -53,7 +53,7 @@ Final disposable test ports were HTTPS 49697 / HTTP 49698 on macOS and HTTPS 440
 
 ## Lifecycle recovery verification, 2026-10-13
 
-Current source passes `scripts/check` on macOS and Tower/Linux, with 67 Rust tests and 20 Python tests, formatting, Clippy, schema validation and the Go-artifact guard. Both hosts pass normal `scripts/check-live` and all 14 `scripts/check-recovery` cases with actual Caddy 2.11.7 and Process Compose 1.122.0 in disposable private state. Every recovery fixture verifies its supervised service listeners are closed. Installed binaries, primary services, trust and sharing configuration were unchanged.
+The receipt-reconciliation checkpoint passes `scripts/check` on macOS and Tower/Linux, with 67 Rust tests and 20 Python tests, formatting, Clippy, schema validation and the Go-artifact guard. Both hosts pass normal `scripts/check-live` and all 14 `scripts/check-recovery` cases with actual Caddy 2.11.7 and Process Compose 1.122.0 in disposable private state. Every recovery fixture verifies its supervised service listeners are closed. Installed binaries, primary services, trust and sharing configuration were unchanged.
 
 The recovery suite covers owner-death route withdrawal and foreign backend-port reuse, seven-second native graceful shutdown, overlapping stop requests, replacement preflight failure preserving the healthy owner, proxy outages preserving two application graphs, lost stop replies, authenticated reattachment without process replay, proxy guardian death with surviving Caddy, invalid native credentials, interrupted stop completion, completed-stop receipt reconciliation, replaced socket and process-birth refusal, and a 12-event HTTPS stream across route-lease renewals. The stream case also probes new requests and compares actual Caddy configuration through its private admin socket. These tests do not certify long-lived connections across configuration changes or guardian restart.
 
@@ -61,7 +61,17 @@ The expanded suite reproduced another defect on both hosts. After controller dea
 
 Before/after reports, source archive hashes and both-host final logs are retained under `/Users/davafons/.local/state/parcela/agent-tests/lifecycle-pickup-20261013T004629Z`. Tower artifacts are under the same suffix in `/home/davafons/.local/state/parcela/agent-tests`. Earlier Tower attempts failed because of test invocation/PATH setup and an unlinked custom Cargo target; the corrected final runs passed. The inherited caller-disconnect fix is now verified against current Linux source as well as macOS.
 
-This proves the listed local lifecycle and recovery cases, not arbitrary orphan adoption, native exit-code observation after controller death, seamless retry while native shutdown is still in progress, concurrent crash-recovery callers, reboot recovery, or active environment handoff. Independent review remains open.
+This checkpoint proves the listed local lifecycle and recovery cases, not arbitrary orphan adoption, native exit-code observation after controller death, reboot recovery, or active environment handoff. Ongoing-shutdown retry and contending crash-stop callers were verified in the follow-up below. Independent review remains open.
+
+### Ongoing shutdown and contending stop recovery
+
+The follow-up passes `scripts/check` on macOS and Tower/Linux with 69 Rust and 20 Python tests, normal live acceptance and all 16 real backend recovery cases. One added case retries while the native service is still in its seven-second shutdown after controller death; it passed without a production change. Another forces two stop callers to contend for recovery ownership after a crash. Before the fix, the elected caller succeeded while the contender failed on `owner.lock` on both hosts. A focused Rust regression failed at the same boundary.
+
+Stop recovery now waits for ownership within the recorded shutdown budget, preserving the caller's selected session. It rechecks generation and token while waiting and after acquisition. Same-generation completion returns success without issuing another native command or performing cleanup. Non-stop recovery remains fail-fast on contention; invalid lock files and permission errors are not treated as contention. The live race case verifies both exits are zero, the original generation is stopped, and exactly one native `down` request was made. Rust guards also prove that a waiting stale caller leaves a successor generation unchanged.
+
+The disconnected-caller regression intermittently accepted a reply after its caller socket was dropped. The fixture now explicitly shuts down the caller socket and retains its reply-rejection assertion. Twenty focused repeats passed before the full suite. No control receiver change was needed.
+
+The failing tests are in `wsylmsyp/d04ef09f`; the fix is in child `xnsvmvlv`. Source archive hashes, binary hashes, before/after reports and both-host logs are under `/Users/davafons/.local/state/parcela/agent-tests/lifecycle-retry-20261013T010300Z`, with Tower artifacts under the same private suffix. Every recovery fixture verified service listener closure. Interrupted allocation/readiness, concurrent up/restart and successor cleanup, immutable launch-snapshot coverage, reboot recovery and active handoff remain unverified. Independent review remains open; no binaries were installed or primary services changed.
 
 ## Real-machine cutover state
 

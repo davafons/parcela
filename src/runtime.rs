@@ -636,18 +636,45 @@ fn monitor(
 pub fn recover(
     registry: &mut Registry,
     workspace: &Workspace,
+    expected: &Session,
     stop: bool,
 ) -> Result<serde_json::Value> {
-    let session = registry
-        .session(&workspace.id)?
-        .context("no interrupted native session")?;
     ensure!(
-        session.status != "stopped",
+        expected.environment_id == workspace.id,
+        "recovery target changed"
+    );
+    let session = current_session(registry, expected)?;
+    ensure!(
+        stop || session.status != "stopped",
         "session is already stopped; use an explicit up to start it"
     );
     let path = registry.runtime_path(workspace);
     private::existing_directory(&path)?;
-    let lock = Lock::acquire(&path.join("owner.lock"))?;
+    let budget = crate::owner::Record::read(&path, &session)?
+        .manifest
+        .shutdown_timeout_seconds;
+    let deadline = Instant::now() + Duration::from_secs(budget + 10);
+    let lock = loop {
+        current_session(registry, expected)?;
+        if let Some(lock) = Lock::try_acquire(&path.join("owner.lock"))? {
+            break lock;
+        }
+        ensure!(
+            stop,
+            "recovery operation is already owned by another process"
+        );
+        ensure!(
+            Instant::now() < deadline,
+            "same-generation stop recovery did not complete; no process was signaled"
+        );
+        thread::sleep(Duration::from_millis(50));
+    };
+    let session = current_session(registry, expected)?;
+    if stop && session.status == "stopped" {
+        return Ok(
+            json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","already_stopped":true}),
+        );
+    }
     let mut record = crate::owner::Record::read(&path, &session)?;
     ensure!(
         !record.owner.alive() && lock.identity()? == record.lock,

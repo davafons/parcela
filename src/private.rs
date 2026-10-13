@@ -66,14 +66,24 @@ impl Lock {
         Ok(Identity::from_metadata(&self._file.metadata()?))
     }
     pub fn acquire(path: &Path) -> Result<Self> {
+        Self::try_acquire(path)?.with_context(|| {
+            format!(
+                "operation already owned by another process: {}",
+                path.display()
+            )
+        })
+    }
+    pub fn try_acquire(path: &Path) -> Result<Option<Self>> {
         let file = file(path)?;
         // SAFETY: fd is held by file; flock does not retain a pointer.
-        ensure!(
-            unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0,
-            "operation already owned by another process: {}",
-            path.display()
-        );
-        Ok(Self { _file: file })
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(Self { _file: file }));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            return Ok(None);
+        }
+        Err(error.into())
     }
     pub fn wait(path: &Path) -> Result<Self> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
