@@ -1,0 +1,89 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/site/**'
+      - 'docs/website/**'
+      - 'docs/documentation.md'
+      - 'docs/configuration.md'
+      - '.agents/skills/parcela/SKILL.md'
+      - 'examples/docs-demo/**'
+      - 'logo.svg'
+      - 'scripts/check_docs.py'
+      - 'scripts/check_docs_example.py'
+      - 'tests/test_docs.py'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/site/**'
+      - 'docs/website/**'
+      - 'docs/documentation.md'
+      - 'docs/configuration.md'
+      - '.agents/skills/parcela/SKILL.md'
+      - 'examples/docs-demo/**'
+      - 'logo.svg'
+      - 'scripts/check_docs.py'
+      - 'scripts/check_docs_example.py'
+      - 'tests/test_docs.py'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish reviewed public docs after Pages is configured; main branch only'
+        type: boolean
+        default: false
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: docs/website/package-lock.json
+      - run: npm ci --prefix docs/website
+      - run: python -m unittest discover -s tests -p 'test_docs.py'
+      - run: python scripts/check_docs.py --output docs-check.json
+      - run: npm run build --prefix docs/website
+        env:
+          DOCS_SITE: https://${{ github.repository_owner }}.github.io
+          DOCS_BASE: /parcela/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parcela-docs
+          path: |
+            target/docs
+            docs-check.json
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+        with:
+          path: target/docs
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy reviewed documentation
+        id: deployment
+        uses: actions/deploy-pages@v4

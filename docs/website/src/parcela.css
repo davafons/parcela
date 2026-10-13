@@ -1,0 +1,23 @@
+:root {
+  --sl-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sl-color-accent-low: #213c30;
+  --sl-color-accent: #7bad85;
+  --sl-color-accent-high: #c2e1cb;
+  --sl-color-bg: #18201c;
+  --sl-color-bg-nav: #18201c;
+  --sl-color-bg-sidebar: #1c2620;
+  --sl-content-width: 48rem;
+}
+:root[data-theme="light"] {
+  --sl-color-accent-low: #dce9dd;
+  --sl-color-accent: #347348;
+  --sl-color-accent-high: #214a30;
+  --sl-color-bg: #fcfaf6;
+  --sl-color-bg-nav: #fcfaf6;
+  --sl-color-bg-sidebar: #f3f0e9;
+}
+.sl-markdown-content { line-height: 1.7; }
+h1, h2, h3 { letter-spacing: -.025em; }
+.brand-mark { margin-bottom: 1.5rem; }
+.sl-markdown-content table { display: block; overflow-x: auto; }
+:focus-visible { outline: 3px solid var(--sl-color-accent); outline-offset: 3px; }
