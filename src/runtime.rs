@@ -761,6 +761,14 @@ pub fn recover(
     };
     record.refresh(&path)?;
     record.save(&path)?;
+    registry.session_status(
+        &session,
+        if record.phase == crate::owner::Phase::Stopping {
+            "stopping"
+        } else {
+            "starting"
+        },
+    )?;
     let supervisor = crate::owner::Supervisor::Peer(record.supervisor.clone());
     let mut resolved = workspace.clone();
     resolved.generation = session.generation;
