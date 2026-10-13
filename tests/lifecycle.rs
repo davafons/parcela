@@ -120,7 +120,11 @@ fn disconnected_caller_retains_complete_stop_and_cannot_fail_owner() {
     drop(caller);
     let pending = server.receive(&session).unwrap().unwrap();
     assert!(matches!(pending.action, Action::Stop));
-    assert!(pending.reply(&session, Ok(serde_json::json!({"stop_accepted": true}))).is_err());
+    assert!(
+        pending
+            .reply(&session, Ok(serde_json::json!({"stop_accepted": true})))
+            .is_err()
+    );
     assert!(server.receive(&session).unwrap().is_none());
 
     let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();

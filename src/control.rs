@@ -136,9 +136,14 @@ impl Server {
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
             Err(error) => return Err(error.into()),
         };
-        stream.set_read_timeout(Some(Duration::from_millis(200)))?;
-        stream.set_write_timeout(Some(Duration::from_millis(200)))?;
         let parsed = (|| -> Result<Request> {
+            if stream
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .and_then(|()| stream.set_write_timeout(Some(Duration::from_millis(200))))
+                .is_err()
+            {
+                stream.set_nonblocking(true)?;
+            }
             let request: Request = serde_json::from_slice(&line(&stream, 8192)?)?;
             ensure!(
                 request.environment_id == session.environment_id
