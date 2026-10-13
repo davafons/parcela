@@ -425,3 +425,73 @@ fn explicit_source_only_checkpoint_does_not_invent_required_data() {
     assert_eq!(restored.scope, checkpoint::CaptureScope::Source);
     assert!(!restored.source.join("storage/app.db").exists());
 }
+
+#[test]
+fn selected_resource_output_overlap_is_refused_before_staging() {
+    let temp = TempDir::new().unwrap();
+    let policy = "transfer:\n  data:\n    uploads:\n      location: runtime\n      path: uploads\n      snapshot: {method: quiescent-files}\n";
+    let (source, manifest) = fixture(&temp, policy);
+    let runtime = temp.path().join("runtime");
+    fs::create_dir_all(runtime.join("uploads/nested")).unwrap();
+    fs::write(runtime.join("uploads/retained"), "persistent upload").unwrap();
+    let alias = temp.path().join("uploads-alias");
+    symlink(runtime.join("uploads"), &alias).unwrap();
+    for output in [
+        runtime.join("uploads/checkpoint"),
+        runtime.join("uploads/nested/checkpoint"),
+        alias.join("checkpoint"),
+    ] {
+        let error = checkpoint::create(
+            &source,
+            &manifest,
+            &output,
+            Some(&runtime),
+            true,
+            checkpoint::CaptureScope::DeclaredResources,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("checkpoint output/staging overlaps selected resource uploads"),
+            "{error:#}"
+        );
+        assert!(!output.exists());
+        assert_eq!(
+            fs::read_to_string(runtime.join("uploads/retained")).unwrap(),
+            "persistent upload"
+        );
+        assert_eq!(fs::read_dir(runtime.join("uploads")).unwrap().count(), 2);
+        assert_eq!(
+            fs::read_dir(runtime.join("uploads/nested"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+    let output = runtime.join("checkpoint");
+    let captured = checkpoint::create(
+        &source,
+        &manifest,
+        &output,
+        Some(&runtime),
+        true,
+        checkpoint::CaptureScope::DeclaredResources,
+    )
+    .unwrap();
+    assert!(captured.resources[0].captured);
+    assert_eq!(
+        fs::read_to_string(output.join("resources/uploads/payload/retained")).unwrap(),
+        "persistent upload"
+    );
+    let source_only = checkpoint::create(
+        &source,
+        &manifest,
+        &runtime.join("uploads/source-only"),
+        None,
+        false,
+        checkpoint::CaptureScope::Source,
+    )
+    .unwrap();
+    assert!(!source_only.resources[0].captured);
+}

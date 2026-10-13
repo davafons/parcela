@@ -352,6 +352,8 @@ def wrong_native_token(f):
         token.write_text('wrong-test-token')
         down = f.cli(app['path'], 'down')
         assert down.returncode != 0 and listening(app['port']), 'failed authentication must not stop or adopt the graph'
+        detached = f.cli(app['path'], 'recover', '--detach')
+        assert detached.returncode != 0 and listening(app['port']), 'detached recovery must not bypass live native authentication'
     finally:
         token.write_text(original)
     return {'unauthenticated_recovery_refused': True, 'service_preserved': True}
@@ -624,10 +626,163 @@ def long_stream_lease(f):
     return {'stream_events': 12, 'lease_windows_crossed': True, 'config_unchanged': True}
 
 
+def shirabe_native_inspection(f):
+    from check_shirabe import compose_processes
+
+    app = f.app('ordinary')
+    graph = app['manifest']['process_compose']['processes']
+    for name in ['css', 'jobs']:
+        graph[name] = {'entrypoint': ['sleep', '300'], 'availability': {'restart': 'no'}}
+    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
+    f.start_proxy()
+    f.start(app)
+    records = compose_processes(f.args.compose, app['runtime'], f.root / 'ordinary-client.log')
+    assert {name: record['status'] for name, record in records.items()} == {'web': 'Running', 'css': 'Running', 'jobs': 'Running'}
+    assert f.request(app)[0] == 200
+    return {'authenticated_inspection': 'ordinary', 'running': ['web', 'css', 'jobs']}
+
+def portable_native_inspection(f):
+    from check_portable_shirabe import processes
+
+    app = f.app('portable')
+    app['manifest']['process_compose']['processes']['css'] = {'entrypoint': ['sleep', '300'], 'availability': {'restart': 'no'}}
+    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
+    f.start_proxy()
+    f.start(app)
+    records = processes(f.args.compose, app['runtime'], f.root / 'portable-client.log', os.environ.copy())
+    assert records == {'web': 'Running', 'css': 'Running'}
+    assert f.request(app)[0] == 200
+    return {'authenticated_inspection': 'portable', 'running': ['web', 'css']}
+
+def occupied_replacement_port(f):
+    app = f.app('occupied')
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    with socket.socket() as foreign:
+        foreign.bind(('127.0.0.1', 0))
+        foreign.listen()
+        port = foreign.getsockname()[1]
+        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(port))
+        assert restart.returncode != 0
+        assert owner.poll() is None, 'occupied replacement preflight must preserve original owner'
+        assert f.session(app)['token'] == original['token']
+        assert f.session(app)['generation'] == original['generation']
+        assert f.request(app)[0] == 200, 'occupied replacement must preserve original HTTPS'
+        with socket.create_connection(('127.0.0.1', port), timeout=2):
+            pass
+    return {'restart_exit': restart.returncode, 'original_owner_alive': True, 'https_code': 200, 'foreign_listener_preserved': True}
+
+def invalid_replacement_port(f):
+    app = f.app('invalid')
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    for port in [0, 80, f.http, f.https]:
+        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(port))
+        assert restart.returncode != 0, f'invalid replacement port {port} must be refused'
+        assert owner.poll() is None, f'invalid replacement port {port} stopped original owner'
+        assert f.session(app)['token'] == original['token']
+        assert f.request(app)[0] == 200
+    return {'invalid_endpoints_refused': 4, 'original_owner_alive': True, 'https_code': 200}
+
+def restart_owned_port(f):
+    app = f.app('reuse')
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    assert restart.returncode == 0, restart.stderr
+    assert owner.wait(timeout=5) == 0
+    current = f.session(app)
+    assert current['token'] != original['token']
+    assert current['generation'] == original['generation'] + 1
+    assert current['backend_port'] == app['port']
+    assert f.request(app)[0] == 200
+    return {'restart_exit': 0, 'owned_endpoint_reused': True, 'new_generation': current['generation'], 'https_code': 200}
+
+def leased_replacement_port(f):
+    app = f.app('leased')
+    other = f.app('reserved')
+    f.start_proxy()
+    owner = f.start(app)
+    other_owner = f.start(other)
+    original = f.session(app)
+    other_owner.kill()
+    other_owner.wait(timeout=5)
+    assert f.pc_down(other).returncode == 0
+    wait_for(lambda: not listening(other['port']))
+    assert f.session(other)['status'] != 'stopped'
+    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(other['port']))
+    assert restart.returncode != 0
+    assert owner.poll() is None, 'reserved replacement must preserve original owner'
+    assert f.session(app)['token'] == original['token']
+    assert f.request(app)[0] == 200
+    return {'reserved_unbound_endpoint_refused': True, 'original_owner_alive': True, 'https_code': 200}
+
+def detached_recover_running(f):
+    app = f.app('rundetach')
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    before = json.loads(f.request(app)[1])
+    owner.kill()
+    owner.wait(timeout=5)
+    recover = f.cli(app['path'], 'recover', '--detach', timeout=25)
+    assert recover.returncode == 0, recover.stderr
+    result = json.loads(recover.stdout)
+    assert result['live']['state'] == 'ready' and result['detached'] is True
+    current = f.session(app)
+    assert current['token'] == original['token'] and current['generation'] == original['generation']
+    assert json.loads(f.request(app)[1])['pid'] == before['pid'], 'detached recovery must not replay services'
+    assert f.cli(app['path'], 'down').returncode == 0
+    assert not listening(app['port'])
+    return {'recover_exit': 0, 'state': 'ready', 'service_pid_preserved': True, 'same_generation': True}
+
+def detached_recover_stopping(f):
+    return detached_stopped_recovery(f, False)
+
+def detached_recover_quiescent(f):
+    return detached_stopped_recovery(f, True)
+
+def detached_stopped_recovery(f, finish_first):
+    app = f.app('stopdetach', delay=7)
+    f.start_proxy()
+    owner = f.start(app)
+    original = f.session(app)
+    with socket.socket(socket.AF_UNIX) as control:
+        control.settimeout(5)
+        control.connect(str(app['runtime'] / 'ctl.sock'))
+        control.sendall((json.dumps({'environment_id': app['id'], 'generation': original['generation'], 'token': original['token'], 'action': {'type': 'stop'}}) + '\n').encode())
+        with control.makefile('rb') as response:
+            reply = json.loads(response.readline())
+        assert reply['result']['stop_accepted'] is True
+    wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
+    owner.kill()
+    owner.wait(timeout=5)
+    if finish_first:
+        wait_for(lambda: (app['runtime'] / 'shutdown-completed').exists())
+        wait_for(lambda: not listening(app['port']))
+        wait_for(lambda: f.pc_down(app).returncode != 0)
+    recover = f.cli(app['path'], 'recover', '--detach', timeout=25)
+    assert recover.returncode == 0, recover.stderr
+    result = json.loads(recover.stdout)
+    assert result['state'] == 'stopped' and result['recovered'] is True and result['detached'] is True
+    current = f.session(app)
+    assert current['token'] == original['token'] and current['generation'] == original['generation']
+    assert current['status'] == 'stopped'
+    assert (app['runtime'] / 'shutdown-completed').exists()
+    assert not listening(app['port'])
+    return {'recover_exit': 0, 'state': 'stopped', 'same_generation': True, 'finished_before_recover': finish_first}
+
+
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
          replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
-         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop]
+         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop, shirabe_native_inspection, portable_native_inspection,
+         occupied_replacement_port,
+         invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
+         detached_recover_stopping, detached_recover_quiescent]
 
 
 def main():
