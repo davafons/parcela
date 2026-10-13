@@ -25,6 +25,15 @@ def stop(*_):
 signal.signal(signal.SIGTERM, stop)
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == '/stream':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.end_headers()
+            for tick in range(12):
+                self.wfile.write(f'data: {tick}\\n\\n'.encode())
+                self.wfile.flush()
+                time.sleep(1)
+            return
         data = json.dumps({'id': os.environ['PARCELA_ENVIRONMENT_ID'], 'pid': os.getpid(), 'generation': os.environ['PARCELA_GENERATION']}).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(data)))
@@ -305,16 +314,134 @@ def wrong_native_token(f):
         token.write_text(original)
     return {'unauthenticated_recovery_refused': True, 'service_preserved': True}
 
+def interrupted_stop(f):
+    app = f.app('interrupted', delay=3)
+    f.start_proxy()
+    owner = f.start(app)
+    session = f.session(app)
+    with socket.socket(socket.AF_UNIX) as client:
+        client.connect(str(app['runtime'] / 'ctl.sock'))
+        client.sendall((json.dumps({'environment_id': app['id'], 'token': session['token'], 'generation': session['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
+    wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
+    owner.kill()
+    owner.wait(timeout=5)
+    wait_for(lambda: (app['runtime'] / 'shutdown-completed').exists())
+    wait_for(lambda: not listening(app['port']))
+    retry = f.cli(app['path'], 'down')
+    assert retry.returncode == 0, retry.stderr
+    assert f.session(app)['status'] == 'stopped'
+    assert f.request(app)[0] == 503
+    return {'interrupted_down_retry_exit': 0, 'shutdown_completed': True, 'route_withdrawn': True}
+
+
+def completed_stop_receipt(f):
+    app = f.app('receipt')
+    f.start_proxy()
+    owner = f.start(app)
+    down = f.cli(app['path'], 'down')
+    assert down.returncode == 0, down.stderr
+    assert owner.wait(timeout=5) == 0
+    record = json.loads((app['runtime'] / 'owner.json').read_text())
+    assert record['phase'] == 'stopped'
+    with sqlite3.connect(f.state / 'registry.sqlite3') as db:
+        db.execute('UPDATE sessions SET status=? WHERE environment_id=?', ('stopping', app['id']))
+    retry = f.cli(app['path'], 'down')
+    assert retry.returncode == 0, retry.stderr
+    assert f.session(app)['status'] == 'stopped'
+    assert not listening(app['port'])
+    return {'completed_receipt_reconciled': True, 'retry_exit': 0}
+
+
+def replaced_native_socket(f):
+    app = f.app('socket')
+    f.start_proxy()
+    owner = f.start(app)
+    owner.kill()
+    owner.wait(timeout=5)
+    path = app['runtime'] / 'pc.sock'
+    retained = app['runtime'] / 'retained.sock'
+    path.rename(retained)
+    try:
+        with socket.socket(socket.AF_UNIX) as foreign:
+            foreign.bind(str(path))
+            foreign.listen()
+            inode = path.stat().st_ino
+            down = f.cli(app['path'], 'down')
+            assert down.returncode != 0, 'replaced native socket must not authorize shutdown'
+            assert path.stat().st_ino == inode, 'foreign socket must be preserved'
+            assert listening(app['port']), 'original graph must not be signaled'
+            assert (app['runtime'] / 'ctl.sock').exists(), 'refusal must preserve original control evidence'
+            wait_for(lambda: f.request(app)[0] == 503)
+    finally:
+        path.unlink()
+        retained.rename(path)
+    return {'replacement_refused': True, 'foreign_socket_preserved': True, 'original_graph_preserved': True}
+
+
+def replaced_process_birth(f):
+    app = f.app('birth')
+    f.start_proxy()
+    owner = f.start(app)
+    owner.kill()
+    owner.wait(timeout=5)
+    path = app['runtime'] / 'owner.json'
+    original = path.read_bytes()
+    record = json.loads(original)
+    record['supervisor']['birth'] += 1
+    try:
+        path.write_text(json.dumps(record))
+        down = f.cli(app['path'], 'down')
+        assert down.returncode != 0, 'mismatched birth must not authorize native shutdown'
+        assert listening(app['port']), 'mismatched process identity must not be signaled'
+        wait_for(lambda: f.request(app)[0] == 503)
+    finally:
+        path.write_bytes(original)
+    return {'mismatched_birth_refused': True, 'graph_preserved': True}
+
+
+def long_stream_lease(f):
+    app = f.app('stream')
+    f.start_proxy()
+    owner = f.start(app)
+    loaded = (f.state / 'proxy/loaded.json').read_bytes()
+    context = ssl.create_default_context(cafile=str(f.state / 'proxy/data/pki/authorities/local/root.crt'))
+    with context.wrap_socket(socket.create_connection(('127.0.0.1', f.https), timeout=3), server_hostname=app['host']) as stream:
+        stream.settimeout(3)
+        stream.sendall(f'GET /stream HTTP/1.1\r\nHost: {app["host"]}\r\nConnection: close\r\n\r\n'.encode())
+        with stream.makefile('rb') as response:
+            assert response.readline().startswith(b'HTTP/1.1 200')
+            while response.readline() != b'\r\n':
+                pass
+            for tick in range(12):
+                line = response.readline()
+                while not line.startswith(b'data: '):
+                    assert line, f'stream closed before event {tick}'
+                    line = response.readline()
+                assert line.strip() == f'data: {tick}'.encode()
+                assert f.request(app)[0] == 200, 'lease renewal must keep new requests routed'
+    assert owner.poll() is None
+    assert (f.state / 'proxy/loaded.json').read_bytes() == loaded, 'lease renewal must not reload Caddy config'
+    return {'stream_events': 12, 'lease_windows_crossed': True, 'config_unchanged': True}
+
+
+CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
+         recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
+         replaced_native_socket, replaced_process_birth, long_stream_lease]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True)
     parser.add_argument('--caddy', required=True)
     parser.add_argument('--compose', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--case', action='append', choices=[case.__name__ for case in CASES])
     args = parser.parse_args()
     os.umask(0o077)
     report = {'mode': 'recovery-acceptance', 'cases': []}
-    for case in [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply, recover_surviving_graph, guardian_death, wrong_native_token]:
+    for case in CASES:
+        if args.case and case.__name__ not in args.case:
+            continue
         fixture = Fixture(args, case.__name__)
         record = {'case': case.__name__, **fixture.details()}
         try:

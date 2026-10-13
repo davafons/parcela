@@ -203,3 +203,59 @@ fn malformed_owner_health_response_stays_unknown() {
     assert_eq!(status["state"], "unknown");
     assert_eq!(status["live_health_verified"], false);
 }
+
+#[test]
+fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
+    use parcela::owner::{Phase, Record};
+
+    let (_temp, mut registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    private::directory(&path).unwrap();
+    let lock = private::Lock::acquire(&path.join("owner.lock")).unwrap();
+    let control = Server::bind(&path).unwrap();
+    let mut child = Command::new("sleep").arg("60").spawn().unwrap();
+    let identity = process::Identity::read(child.id()).unwrap().unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let mut record = Record {
+        session: session.clone(),
+        phase: Phase::Running,
+        owner: identity.clone(),
+        lock: lock.identity().unwrap(),
+        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        supervisor: identity.clone(),
+        processes: vec![identity],
+        native: None,
+        manifest: serde_saphyr::from_str(
+            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        )
+        .unwrap(),
+        diagnostic: None,
+    };
+    record.save(&path).unwrap();
+    drop(control);
+    drop(lock);
+    assert!(lifecycle::down(&registry, &workspace).is_err());
+    assert_ne!(
+        registry.session(&workspace.id).unwrap().unwrap().status,
+        "stopped"
+    );
+
+    record.phase = Phase::Stopping;
+    record.save(&path).unwrap();
+    registry.session_status(&session, "stopping").unwrap();
+    assert_eq!(
+        lifecycle::down(&registry, &workspace).unwrap()["state"],
+        "stopped"
+    );
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().status,
+        "stopped"
+    );
+    assert_eq!(Record::read(&path, &session).unwrap().phase, Phase::Stopped);
+    assert!(!path.join("ctl.sock").exists());
+    assert_eq!(
+        lifecycle::down(&registry, &workspace).unwrap()["already_stopped"],
+        true
+    );
+}
