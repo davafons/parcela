@@ -137,6 +137,7 @@ impl Server {
             Err(error) => return Err(error.into()),
         };
         let parsed = (|| -> Result<Request> {
+            stream.set_nonblocking(false)?;
             if stream
                 .set_read_timeout(Some(Duration::from_millis(200)))
                 .and_then(|()| stream.set_write_timeout(Some(Duration::from_millis(200))))
