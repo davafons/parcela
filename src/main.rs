@@ -32,6 +32,9 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Print the bundled agent operating skill without reading project or registry state.
+    #[command(long_flag = "skill")]
+    Skill,
     /// Validate organizer schema (not backend compatibility). Does not create state.
     Config {
         #[command(subcommand)]
@@ -126,7 +129,10 @@ enum Command {
         tail: u32,
     },
     /// Print the reserved environment URL. Does not certify readiness.
-    Url,
+    Url {
+        #[arg(long)]
+        service: Option<String>,
+    },
 }
 #[derive(Subcommand)]
 enum TransferCommand {
@@ -355,7 +361,7 @@ fn inspect(cli: Cli) -> Result<()> {
             json(&serde_json::json!({
                 "implementation":"rust", "planned_architecture":{"http_tls":"managed Caddy","supervision":"managed Process Compose"},
                 "backend_probes":{"caddy":probe(caddy,"version"),"process_compose":probe(process_compose,"version")},
-                "supported":["config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, one routed service)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
+                "supported":["skill (--skill)","config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, worktree service sets)","task","transfer plan","transfer capture/verify/restore (paused jj/resources)"],
                 "unsupported":["automatic crash reconciliation","control of older ownerless runs","automatic backend installation","privilege/trust setup","sharing","boot service"],
                 "data_isolation_verified":false,"host_configuration_modified":false
             }))
@@ -396,7 +402,7 @@ fn inspect(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Command::Services | Command::Logs { .. } | Command::Url => {
+        Command::Services | Command::Logs { .. } | Command::Url { .. } => {
             let state = state_dir(cli.state_dir)?;
             let registry =
                 Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
@@ -441,10 +447,16 @@ fn inspect(cli: Cli) -> Result<()> {
                     )?;
                     Ok(())
                 }
-                _ => {
-                    println!("{}", lifecycle::url(&registry, &workspace)?);
+                Command::Url { service } => {
+                    let url = if let Some(service) = service {
+                        lifecycle::service_url(&registry, &workspace, &service)?
+                    } else {
+                        lifecycle::url(&registry, &workspace)?
+                    };
+                    println!("{url}");
                     Ok(())
                 }
+                _ => unreachable!(),
             }
         }
         Command::Proxy {
@@ -511,7 +523,7 @@ fn inspect(cli: Cli) -> Result<()> {
             let state = state_dir(cli.state_dir)?;
             let mut registry = Registry::open(&state, true)?.context("registry not created")?;
             let workspace = registry.adopt(&manifest, &source, role, &label)?;
-            json(&ResolvedContext::new(&registry, &manifest, workspace))
+            json(&ResolvedContext::new(&registry, &manifest, workspace)?)
         }
         Command::Context
         | Command::Workspace {
@@ -523,12 +535,19 @@ fn inspect(cli: Cli) -> Result<()> {
                 bail!("no registry; run workspace adopt with explicit --role and --label");
             };
             let workspace = registry.current(&source, &manifest)?;
-            json(&ResolvedContext::new(&registry, &manifest, workspace))
+            json(&ResolvedContext::new(&registry, &manifest, workspace)?)
         }
         _ => bail!("runtime command reached inspection dispatcher"),
     }
 }
 fn run(mut cli: Cli) -> Result<i32> {
+    if matches!(cli.command, Command::Skill) {
+        use std::io::Write;
+        std::io::stdout()
+            .lock()
+            .write_all(include_bytes!("../.agents/skills/parcela/SKILL.md"))?;
+        return Ok(0);
+    }
     if let Some(id) = cli.workspace {
         let state = state_dir(cli.state_dir.clone())?;
         let registry =

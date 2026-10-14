@@ -34,6 +34,15 @@ pub enum LiveState {
     Stopping,
 }
 #[derive(Debug, Serialize, Deserialize)]
+pub struct EndpointHealth {
+    pub hostname: String,
+    pub public_url: String,
+    pub backend_port: u16,
+    pub listener_owned: bool,
+    pub listener_pids: Vec<u32>,
+    pub http_ready: bool,
+}
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LiveStatus {
     pub state: LiveState,
     pub http_ready: bool,
@@ -44,6 +53,8 @@ pub struct LiveStatus {
     pub owner_pid: u32,
     pub child_pid: u32,
     pub listener_pids: Vec<u32>,
+    #[serde(default)]
+    pub endpoints: std::collections::BTreeMap<String, EndpointHealth>,
     pub checked_at_unix_ms: u128,
 }
 #[derive(Serialize, Deserialize)]

@@ -27,11 +27,45 @@ process_compose:
 
 Project IDs are 1–128 ASCII letters/digits/hyphens/underscores/dots. DNS labels are 1–63 lowercase ASCII letters/digits with internal hyphens. Preview label plus project name must fit one label. Unknown organizer fields, invalid paths/names, NUL argv and nonpositive task timeouts fail. Native `process_compose` data is preserved, not interpreted as organizer fields. `config check` does not certify backend graph compatibility or resource isolation.
 
-Only one routed service is currently executable. Additional service declarations can describe planned URLs but `run/up` reject them. Put non-routed workers in the native graph. Services must bind their assigned port only on `127.0.0.1`; mere HTTP answers from foreign listeners cannot establish readiness.
+`up` runs all declared HTTP services in one worktree environment and one native graph. `run` remains a literal single-HTTP-service command. Non-HTTP workers belong in the native graph but not in `services`. In a service set, each routed service must name a graph process. Legacy single-service graphs can retain a different native process name. Services must bind their assigned ports only on `127.0.0.1`; HTTP answers from foreign listeners cannot establish readiness.
+
+## Service sets
+
+The default service uses the environment base hostname. Other services use a flat prefix, supplied by `subdomain` or the service name. For project `my-app`, the primary frontend is `my-app.localhost` and the backend is `api-my-app.localhost`. A preview labeled `review` uses `review-my-app.localhost` and `api-review-my-app.localhost`.
+
+```yaml
+version: 1
+project: {id: my-app, name: my-app}
+default_service: frontend
+services:
+  frontend: {readiness_path: /up}
+  backend: {subdomain: api, readiness_path: /up}
+environment:
+  API_ORIGIN: "${PARCELA_SERVICE_BACKEND_URL}"
+process_compose:
+  version: "0.5"
+  processes:
+    frontend:
+      working_dir: frontend
+      command: "./bin/dev --host ${HOST} --port ${PORT}"
+    backend:
+      working_dir: backend
+      command: "./bin/dev"
+      environment:
+        - PORT=${PARCELA_SERVICE_BACKEND_PORT}
+    worker:
+      command: "./bin/worker"
+```
+
+Commands and working directories are native Process Compose configuration, not framework adapters. The backend overrides its process-local `PORT`; both processes inherit the default `PARCELA_URL` unless project configuration overrides an application-specific variable. Core does not discover or start npm workspaces automatically.
+
+Each run records a service endpoint set under one generation and nonce. All declared HTTP services must pass startup readiness before any group route opens. A changed listener identity withdraws the group until every required endpoint passes readiness again. `status.live.endpoints` reports each service's listener ownership and fresh HTTP readiness. Whole-graph `down`, `restart` and qualified `recover` operate on the set. Individual service restart is not a Parcela command.
+
+Adoption reserves every service hostname atomically, including collisions with another worktree's base hostname. Port allocation reserves the whole set atomically. Stopped hostnames stay reserved and unavailable. To change reservations, stop the environment, change its manifest and explicitly adopt it again with the same role and label. No source or data is removed. Distinct names and runtime paths do not certify database or storage isolation.
 
 ## Context and environment
 
-`run/up/task` supply `PARCELA_PROJECT_ID`, `PARCELA_ENVIRONMENT_ID`, `PARCELA_ROLE`, `PARCELA_GENERATION`, `PARCELA_RUNTIME_DIR`, `PARCELA_URL`, `PARCELA_HOSTNAME`, `HOST=127.0.0.1`, and `PORT` when allocated/recorded. These reserved keys cannot be overridden by organizer configuration. Manifest environment values support `${...}` substitution from the supplied context; unresolved placeholders fail.
+`run/up/task` supply `PARCELA_PROJECT_ID`, `PARCELA_ENVIRONMENT_ID`, `PARCELA_ROLE`, `PARCELA_GENERATION`, `PARCELA_RUNTIME_DIR`, `PARCELA_URL`, `PARCELA_HOSTNAME`, `HOST=127.0.0.1`, and `PORT` when allocated/recorded. Each declared service also receives `PARCELA_SERVICE_<NAME>_URL` and `_HOSTNAME`, plus `_PORT` when allocated or recorded. Names become uppercase and hyphens become underscores. `PORT`, `PARCELA_URL` and `PARCELA_HOSTNAME` remain default-service aliases. `--backend-port` selects only the default service's port; other service ports are allocated automatically. These reserved keys cannot be overridden by organizer configuration. Manifest environment values support `${...}` substitution from the supplied context; unresolved placeholders fail.
 
 `inherit_environment` defaults to true. With false, PATH/HOME are retained and other inherited values are cleared. Inherited `PORTLESS_*`, `PC_*` and `PARCELA_*` controls are removed before resolved context is applied. This is not sandboxing: project code can read files, load dotenv and make network requests.
 
@@ -41,6 +75,7 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 
 | Command | Behavior |
 |---|---|
+| `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
 | `config check` | Strict organizer validation, no state creation |
 | `workspace adopt --role primary\|preview --label LABEL` | Explicit source identity and hostname reservation |
 | `workspace list [--all] [--human]` | Registered inventory plus live owner probes, scoped to the current project or explicit machine-wide view |
@@ -57,10 +92,12 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 | `restart [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Preflight the replacement backend/native graph before stopping the healthy owner, then launch in a fresh generation; does not replay arbitrary `run` argv |
 | `services [--human]` | Native Process Compose service state through the selected live owner |
 | `logs [SERVICE] --tail N` | Plain-text log tail from Process Compose; default service is the owner's routed service; 1–10,000 lines, bounded response size |
-| `url` | Plain-text recorded URL, or the planned standard HTTPS URL before the first launch; does not certify reachability |
+| `url [--service NAME]` | Plain-text default or selected service URL, recorded when available and otherwise planned standard HTTPS; does not certify reachability |
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
 | `status [--all] [--human]` | Live owner/loopback HTTP/router probes, with durable intent reported separately; explicit machine-wide view works outside a project |
 | `doctor [--caddy PATH] [--process-compose PATH]` | Capability report plus requested bounded version probes |
+
+`--skill` is a long-flag alias for the `skill` subcommand. It runs before workspace lookup and cannot be combined with a lifecycle command. Its output is the bundled `.agents/skills/parcela/SKILL.md`, not generated from the current project. An agent can load this output directly; no global profile installation runs.
 
 Inspection and detached startup print JSON by default. `--human` selects inventory/status/service tables. `url` and `logs` print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, bulk stop, arbitrary persisted-PID signaling, or replay of an uncertain command.
 
@@ -70,7 +107,9 @@ The optional strict `transfer` policy and paused capture/restore commands are do
 
 ## Ownership and failure
 
-Registry schema 2 adds session/port leases; writable opening migrates schema 1 explicitly, preserving identities. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.
+Registry schema 3 adds hostname and endpoint-set port reservations. Writable opening migrates schemas 1 and 2 transactionally, preserving workspace IDs, session nonces, generations and active default-port leases. Read-only opening supports those older schemas without migration. Legacy single-service owner records remain readable without rewriting them. A stopped generation cannot transition back to ready; a new run needs a new generation.
+
+Old binaries do not support schema 3. Upgrade the owned proxy and stop or explicitly reconcile existing owners before a new binary opens the installed registry for writing. A disposable registry migration is not an installed-host upgrade. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.
 
 Kernel lifetime locks protect each environment and the dedicated proxy. Session updates require nonce/generation identity. Full Caddy configuration updates are serialized. Backend listener PID ancestry is checked while the retained child is live; probe-and-release is not an atomic socket handoff. Changed listener identity withdraws the route and requires readiness again. The owner does not continuously poll HTTP readiness after establishment; `status` performs a fresh HTTP probe. A failed probe can report `unhealthy` while `recorded_session.status` still says `ready`. Native Process Compose remains authoritative for individual workers.
 

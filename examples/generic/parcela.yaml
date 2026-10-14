@@ -11,9 +11,10 @@ tasks:
   test:
     argv: [python3, -m, unittest]
     timeout_seconds: 60
-# Preserved as native graph data, not yet validated against Process Compose.
 process_compose:
   version: "0.5"
   processes:
     web:
       command: "python3 -m http.server ${PORT} --bind 127.0.0.1"
+    api:
+      command: "python3 -m http.server ${PARCELA_SERVICE_API_PORT} --bind 127.0.0.1"

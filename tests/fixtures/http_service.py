@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/ready' and os.path.exists(os.path.join(os.environ['PARCELA_RUNTIME_DIR'], 'unhealthy')):
+        if self.path == '/ready' and any(os.path.exists(os.path.join(os.environ['PARCELA_RUNTIME_DIR'], name)) for name in ['unhealthy', f'unhealthy-{sys.argv[1]}' if len(sys.argv) > 1 else 'unhealthy']):
             self.send_response(503)
             self.send_header('Content-Length', '0')
             self.end_headers()
@@ -31,7 +31,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
         body = json.dumps({'id': os.environ['PARCELA_ENVIRONMENT_ID'], 'generation': os.environ['PARCELA_GENERATION'],
-                           'url': os.environ['PARCELA_URL'], 'argv': sys.argv[1:], 'headers': dict(self.headers)}).encode()
+                           'url': os.environ['PARCELA_URL'], 'pid': os.getpid(), 'cwd': os.getcwd(), 'api_origin': os.environ.get('API_ORIGIN'), 'argv': sys.argv[1:], 'headers': dict(self.headers)}).encode()
         self.send_response(200)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Content-Type', 'application/json')

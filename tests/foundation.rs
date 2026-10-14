@@ -99,11 +99,11 @@ fn flat_planned_urls_and_explicit_no_runtime_claims() {
     let preview = registry
         .adopt(&m, &preview_path, Role::Preview, "auth")
         .unwrap();
-    let context = ResolvedContext::new(&registry, &m, preview);
+    let context = ResolvedContext::new(&registry, &m, preview).unwrap();
     assert_eq!(context.planned_urls["web"], "https://auth-demo.localhost");
     assert_eq!(
         context.planned_urls["api"],
-        "https://api.auth-demo.localhost"
+        "https://api-auth-demo.localhost"
     );
     assert!(!context.capabilities.routing && !context.capabilities.data_isolation_verified);
     assert!(!context.runtime_dir.exists());
@@ -312,6 +312,9 @@ fn corrupted_identity_cannot_become_runtime_path() {
         .adopt(&manifest(), &path, Role::Preview, "auth")
         .unwrap();
     let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
+    connection
+        .pragma_update(None, "foreign_keys", "OFF")
+        .unwrap();
     connection
         .execute("UPDATE workspaces SET id = '../../foreign'", [])
         .unwrap();

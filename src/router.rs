@@ -200,10 +200,11 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
     let sessions = registry.sessions()?;
     let mut routes = Vec::new();
     let mut redirects = Vec::new();
-    let hosts: Vec<_> = workspaces
-        .iter()
-        .map(|workspace| workspace.hostname.clone())
-        .collect();
+    let mut hosts = std::collections::BTreeSet::new();
+    for workspace in &workspaces {
+        hosts.extend(registry.hosts(&workspace.id)?.into_values());
+    }
+    let hosts: Vec<_> = hosts.into_iter().collect();
     for host in &hosts {
         crate::config::dns_label(
             host.strip_suffix(".localhost")
@@ -215,30 +216,34 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
         .filter(|s| s.status == "ready" && s.router_token == router.token)
     {
         let path = state.join("environments").join(&session.environment_id);
-        if !crate::owner::Record::read(&path, session).is_ok_and(|record| record.routable(&path)) {
+        let Ok(record) = crate::owner::Record::read(&path, session) else {
+            continue;
+        };
+        if !record.routable(&path) {
             continue;
         }
         let workspace = workspaces
             .iter()
-            .find(|w| w.id == session.environment_id)
+            .find(|workspace| workspace.id == session.environment_id)
             .context("session source missing from registry")?;
-        ensure!(
-            session.backend_port != router.http_port && session.backend_port != router.https_port,
-            "proxy loop rejected"
-        );
-        crate::config::dns_label(
-            workspace
-                .hostname
-                .strip_suffix(".localhost")
-                .context("invalid owned hostname")?,
-        )?;
-
-        routes.push(json!({"@id": format!("run-{}", session.token), "match":[{"host":[workspace.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
-            "handler":"reverse_proxy", "upstreams":[{"dial":format!("127.0.0.1:{}",session.backend_port)}],
-            "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
-        }], "terminal": true}));
-        redirects.push(json!({"match":[{"host":[workspace.hostname]}], "handle":[{"handler":"static_response", "status_code":308,
-            "headers":{"Location":[format!("{}{{http.request.uri}}",router.url(&workspace.hostname))]}}], "terminal": true}));
+        let reserved = registry.hosts(&workspace.id)?;
+        for endpoint in session.endpoints(&record.manifest.default_service) {
+            ensure!(
+                reserved.values().any(|host| host == &endpoint.hostname),
+                "unreserved service route refused"
+            );
+            ensure!(
+                endpoint.backend_port != router.http_port
+                    && endpoint.backend_port != router.https_port,
+                "proxy loop rejected"
+            );
+            routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
+                "handler":"reverse_proxy", "upstreams":[{"dial":format!("127.0.0.1:{}",endpoint.backend_port)}],
+                "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
+            }], "terminal": true}));
+            redirects.push(json!({"match":[{"host":[endpoint.hostname]}], "handle":[{"handler":"static_response", "status_code":308,
+                "headers":{"Location":[format!("{}{{http.request.uri}}",endpoint.public_url)]}}], "terminal": true}));
+        }
     }
     if !hosts.is_empty() {
         routes.push(json!({"match":[{"host":hosts}], "handle":[{"handler":"static_response","status_code":503,"body":"Parcela environment unavailable\n"}], "terminal":true}));

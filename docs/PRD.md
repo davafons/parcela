@@ -157,11 +157,13 @@ Checkout moves require an explicit rebind after identity validation. A missing s
 | Primary default service | `https://shirabe.localhost` |
 | Auth preview default service | `https://auth-shirabe.localhost` |
 | Billing preview default service | `https://billing-shirabe.localhost` |
-| Explicit auth preview API service | `https://api.auth-shirabe.localhost` |
+| Explicit auth preview API service | `https://api-auth-shirabe.localhost` |
 | Auth preview tenant, only when enabled | `https://kobe.auth-shirabe.localhost` |
 | Configurable nested alternative | `https://auth.shirabe.localhost` |
 
 The primary default service has no `main.` prefix. Flat environment bases avoid placing previews under the primary cookie domain. Tenant/wildcard routing is off by default; additional services are explicitly registered and do not require tenant mode. Additional services have explicit names. Service, environment, and tenant labels occupy overlapping DNS namespaces; configuration must reserve conflicting names or require explicit disambiguation.
+
+A project can contain several runnable services in one checkout. One worktree environment owns their explicit Process Compose graph, runtime generation and endpoint set. Commands and working directories can differ per process. Non-HTTP workers need no hostname. The default service uses the environment base; other services use flat prefixes. Starting, stopping and recovering the environment must retain this group ownership rather than registering frontend and backend as unrelated projects.
 
 Changing a label or canonical URL is explicit and updates consumers together. Arbitrary aliases do not change environment identity. Alias ownership is retained while stopped unless explicitly released.
 

@@ -1,11 +1,11 @@
 use crate::{
     config::Manifest,
-    control::{self, Action, LiveState, LiveStatus},
+    control::{self, Action, EndpointHealth, LiveState, LiveStatus},
     http,
     lifecycle::current_session,
     private::{self, Lock},
     process::{OwnedChild, Signals, exit_code, listener_identity, version},
-    registry::{Registry, Session, Workspace},
+    registry::{Endpoint, Registry, Session, Workspace},
     router::{self, Router},
 };
 use anyhow::{Context, Result, ensure};
@@ -26,6 +26,31 @@ pub fn environment(
     url: &str,
     port: Option<u16>,
 ) -> Result<BTreeMap<String, String>> {
+    environment_context(manifest, workspace, runtime, url, port, &[])
+}
+pub fn session_environment(
+    manifest: &Manifest,
+    workspace: &Workspace,
+    runtime: &std::path::Path,
+    session: &Session,
+) -> Result<BTreeMap<String, String>> {
+    environment_context(
+        manifest,
+        workspace,
+        runtime,
+        &session.public_url,
+        Some(session.backend_port),
+        &session.endpoints(&manifest.default_service),
+    )
+}
+fn environment_context(
+    manifest: &Manifest,
+    workspace: &Workspace,
+    runtime: &std::path::Path,
+    url: &str,
+    port: Option<u16>,
+    endpoints: &[Endpoint],
+) -> Result<BTreeMap<String, String>> {
     let mut context = BTreeMap::from([
         ("PARCELA_PROJECT_ID".into(), workspace.project_id.clone()),
         ("PARCELA_ROLE".into(), workspace.role.as_str().into()),
@@ -44,6 +69,28 @@ pub fn environment(
     ]);
     if let Some(port) = port {
         context.insert("PORT".into(), port.to_string());
+    }
+    for (service, hostname) in manifest.service_hosts(&workspace.hostname)? {
+        let prefix = format!(
+            "PARCELA_SERVICE_{}",
+            service.to_ascii_uppercase().replace('-', "_")
+        );
+        let endpoint = endpoints
+            .iter()
+            .find(|endpoint| endpoint.service == service);
+        let service_url = endpoint.map_or_else(
+            || url.replacen(&workspace.hostname, &hostname, 1),
+            |endpoint| endpoint.public_url.clone(),
+        );
+        context.insert(format!("{prefix}_URL"), service_url);
+        context.insert(format!("{prefix}_HOSTNAME"), hostname);
+        if let Some(port) = endpoint.map(|endpoint| endpoint.backend_port).or_else(|| {
+            (service == manifest.default_service)
+                .then_some(port)
+                .flatten()
+        }) {
+            context.insert(format!("{prefix}_PORT"), port.to_string());
+        }
     }
     for (key, value) in &manifest.environment {
         let mut resolved = value.clone();
@@ -109,42 +156,36 @@ pub fn run(
     timeout: u64,
 ) -> Result<i32> {
     ensure!(
-        manifest.services.len() == 1,
-        "initial runtime supports one routed service per environment; additional workers belong in the native graph"
+        matches!(launch, Launch::Compose(_)) || manifest.services.len() == 1,
+        "literal run supports one HTTP service; use up for a service set"
     );
     ensure!(timeout > 0, "readiness timeout must be positive");
     preflight(registry, manifest, workspace, launch, backend_port, timeout)?;
     let router = router::current(registry.state_path())?;
     let path = runtime(registry, workspace)?;
     let _owner = Lock::acquire(&path.join("owner.lock"))?;
-    let probe = TcpListener::bind(("127.0.0.1", backend_port.unwrap_or(0)))
-        .context("backend endpoint unavailable; foreign listeners are never stopped")?;
-    let port = probe.local_addr()?.port();
-    ensure!(
-        port >= 1024 && port != router.https_port && port != router.http_port,
-        "backend endpoint conflicts with privileged/router ports"
-    );
+    let (endpoints, probes) = allocate(registry, manifest, workspace, &router, backend_port)?;
+    let default = endpoints
+        .iter()
+        .find(|endpoint| endpoint.service == manifest.default_service)
+        .context("default endpoint missing")?;
+    let port = default.backend_port;
     let kind = match launch {
         Launch::Command(_) => "run",
         Launch::Compose(_) => "compose",
     };
-    let session = registry.begin_session(
+    let session = registry.begin_endpoints(
         workspace,
         &router.token,
         port,
         kind,
         &router.url(&workspace.hostname),
+        &endpoints,
     )?;
     let prepared = (|| -> Result<_> {
         let mut resolved_workspace = registry.current(&workspace.source, manifest)?;
         resolved_workspace.generation = session.generation;
-        let env = environment(
-            manifest,
-            &resolved_workspace,
-            &path,
-            &session.public_url,
-            Some(port),
-        )?;
+        let env = session_environment(manifest, &resolved_workspace, &path, &session)?;
         private::write_json(
             &path.join("context.json"),
             &json!({"session":session,"environment":env,"source":workspace.source,"isolation":"routing-only; project must consume declared private paths"}),
@@ -167,7 +208,7 @@ pub fn run(
         &session,
         &router,
         launch,
-        probe,
+        probes,
         &env,
         timeout,
         &_owner,
@@ -184,7 +225,7 @@ fn launch_and_monitor(
     session: &Session,
     _router: &Router,
     launch: Launch<'_>,
-    probe: TcpListener,
+    probes: Vec<TcpListener>,
     env: &BTreeMap<String, String>,
     timeout: u64,
     owner_lock: &Lock,
@@ -262,7 +303,7 @@ fn launch_and_monitor(
         }
     };
     // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
-    drop(probe);
+    drop(probes);
     let child = match OwnedChild::spawn(&mut command) {
         Ok(child) => child,
         Err(error) => {
@@ -320,6 +361,58 @@ pub fn resolve_binary(binary: &str, source: &std::path::Path) -> Result<PathBuf>
         .with_context(|| format!("backend executable unavailable: {binary}"))
 }
 
+fn allocate(
+    registry: &Registry,
+    manifest: &Manifest,
+    workspace: &Workspace,
+    router: &Router,
+    port: Option<u16>,
+) -> Result<(Vec<Endpoint>, Vec<TcpListener>)> {
+    let unavailable: std::collections::BTreeSet<_> = registry
+        .sessions()?
+        .iter()
+        .filter(|session| session.status != "stopped")
+        .flat_map(Session::ports)
+        .collect();
+    let mut endpoints = Vec::new();
+    let mut probes = Vec::new();
+    for (service, hostname) in manifest.service_hosts(&workspace.hostname)? {
+        let requested = if service == manifest.default_service {
+            port.unwrap_or(0)
+        } else {
+            0
+        };
+        let mut skipped = Vec::new();
+        let probe = loop {
+            let probe = TcpListener::bind(("127.0.0.1", requested))
+                .context("backend endpoint unavailable; foreign listeners are never stopped")?;
+            if requested != 0 || !unavailable.contains(&probe.local_addr()?.port()) {
+                break probe;
+            }
+            skipped.push(probe);
+            ensure!(
+                skipped.len() < 32,
+                "unable to allocate an unreserved backend endpoint"
+            );
+        };
+        let backend_port = probe.local_addr()?.port();
+        ensure!(
+            backend_port >= 1024
+                && backend_port != router.http_port
+                && backend_port != router.https_port,
+            "backend endpoint conflicts with privileged/router ports"
+        );
+        endpoints.push(Endpoint {
+            service,
+            public_url: router.url(&hostname),
+            hostname,
+            backend_port,
+        });
+        probes.push(probe);
+    }
+    Ok((endpoints, probes))
+}
+
 pub fn preflight(
     registry: &Registry,
     manifest: &Manifest,
@@ -329,8 +422,8 @@ pub fn preflight(
     timeout: u64,
 ) -> Result<()> {
     ensure!(
-        manifest.services.len() == 1,
-        "initial runtime supports one routed service per environment; additional workers belong in the native graph"
+        matches!(launch, Launch::Compose(_)) || manifest.services.len() == 1,
+        "literal run supports one HTTP service; use up for a service set"
     );
     ensure!(
         (1..=86400).contains(&timeout),
@@ -340,7 +433,16 @@ pub fn preflight(
     let mut resolved = workspace.clone();
     resolved.generation += 1;
     let active_router = router::current(registry.state_path())?;
-    let probe = if let Some(port) = port {
+    let reserved = registry.hosts(&workspace.id)?;
+    for (service, host) in manifest.service_hosts(&workspace.hostname)? {
+        ensure!(
+            reserved.get(&service) == Some(&host)
+                || (manifest.services.len() == 1 && reserved.get("") == Some(&host)),
+            "service hostname not reserved; explicitly re-adopt the stopped environment"
+        );
+    }
+    let mut reusable = false;
+    if let Some(port) = port {
         ensure!(
             port >= 1024 && port != active_router.https_port && port != active_router.http_port,
             "backend endpoint conflicts with privileged/router ports"
@@ -349,39 +451,53 @@ pub fn preflight(
             !registry
                 .sessions()?
                 .iter()
-                .any(|session| session.backend_port == port
+                .any(|session| session.ports().contains(&port)
                     && session.environment_id != workspace.id
                     && session.status != "stopped"),
             "backend endpoint reserved by another environment"
         );
-        match TcpListener::bind(("127.0.0.1", port)) {
-            Ok(probe) => probe,
-            Err(_) => {
-                let session = registry
-                    .session(&workspace.id)?
-                    .context("backend endpoint unavailable; foreign listeners are never stopped")?;
-                ensure!(
-                    session.backend_port == port && session.status != "stopped",
-                    "backend endpoint unavailable; foreign listeners are never stopped"
-                );
-                let record = crate::owner::Record::read(&path, &session)?;
-                ensure!(
-                    record.routable(&path),
-                    "backend endpoint is not owned by the current routable generation"
-                );
-                record.authenticate(&path, workspace)?;
-                TcpListener::bind(("127.0.0.1", 0))?
-            }
+        if TcpListener::bind(("127.0.0.1", port)).is_err() {
+            let session = registry
+                .session(&workspace.id)?
+                .context("backend endpoint unavailable; foreign listeners are never stopped")?;
+            ensure!(
+                session.backend_port == port && session.status != "stopped",
+                "backend endpoint unavailable; foreign listeners are never stopped"
+            );
+            let record = crate::owner::Record::read(&path, &session)?;
+            ensure!(
+                record.routable(&path),
+                "backend endpoint is not owned by the current routable generation"
+            );
+            record.authenticate(&path, workspace)?;
+            reusable = true;
         }
-    } else {
-        TcpListener::bind(("127.0.0.1", 0))?
-    };
-    let env = environment(
+    }
+    let (mut endpoints, _probes) = allocate(
+        registry,
+        manifest,
+        workspace,
+        &active_router,
+        if reusable { None } else { port },
+    )?;
+    if reusable {
+        endpoints
+            .iter_mut()
+            .find(|endpoint| endpoint.service == manifest.default_service)
+            .context("default endpoint missing")?
+            .backend_port = port.context("reuse port missing")?;
+    }
+    let default = endpoints
+        .iter()
+        .find(|endpoint| endpoint.service == manifest.default_service)
+        .context("default endpoint missing")?;
+    let env = environment_context(
         manifest,
         &resolved,
         &path,
-        &active_router.url(&workspace.hostname),
-        Some(port.unwrap_or(probe.local_addr()?.port())),
+        &default.public_url,
+        Some(default.backend_port),
+        &endpoints,
     )?;
     if let Launch::Compose(binary) = launch {
         let binary = resolve_binary(binary, &workspace.source)?;
@@ -406,6 +522,14 @@ pub fn preflight(
                         .values()
                         .all(|p| p.get("is_daemon") != Some(&json!(true)))),
             "native graph must contain supervised, non-daemon processes"
+        );
+        ensure!(
+            manifest.services.len() == 1
+                || manifest.services.keys().all(|service| graph
+                    .get("processes")
+                    .and_then(|processes| processes.get(service))
+                    .is_some()),
+            "every routed service must name a native graph process"
         );
         ensure!(
             path.join("ctl.sock").as_os_str().len() < 100
@@ -465,12 +589,10 @@ fn monitor(
 ) -> Result<i32> {
     use crate::owner::Phase;
     let session = record.session.clone();
-    let readiness = &record.manifest.services[&record.manifest.default_service]
-        .readiness_path
-        .clone();
+    let endpoints = session.endpoints(&record.manifest.default_service);
     let mut deadline = Instant::now() + Duration::from_secs(timeout);
     let mut ready = false;
-    let mut listener = Vec::new();
+    let mut listener = BTreeMap::new();
     let mut published = None;
     let mut requested_stop = record.phase == Phase::Stopping;
     let result = (|| -> Result<i32> {
@@ -496,10 +618,9 @@ fn monitor(
                     match &pending.action {
                         Action::Status => live_status(
                             registry,
-                            workspace,
                             &session,
                             supervisor.identity().pid,
-                            readiness,
+                            &record.manifest,
                         ),
                         Action::Stop => {
                             record.phase = Phase::Stopping;
@@ -515,13 +636,8 @@ fn monitor(
                                 .native
                                 .as_ref()
                                 .context("service inspection requires Process Compose")?;
-                            let env = environment(
-                                &record.manifest,
-                                workspace,
-                                path,
-                                &session.public_url,
-                                Some(session.backend_port),
-                            )?;
+                            let env =
+                                session_environment(&record.manifest, workspace, path, &session)?;
                             compose_read(&native.binary, path, action, &record.manifest, &env)
                         }
                     }
@@ -533,7 +649,15 @@ fn monitor(
                     return Ok(0);
                 }
             }
-            let observed = listener_identity(session.backend_port, supervisor.identity().pid)?;
+            let observed = endpoints
+                .iter()
+                .map(|endpoint| {
+                    Ok((
+                        endpoint.service.clone(),
+                        listener_identity(endpoint.backend_port, supervisor.identity().pid)?,
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()?;
             if ready && observed != listener {
                 record.phase = Phase::Starting;
                 record.save(path)?;
@@ -544,10 +668,16 @@ fn monitor(
                 ready = false;
                 deadline = Instant::now() + Duration::from_secs(timeout);
             }
-            let healthy = !observed.is_empty()
-                && (ready
-                    || http::readiness(session.backend_port, &workspace.hostname, readiness)
-                        .unwrap_or(false));
+            let healthy = endpoints.iter().all(|endpoint| {
+                !observed[&endpoint.service].is_empty()
+                    && (ready
+                        || http::readiness(
+                            endpoint.backend_port,
+                            &endpoint.hostname,
+                            &record.manifest.services[&endpoint.service].readiness_path,
+                        )
+                        .unwrap_or(false))
+            });
             listener = observed;
             if healthy != ready {
                 ready = healthy;
@@ -564,13 +694,25 @@ fn monitor(
                         "parcela: ready {} (generation {}, routing-only; data isolation requires project bindings)",
                         session.public_url, session.generation
                     );
+                    for endpoint in endpoints
+                        .iter()
+                        .filter(|endpoint| endpoint.service != record.manifest.default_service)
+                    {
+                        eprintln!(
+                            "parcela: service {} ready {}",
+                            endpoint.service, endpoint.public_url
+                        );
+                    }
                     private::write_json(&path.join("last-successful.json"), &record.manifest)?;
                 }
             }
             if let Ok(router) = router::current(registry.state_path())
                 && published.as_ref() != Some(&router.token)
             {
-                if router.url(&workspace.hostname) == session.public_url {
+                if endpoints
+                    .iter()
+                    .all(|endpoint| router.url(&endpoint.hostname) == endpoint.public_url)
+                {
                     registry.rebind_router(&session, &router.token)?;
                     if router::sync(registry, &router).is_ok() {
                         published = Some(router.token);
@@ -630,10 +772,9 @@ fn monitor(
                 ),
                 Action::Status => live_status(
                     registry,
-                    workspace,
                     &session,
                     supervisor.identity().pid,
-                    readiness,
+                    &record.manifest,
                 ),
                 _ => Err(anyhow::anyhow!(
                     "service inspection unavailable during shutdown"
@@ -805,13 +946,11 @@ pub fn task(
         .as_ref()
         .map(|s| s.public_url.clone())
         .unwrap_or_else(|| format!("https://{}", workspace.hostname));
-    let env = environment(
-        manifest,
-        workspace,
-        &path,
-        &url,
-        session.as_ref().map(|s| s.backend_port),
-    )?;
+    let env = if let Some(session) = &session {
+        session_environment(manifest, workspace, &path, session)?
+    } else {
+        environment(manifest, workspace, &path, &url, None)?
+    };
     let mut command = Command::new(&task.argv[0]);
     command
         .args(&task.argv[1..])
@@ -848,15 +987,39 @@ pub fn task(
 
 fn live_status(
     registry: &Registry,
-    workspace: &Workspace,
     session: &Session,
     child: u32,
-    readiness: &str,
+    manifest: &Manifest,
 ) -> Result<serde_json::Value> {
     let current = current_session(registry, session)?;
-    let listeners = listener_identity(session.backend_port, child)?;
-    let http_ready = !listeners.is_empty()
-        && http::readiness(session.backend_port, &workspace.hostname, readiness).unwrap_or(false);
+    let mut endpoints = BTreeMap::new();
+    let mut listeners = Vec::new();
+    for endpoint in session.endpoints(&manifest.default_service) {
+        let pids = listener_identity(endpoint.backend_port, child)?;
+        let http_ready = !pids.is_empty()
+            && http::readiness(
+                endpoint.backend_port,
+                &endpoint.hostname,
+                &manifest.services[&endpoint.service].readiness_path,
+            )
+            .unwrap_or(false);
+        listeners.extend(&pids);
+        endpoints.insert(
+            endpoint.service.clone(),
+            EndpointHealth {
+                hostname: endpoint.hostname,
+                public_url: endpoint.public_url,
+                backend_port: endpoint.backend_port,
+                listener_owned: !pids.is_empty(),
+                listener_pids: pids,
+                http_ready,
+            },
+        );
+    }
+    listeners.sort_unstable();
+    listeners.dedup();
+    let http_ready = endpoints.values().all(|endpoint| endpoint.http_ready);
+    let listener_owned = endpoints.values().all(|endpoint| endpoint.listener_owned);
     let current_router = router::current(registry.state_path()).ok();
     let router_owned = current_router
         .as_ref()
@@ -876,12 +1039,13 @@ fn live_status(
     Ok(serde_json::to_value(LiveStatus {
         state,
         http_ready,
-        listener_owned: !listeners.is_empty(),
+        listener_owned,
         router_owned,
         route_published,
         owner_pid: std::process::id(),
         child_pid: child,
         listener_pids: listeners,
+        endpoints,
         checked_at_unix_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_millis(),

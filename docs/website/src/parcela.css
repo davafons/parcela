@@ -1,0 +1,118 @@
+:root {
+  --sl-color-white: #f7f9fc;
+  --sl-color-gray-1: #eef1f7;
+  --sl-color-gray-2: #c2ccda;
+  --sl-color-gray-3: #9ba8bc;
+  --sl-color-gray-4: #647086;
+  --sl-color-gray-5: #303847;
+  --sl-color-gray-6: #202631;
+  --sl-color-black: #111318;
+  --sl-color-accent-low: #252f4d;
+  --sl-color-accent: #a1b7ff;
+  --sl-color-accent-high: #a1b7ff;
+  --sl-color-text: #c2ccda;
+  --sl-color-text-accent: #a1b7ff;
+  --sl-color-text-invert: #111318;
+  --sl-color-bg: #111318;
+  --sl-color-bg-nav: #111318;
+  --sl-color-bg-sidebar: #111318;
+  --sl-color-bg-inline-code: #202631;
+  --sl-color-hairline-light: #303847;
+  --sl-color-hairline: #202631;
+  --sl-color-hairline-shade: #111318;
+  --sl-content-width: 46rem;
+  --sl-sidebar-width: 16.5rem;
+  --sl-line-height: 1.75;
+  --sl-line-height-headings: 1.16;
+  --sl-content-gap-y: 1.25rem;
+}
+
+:root[data-theme="light"] {
+  --sl-color-white: #18202f;
+  --sl-color-gray-1: #18202f;
+  --sl-color-gray-2: #354357;
+  --sl-color-gray-3: #617083;
+  --sl-color-gray-4: #8995a7;
+  --sl-color-gray-5: #ced5df;
+  --sl-color-gray-6: #eef1f6;
+  --sl-color-gray-7: #f5f7fb;
+  --sl-color-black: #ffffff;
+  --sl-color-accent-low: #e7edff;
+  --sl-color-accent: #315de8;
+  --sl-color-accent-high: #2649bc;
+  --sl-color-text: #354357;
+  --sl-color-text-accent: #315de8;
+  --sl-color-text-invert: #ffffff;
+  --sl-color-bg: #fafbfc;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #fafbfc;
+  --sl-color-bg-inline-code: #eef1f6;
+  --sl-color-hairline-light: #e1e6ee;
+  --sl-color-hairline: #e1e6ee;
+  --sl-color-hairline-shade: #eef1f6;
+}
+
+.site-title {
+  gap: 0.65rem;
+  color: var(--sl-color-white);
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.site-title img {
+  width: 2rem;
+  height: 2rem;
+}
+
+h1 {
+  font-size: clamp(2rem, 3.6vw, 3rem);
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+h2, h3 {
+  letter-spacing: -0.03em;
+}
+
+.sidebar-content .top-level > li + li {
+  margin-top: 1.1rem;
+}
+
+.sidebar-content summary .large {
+  color: var(--sl-color-gray-3);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.sidebar-content a {
+  border-radius: 0.4rem;
+  padding-block: 0.5rem;
+}
+
+.sidebar-content a[aria-current="page"] {
+  color: var(--sl-color-text-accent);
+  background: var(--sl-color-accent-low);
+}
+
+.sl-markdown-content table {
+  display: block;
+  overflow-x: auto;
+}
+
+.pagination-links a {
+  border-color: var(--sl-color-hairline-light);
+  border-radius: 0.75rem;
+  box-shadow: none;
+}
+
+.pagination-links .link-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+:focus-visible {
+  outline: 3px solid var(--sl-color-text-accent);
+  outline-offset: 3px;
+}

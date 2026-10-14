@@ -46,10 +46,30 @@ impl Record {
         ensure!(
             record.session.environment_id == expected.environment_id
                 && record.session.generation == expected.generation
-                && record.session.token == expected.token,
+                && record.session.token == expected.token
+                && record.session.backend_port == expected.backend_port
+                && record.session.public_url == expected.public_url
+                && record.session.endpoints == expected.endpoints,
             "runtime evidence belongs to a different generation"
         );
         record.manifest.validate()?;
+        let hosts = record.manifest.service_hosts(
+            record
+                .session
+                .public_url
+                .trim_start_matches("https://")
+                .split(':')
+                .next()
+                .unwrap_or_default(),
+        )?;
+        let endpoints = record.session.endpoints(&record.manifest.default_service);
+        ensure!(
+            endpoints.len() == hosts.len()
+                && endpoints
+                    .iter()
+                    .all(|endpoint| hosts.get(&endpoint.service) == Some(&endpoint.hostname)),
+            "recorded service set differs from launch manifest"
+        );
         Ok(record)
     }
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -82,8 +102,14 @@ impl Record {
             && self.owner.alive()
             && self.supervisor.alive()
             && self.lock.locked(&path.join("owner.lock")).unwrap_or(false)
-            && process::listener_identity(self.session.backend_port, self.supervisor.pid)
-                .is_ok_and(|pids| !pids.is_empty())
+            && self
+                .session
+                .endpoints(&self.manifest.default_service)
+                .iter()
+                .all(|endpoint| {
+                    process::listener_identity(endpoint.backend_port, self.supervisor.pid)
+                        .is_ok_and(|pids| !pids.is_empty())
+                })
     }
     pub fn quiescent(&self) -> bool {
         !self.supervisor.alive() && self.processes.iter().all(|process| !process.alive())
@@ -116,13 +142,8 @@ impl Record {
             .arg(path.join("log/recovery.log"));
         let mut resolved = workspace.clone();
         resolved.generation = self.session.generation;
-        let env = crate::runtime::environment(
-            &self.manifest,
-            &resolved,
-            path,
-            &self.session.public_url,
-            Some(self.session.backend_port),
-        )?;
+        let env =
+            crate::runtime::session_environment(&self.manifest, &resolved, path, &self.session)?;
         crate::runtime::command_env(&mut command, &self.manifest, &env);
         Ok(command)
     }

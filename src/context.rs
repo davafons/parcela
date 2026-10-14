@@ -2,6 +2,7 @@ use crate::{
     config::Manifest,
     registry::{Registry, Workspace},
 };
+use anyhow::Result;
 use serde::Serialize;
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -27,24 +28,15 @@ pub struct Capabilities {
     pub data_isolation_verified: bool,
 }
 impl ResolvedContext {
-    pub fn new(registry: &Registry, manifest: &Manifest, workspace: Workspace) -> Self {
+    pub fn new(registry: &Registry, manifest: &Manifest, workspace: Workspace) -> Result<Self> {
+        let reserved = registry.hosts(&workspace.id)?;
         let planned_urls = manifest
-            .services
-            .iter()
-            .map(|(name, service)| {
-                let host = if name == &manifest.default_service {
-                    workspace.hostname.clone()
-                } else {
-                    format!(
-                        "{}.{}",
-                        service.subdomain.as_deref().unwrap_or(name),
-                        workspace.hostname
-                    )
-                };
-                (name.clone(), format!("https://{host}"))
-            })
+            .service_hosts(&workspace.hostname)?
+            .into_iter()
+            .filter(|(_, host)| reserved.values().any(|reserved| reserved == host))
+            .map(|(name, host)| (name, format!("https://{host}")))
             .collect();
-        Self {
+        Ok(Self {
             source_exists: workspace.source.is_dir(),
             runtime_dir: registry.runtime_path(&workspace),
             workspace,
@@ -63,6 +55,6 @@ impl ResolvedContext {
                 "Inspection does not start services or verify planned URLs; use proxy status and status for separate ownership/intent reports",
                 "Data isolation requires project bindings; recorded intent is not live health. Automatic packaging and network sharing remain unsupported",
             ],
-        }
+        })
     }
 }

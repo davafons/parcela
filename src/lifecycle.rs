@@ -247,6 +247,33 @@ pub fn url(registry: &Registry, workspace: &Workspace) -> Result<String> {
     ))
 }
 
+pub fn service_url(registry: &Registry, workspace: &Workspace, service: &str) -> Result<String> {
+    crate::config::dns_label(service)?;
+    let session = registry.session(&workspace.id)?;
+    if let Some(session) = &session
+        && !session.endpoints.is_empty()
+    {
+        return session
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.service == service)
+            .map(|endpoint| endpoint.public_url.clone())
+            .context("unknown routed service");
+    }
+    let hosts = registry.hosts(&workspace.id)?;
+    let hostname = hosts
+        .get(service)
+        .context("unknown routed service; legacy unnamed sessions expose only the default url")?;
+    Ok(session.map_or_else(
+        || format!("https://{hostname}"),
+        |session| {
+            session
+                .public_url
+                .replacen(&workspace.hostname, hostname, 1)
+        },
+    ))
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchSnapshot {

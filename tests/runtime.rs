@@ -222,7 +222,7 @@ fn old_registry_migration_is_explicit_and_preserves_ids() {
     let state = temp.path().join("state");
     let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
     connection
-        .execute_batch("DROP TABLE sessions; PRAGMA user_version=1;")
+        .execute_batch("DROP TABLE active_ports; DROP TABLE workspace_hosts; DROP TABLE sessions; PRAGMA user_version=1;")
         .unwrap();
     drop(connection);
     let old = Registry::open(&state, false).unwrap().unwrap();
@@ -259,4 +259,225 @@ fn explicit_forwarding_keeps_public_url_port_free_without_changing_listeners() {
         config["apps"]["http"]["servers"]["redirect"]["routes"][1]["handle"][0]["body"],
         format!("parcela-{}", router.token)
     );
+}
+
+#[test]
+fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
+    use parcela::registry::Endpoint;
+    let (temp, mut registry, mut manifest, workspace) = fixture();
+    manifest.services.insert(
+        "backend".into(),
+        parcela::config::Service {
+            subdomain: Some("api".into()),
+            readiness_path: "/ready".into(),
+        },
+    );
+    registry
+        .adopt(&manifest, &workspace.source, Role::Preview, "auth")
+        .unwrap();
+    let hosts = manifest.service_hosts(&workspace.hostname).unwrap();
+    assert_eq!(hosts["backend"], "api-auth-app.localhost");
+    let token = Uuid::new_v4().to_string();
+    let endpoints = vec![
+        Endpoint {
+            service: "web".into(),
+            hostname: workspace.hostname.clone(),
+            backend_port: 32010,
+            public_url: "https://auth-app.localhost".into(),
+        },
+        Endpoint {
+            service: "backend".into(),
+            hostname: hosts["backend"].clone(),
+            backend_port: 32011,
+            public_url: "https://api-auth-app.localhost".into(),
+        },
+    ];
+    let session = registry
+        .begin_endpoints(
+            &workspace,
+            &token,
+            32010,
+            "compose",
+            "https://auth-app.localhost",
+            &endpoints,
+        )
+        .unwrap();
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().endpoints,
+        endpoints
+    );
+    let other = temp.path().join("other");
+    fs::create_dir(&other).unwrap();
+    let other = registry
+        .adopt(&manifest, &other, Role::Preview, "other")
+        .unwrap();
+    assert!(
+        registry
+            .begin_session(&other, &token, 32011, "run", "https://other-app.localhost")
+            .is_err()
+    );
+    let other_endpoints = vec![
+        Endpoint {
+            service: "web".into(),
+            hostname: other.hostname.clone(),
+            backend_port: 32012,
+            public_url: "https://other-app.localhost".into(),
+        },
+        Endpoint {
+            service: "backend".into(),
+            hostname: "api-other-app.localhost".into(),
+            backend_port: 32011,
+            public_url: "https://api-other-app.localhost".into(),
+        },
+    ];
+    assert!(
+        registry
+            .begin_endpoints(
+                &other,
+                &token,
+                32012,
+                "compose",
+                "https://other-app.localhost",
+                &other_endpoints
+            )
+            .is_err()
+    );
+    assert!(registry.session(&other.id).unwrap().is_none());
+    let database =
+        rusqlite::Connection::open(registry.state_path().join("registry.sqlite3")).unwrap();
+    assert_eq!(
+        database
+            .query_row(
+                "SELECT count(*) FROM active_ports WHERE port=32012",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+
+    assert_eq!(
+        registry
+            .current(&other.source, &manifest)
+            .unwrap()
+            .generation,
+        1
+    );
+    assert!(
+        registry
+            .adopt(&manifest, &workspace.source, Role::Preview, "auth")
+            .is_ok()
+    );
+    manifest.services.remove("backend");
+    assert!(
+        registry
+            .adopt(&manifest, &workspace.source, Role::Preview, "auth")
+            .is_err()
+    );
+    registry.session_status(&session, "stopped").unwrap();
+    let next = registry
+        .begin_session(&other, &token, 32011, "run", "https://other-app.localhost")
+        .unwrap();
+    assert_eq!(next.backend_port, 32011);
+    assert!(registry.session_status(&session, "ready").is_err());
+    registry.session_status(&session, "stopped").unwrap();
+    assert!(
+        registry
+            .begin_session(
+                &workspace,
+                &token,
+                32011,
+                "run",
+                "https://auth-app.localhost"
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn secondary_hostname_conflicts_with_preview_base_without_partial_adoption() {
+    let (temp, mut registry, mut manifest, workspace) = fixture();
+    manifest.services.insert(
+        "api".into(),
+        parcela::config::Service {
+            subdomain: None,
+            readiness_path: "/".into(),
+        },
+    );
+    registry
+        .adopt(&manifest, &workspace.source, Role::Preview, "auth")
+        .unwrap();
+    let other = temp.path().join("collision");
+    fs::create_dir(&other).unwrap();
+    assert!(
+        registry
+            .adopt(&manifest, &other, Role::Preview, "api-auth")
+            .is_err()
+    );
+    assert_eq!(registry.list(None).unwrap().len(), 1);
+    assert_eq!(
+        registry.hosts(&workspace.id).unwrap()["api"],
+        "api-auth-app.localhost"
+    );
+    assert!(
+        manifest
+            .service_hosts(&format!("{}.localhost", "a".repeat(63)))
+            .is_err()
+    );
+}
+
+#[test]
+fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
+    let (temp, mut registry, manifest, workspace) = fixture();
+    let token = Uuid::new_v4().to_string();
+    let session = registry
+        .begin_session(
+            &workspace,
+            &token,
+            32030,
+            "compose",
+            "https://auth-app.localhost",
+        )
+        .unwrap();
+    let mut legacy = serde_json::to_value(&session).unwrap();
+    legacy.as_object_mut().unwrap().remove("endpoints");
+    let parsed: parcela::registry::Session = serde_json::from_value(legacy).unwrap();
+    assert!(parsed.endpoints.is_empty());
+    assert_eq!(parsed.endpoints("web")[0].hostname, "auth-app.localhost");
+    drop(registry);
+    let state = temp.path().join("state");
+    let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
+    connection.execute_batch("DROP TABLE active_ports; DROP TABLE workspace_hosts; ALTER TABLE sessions DROP COLUMN endpoints;
+        CREATE UNIQUE INDEX active_port ON sessions(backend_port) WHERE status != 'stopped'; PRAGMA user_version=2;").unwrap();
+    let old = Registry::open(&state, false).unwrap().unwrap();
+    assert_eq!(
+        old.session(&workspace.id).unwrap().unwrap().token,
+        session.token
+    );
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    drop(old);
+    let mut migrated = Registry::open(&state, true).unwrap().unwrap();
+    let current = migrated.session(&workspace.id).unwrap().unwrap();
+    assert_eq!(current.token, session.token);
+    assert_eq!(current.generation, 2);
+    assert_eq!(current.backend_port, 32030);
+    let other = temp.path().join("other");
+    fs::create_dir(&other).unwrap();
+    let other = migrated
+        .adopt(&manifest, &other, Role::Preview, "other")
+        .unwrap();
+    assert!(
+        migrated
+            .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
+            .is_err()
+    );
+    migrated.session_status(&current, "stopped").unwrap();
+    migrated
+        .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
+        .unwrap();
 }
