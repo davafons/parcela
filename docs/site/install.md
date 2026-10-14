@@ -2,25 +2,35 @@
 
 ## Build the CLI
 
-Use macOS or Linux. You need Rust 1.89 or newer and a C toolchain for bundled SQLite. Release packaging and automatic backend installation are not implemented.
+Use macOS or Linux. You need Rust 1.89 or newer and a C toolchain for bundled SQLite. Release archives, a public shell installer and automatic backend installation are not available yet.
+
+The source repository is currently private. You need repository access or an existing source checkout to build the CLI. Public documentation and example downloads do not grant that access.
 
 Build the [`main` source branch](https://github.com/davafons/parcela/tree/main) for the commands in these guides. Select the intended revision through your project's VCS workflow before building.
 
-From that Parcela source checkout:
+From that Parcela source checkout, copy this block into your shell:
 
 ```sh
-cargo build --release --locked
-./target/release/parcela --version
-./target/release/parcela --help
+cargo build --release --locked &&
+  export PATH="$PWD/target/release:$PATH" &&
+  parcela --version &&
+  parcela --help
 ```
 
-Add that build to this shell's path:
+Expect `parcela 0.1.0` followed by command help. If the build fails, the remaining commands do not run.
+
+The PATH change affects this shell only. It does not replace an installed binary or restart its proxy. Keep the same binary and registry for later environment commands.
+
+To print instructions your agent can read:
 
 ```sh
-export PATH="$PWD/target/release:$PATH"
+parcela --skill
 ```
 
-This changes the current shell only. It does not replace an installed binary or restart its proxy. Keep the same binary and registry for later environment commands.
+The command prints Markdown without reading or creating project or registry state. Printing it does not install a skill.
+
+- [Install the operating skill for Claude Code](agents.md#install-the-skill-for-claude-code) with a copyable project-local command.
+- [Ask your existing agent to configure this checkout](agents.md#tldr-ask-your-agent-to-configure-this-checkout) without a separate AI setup service.
 
 > **Coordinate upgrades.**
 >
@@ -35,6 +45,8 @@ Inspect the exact tools you intend to use:
 ```sh
 parcela doctor --caddy caddy --process-compose process-compose
 ```
+
+Read `backend_probes` in the JSON response. Both tools should have `availability: "available"` and a version. An unavailable probe does not install the missing tool. Version availability is not proof that the front door is ready.
 
 The native acceptance fixtures use Caddy 2.11.7 and Process Compose 1.122.0. Other versions require their own verification. A successful version probe does not prove graph compatibility or application health.
 
