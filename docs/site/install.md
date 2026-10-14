@@ -4,7 +4,7 @@
 
 Use macOS or Linux. You need Rust 1.89 or newer and a C toolchain for bundled SQLite. Release packaging and automatic backend installation are not implemented.
 
-Build the [`docs-site` development branch](https://github.com/davafons/parcela/tree/docs-site) for the commands in these guides. The published `main` branch does not yet include its service-set or bundled-skill changes. Select the intended revision through your project's VCS workflow before building.
+Build the [`main` source branch](https://github.com/davafons/parcela/tree/main) for the commands in these guides. Select the intended revision through your project's VCS workflow before building.
 
 From that Parcela source checkout:
 
