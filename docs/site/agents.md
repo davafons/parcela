@@ -52,7 +52,14 @@ An agent can load the returned text into its context. The [operating skill](../.
 ```sh
 (
 	set -eu
-	skill_dir=.claude/skills/parcela
+	skill_root=.claude
+	skill_dir="$skill_root/skills/parcela"
+	for path in "$skill_root" "$skill_root/skills" "$skill_dir"; do
+		if test -L "$path"; then
+			printf 'Refusing symlinked skill directory: %s\n' "$path" >&2
+			exit 1
+		fi
+	done
 	mkdir -p "$skill_dir"
 	stage=$(mktemp -d "$skill_dir/.install.XXXXXX")
 	trap 'rm -f "$stage/SKILL.md"; rmdir "$stage"' EXIT
@@ -62,7 +69,7 @@ An agent can load the returned text into its context. The [operating skill](../.
 )
 ```
 
-The block installs the complete bundled Markdown and refuses to replace an existing `SKILL.md`. It does not install the CLI, edit Claude permissions, or start services. If an older binary lacks `--skill`, the command fails without publishing an empty skill.
+The block installs the complete bundled Markdown and refuses to replace an existing `SKILL.md`. It also refuses symlinked skill directories before creating files, so an existing project path cannot silently redirect the install into personal scope. It does not install the CLI, edit Claude permissions, or start services. If an older binary lacks `--skill`, the command fails without publishing an empty skill.
 
 Open a Claude Code session in that project. At the Claude Code prompt, invoke the skill with a bounded request:
 
@@ -70,7 +77,7 @@ Open a Claude Code session in that project. At the Claude Code prompt, invoke th
 /parcela Inspect this checkout's status and services. Do not start, stop or restart any environment.
 ```
 
-For a personal skill available across projects, use the same block with `skill_dir="$HOME/.claude/skills/parcela"`. Choose that scope explicitly. Do not replace a customized skill without reviewing its differences. After a CLI upgrade, inspect `parcela --skill` before updating the installed copy.
+For a personal skill available across projects, replace the `skill_root=.claude` line with `skill_root="$HOME/.claude"`. Choose that scope explicitly. Do not replace a customized skill without reviewing its differences. After a CLI upgrade, inspect `parcela --skill` before updating the installed copy.
 
 Without a compatible binary, [download the operating skill](../../.agents/skills/parcela/SKILL.md?raw=1) and save it as `.claude/skills/parcela/SKILL.md`. This is a standalone skill, not a published Claude plugin or marketplace installer. It covers operating configured environments; use the setup request above to configure a project first.
 
