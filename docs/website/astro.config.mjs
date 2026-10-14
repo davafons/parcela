@@ -20,7 +20,7 @@ export default defineConfig({
   trailingSlash: 'always',
   integrations: [starlight({
     title: 'Parcela',
-    favicon: '/assets/logo.svg',
+    favicon: '/assets/logo.svg?v=picket-a',
     description: 'Named local HTTPS and native service sets for your development worktrees.',
     logo: { src: '../../logo.svg', alt: '' },
     expressiveCode: {
