@@ -97,7 +97,6 @@ export function prepareContent(base) {
       if (!route) throw new Error(`Undeclared public link: ${reference} from ${source}`);
       return `](${route}${suffix === '?raw=1' ? '' : suffix})`;
     });
-    markdown = markdown.replace('src="../../logo.svg"', `src="${base}assets/logo.svg"`);
     writeFileSync(join(src, 'content/docs', `${slug}.md`), `---\ntitle: ${JSON.stringify(title)}\n---\n\n${markdown}`);
   }
   writeFileSync(join(src, 'content.config.ts'), `import { defineCollection } from 'astro:content';\nimport { docsLoader } from '@astrojs/starlight/loaders';\nimport { docsSchema } from '@astrojs/starlight/schema';\nexport const collections = { docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }) };\n`);

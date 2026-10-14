@@ -65,6 +65,45 @@ def target_file(site, current, reference, base='/'):
     return target
 
 
+def contrast_ratio(foreground, background):
+    def luminance(color):
+        channels = [int(color[offset:offset + 2], 16) / 255 for offset in (1, 3, 5)]
+        linear = [value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+                  for value in channels]
+        return sum(value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    light, dark = sorted((luminance(foreground), luminance(background)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def check_theme_colors():
+    text = (WEBSITE / 'src/parcela.css').read_text()
+    palettes = {mode or 'dark': dict(re.findall(r'(--sl-[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;', body))
+                for mode, body in re.findall(r':root(?:\[data-theme="(light)"\])?\s*\{([^}]+)\}', text)}
+    if set(palettes) != {'dark', 'light'}:
+        raise ValueError('expected explicit dark and light palettes')
+    pairs = [
+        ('body', 'text', 'bg', 4.5),
+        ('heading', 'white', 'bg', 4.5),
+        ('sidebar label', 'gray-3', 'bg-sidebar', 4.5),
+        ('link', 'text-accent', 'bg', 4.5),
+        ('selected navigation', 'text-accent', 'accent-low', 4.5),
+        ('inline code', 'text', 'bg-inline-code', 4.5),
+        ('accent control', 'text-invert', 'text-accent', 4.5),
+        ('focus on page', 'text-accent', 'bg', 3),
+        ('focus in header', 'text-accent', 'bg-nav', 3),
+    ]
+    results = {}
+    for mode, colors in palettes.items():
+        results[mode] = {}
+        for label, foreground, background, minimum in pairs:
+            ratio = contrast_ratio(colors[f'--sl-color-{foreground}'], colors[f'--sl-color-{background}'])
+            if ratio < minimum:
+                raise ValueError(f'{mode} {label} contrast {ratio:.2f} is below {minimum}')
+            results[mode][label] = round(ratio, 2)
+    return results
+
+
 def check_search(site, base):
     expected = json.loads((site / 'documentation-pages.json').read_text())
     indexed = {}
@@ -221,7 +260,8 @@ def main():
             results.append(check_http(site, pages, resources, base))
         report = {'complete': True, 'hosting': results, 'internal_docs_excluded': True,
                   'undeclared_and_external_sources_refused': True, 'canonical_downloads': True,
-                  'search_index_pages': check_search(site, base), 'browser_visual_check': False}
+                  'search_index_pages': check_search(site, base), 'declared_theme_contrast': check_theme_colors(),
+                  'browser_visual_check': False}
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(json.dumps(report, indent=2) + '\n')

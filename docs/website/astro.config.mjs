@@ -22,7 +22,10 @@ export default defineConfig({
     title: 'Parcela',
     favicon: '/assets/logo.svg',
     description: 'Named local HTTPS and native service sets for your development worktrees.',
-    logo: { src: '../../logo.svg', alt: 'Parcela' },
+    logo: { src: '../../logo.svg', alt: '' },
+    expressiveCode: {
+      styleOverrides: { borderRadius: '0.75rem' },
+    },
     social: [{ icon: 'github', label: 'Source on GitHub', href: 'https://github.com/davafons/parcela' }],
     customCss: ['./src/parcela.css'],
     sidebar: groups.map(({ label, pages }) => ({

@@ -1,15 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
   <title id="title">Parcela</title>
-  <desc id="desc">Four green and gold parcels separated by paths inside a rounded forest-green tile.</desc>
-  <rect x="8" y="8" width="144" height="144" rx="34" fill="#173f35"/>
-  <rect x="9" y="9" width="142" height="142" rx="33" fill="none" stroke="#2e5c4e" stroke-width="2"/>
-  <path d="M43 28h27v42H28V43a15 15 0 0 1 15-15Z" fill="#a7d78c"/>
-  <path d="M90 28h27a15 15 0 0 1 15 15v27H90Z" fill="#69b590"/>
-  <path d="M28 90h42v42H43a15 15 0 0 1-15-15Z" fill="#4c9b75"/>
-  <path d="M90 90h42v27a15 15 0 0 1-15 15H90Z" fill="#dec982"/>
-  <g fill="none" stroke="#173f35" stroke-width="3" stroke-linecap="round" opacity="0.28">
-    <path d="m39 55 16-16m-12 25 21-21m34 5h25m-25 11h25M38 101h23m-23 11h23m40 4 15-15m-16 24 25-25"/>
-  </g>
-  <path d="M80 27v106M27 80h106" fill="none" stroke="#edf2d9" stroke-width="6" stroke-linecap="round"/>
-  <circle cx="80" cy="80" r="7" fill="#edf2d9"/>
+  <desc id="desc">A white geometric P on a rounded cobalt-blue square.</desc>
+  <rect x="8" y="8" width="144" height="144" rx="32" fill="#315de8"/>
+  <path fill="#ffffff" fill-rule="evenodd" d="M48 120V40h40c22 0 34 10 34 26s-12 26-34 26H70v28H48Zm22-62v16h18c8 0 12-2 12-8s-4-8-12-8H70Z"/>
 </svg>

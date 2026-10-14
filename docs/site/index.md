@@ -1,7 +1,5 @@
 # Run development services at named HTTPS URLs
 
-<img src="../../logo.svg" alt="Parcela" width="96" class="brand-mark">
-
 Parcela connects a checkout to its service set. Keep a primary environment and several previews identifiable without managing browser-facing port numbers.
 
 ```text

@@ -1,8 +1,9 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
-from scripts.check_docs import Page, inspect_site, target_file
+from scripts.check_docs import Page, check_theme_colors, contrast_ratio, inspect_site, target_file
 
 
 class DocumentationLinks(unittest.TestCase):
@@ -46,6 +47,24 @@ class DocumentationLinks(unittest.TestCase):
             with self.subTest(reference=reference), self.assertRaises(ValueError):
                 target_file(self.site, self.current, reference)
         self.assertIsNone(target_file(self.site, self.current, 'https://example.test/'))
+
+    def test_color_contrast_uses_linear_srgb_luminance(self):
+        self.assertAlmostEqual(contrast_ratio('#ffffff', '#000000'), 21)
+        self.assertAlmostEqual(contrast_ratio('#ffffff', '#ffffff'), 1)
+        self.assertAlmostEqual(contrast_ratio('#777777', '#ffffff'), 4.478089, places=5)
+
+    def test_color_contrast_is_independent_of_foreground_order(self):
+        self.assertAlmostEqual(contrast_ratio('#000000', '#ffffff'), 21)
+        self.assertAlmostEqual(contrast_ratio('#ffffff', '#777777'), 4.478089, places=5)
+
+    def test_unreadable_declared_theme_is_rejected(self):
+        (self.site / 'src').mkdir()
+        (self.site / 'src/parcela.css').write_text(
+            ':root { --sl-color-text: #111318; --sl-color-bg: #111318; }'
+            ':root[data-theme="light"] { --sl-color-text: #ffffff; --sl-color-bg: #ffffff; }')
+        with patch('scripts.check_docs.WEBSITE', self.site):
+            with self.assertRaisesRegex(ValueError, 'dark body contrast 1.00 is below 4.5'):
+                check_theme_colors()
 
     def test_duplicate_ids_fail_instead_of_hiding_anchor_ambiguity(self):
         with self.assertRaisesRegex(ValueError, 'duplicate HTML ID'):
