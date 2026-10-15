@@ -54,9 +54,9 @@ An agent can load the returned text into its context. The [operating skill](../.
 	set -eu
 	skill_root=.claude
 	skill_dir="$skill_root/skills/parcela"
-	for path in "$skill_root" "$skill_root/skills" "$skill_dir"; do
-		if test -L "$path"; then
-			printf 'Refusing symlinked skill directory: %s\n' "$path" >&2
+	for skill_path in "$skill_root" "$skill_root/skills" "$skill_dir"; do
+		if test -L "$skill_path"; then
+			printf 'Refusing symlinked skill directory: %s\n' "$skill_path" >&2
 			exit 1
 		fi
 	done
