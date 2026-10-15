@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from pathlib import Path
 
 DOCUMENT = Path(__file__).resolve().parents[1] / 'docs/site/agents.md'
 PAYLOAD = b'---\nname: parcela\ndescription: Test fixture\n---\nFixture instructions.\n'
+ZSH = shutil.which('zsh')
 
 
 class ClaudeSkillInstallation(unittest.TestCase):
@@ -36,9 +38,10 @@ class ClaudeSkillInstallation(unittest.TestCase):
         section = DOCUMENT.read_text().split('## Install the skill for Claude Code\n', 1)[1]
         self.script = re.search(r'```sh\n(.*?)\n```', section, re.S).group(1)
 
-    def install(self, script=None):
+    def install(self, script=None, shell='/bin/sh'):
+        command = [shell, '-f'] if Path(shell).name == 'zsh' else [shell]
         result = subprocess.run(
-            ['/bin/sh', '-c', self.script if script is None else script],
+            [*command, '-c', self.script if script is None else script],
             cwd=self.project, env=self.environment, capture_output=True,
             text=True, timeout=5)
         self.assertEqual((self.state / 'sentinel').read_bytes(), b'unchanged state')
@@ -131,6 +134,22 @@ class ClaudeSkillInstallation(unittest.TestCase):
         assignment = re.search(r'line with `(skill_root=[^`]+)`', text).group(1)
         script = self.script.replace('skill_root=.claude', assignment)
         result = self.install(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.home / '.claude/skills/parcela/SKILL.md').read_bytes(), PAYLOAD)
+        self.assertFalse((self.project / '.claude').exists())
+
+    @unittest.skipUnless(ZSH, 'zsh is not installed')
+    def test_zsh_can_paste_the_exact_project_install_block(self):
+        result = self.install(shell=ZSH)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.project / '.claude/skills/parcela/SKILL.md').read_bytes(), PAYLOAD)
+        self.assertFalse((self.home / '.claude').exists())
+
+    @unittest.skipUnless(ZSH, 'zsh is not installed')
+    def test_zsh_can_paste_the_explicit_personal_install_block(self):
+        assignment = re.search(r'line with `(skill_root=[^`]+)`', DOCUMENT.read_text()).group(1)
+        script = self.script.replace('skill_root=.claude', assignment)
+        result = self.install(script, shell=ZSH)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.home / '.claude/skills/parcela/SKILL.md').read_bytes(), PAYLOAD)
         self.assertFalse((self.project / '.claude').exists())
