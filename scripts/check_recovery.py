@@ -56,6 +56,13 @@ def free_port(exclude=()):
         if port not in exclude:
             return port
 
+def socket_path(app, kind):
+    return Path(json.loads((app['runtime'] / 'context.json').read_text())['sockets'][kind])
+
+def socket_live(path):
+    with socket.socket(socket.AF_UNIX) as probe:
+        return probe.connect_ex(str(path)) == 0
+
 def wait_for(check, timeout=15):
     deadline = time.monotonic() + timeout
     last = None
@@ -173,7 +180,7 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
     def caddy_config(self):
         with socket.socket(socket.AF_UNIX) as stream:
             stream.settimeout(3)
-            stream.connect(str(self.state / 'proxy/admin.sock'))
+            stream.connect(json.loads((self.state / 'proxy/caddy.json').read_text())['admin']['listen'].removeprefix('unix/'))
             stream.sendall(b'GET /config/ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
             with HTTPResponse(stream) as response:
                 response.begin()
@@ -183,14 +190,14 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
         context = json.loads((app['runtime'] / 'context.json').read_text())
         assert context['session']['environment_id'] == app['id']
         token = ['--token-file', str(app['runtime'] / 'pc.token')] if (app['runtime'] / 'pc.token').exists() else []
-        return subprocess.run([self.args.compose, *token, '--use-uds', '--unix-socket', str(app['runtime'] / 'pc.sock'), '--log-file', str(self.root / 'native-client.log'), 'down'],
+        return subprocess.run([self.args.compose, *token, '--use-uds', '--unix-socket', str(socket_path(app, 'compose')), '--log-file', str(self.root / 'native-client.log'), 'down'],
                               capture_output=True, text=True, timeout=20)
     def close(self):
         for app in self.apps:
-            if (app['runtime'] / 'pc.sock').exists():
+            if (app['runtime'] / 'context.json').exists() and socket_path(app, 'compose').exists():
                 try:
                     self.cli(app['path'], 'down')
-                    if (app['runtime'] / 'pc.sock').exists(): self.pc_down(app)
+                    if socket_path(app, 'compose').exists(): self.pc_down(app)
                 except (OSError, subprocess.TimeoutExpired): pass
         for child in reversed(self.owners):
             if child.poll() is None:
@@ -202,6 +209,13 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
         for app in self.apps:
             wait_for(lambda: not listening(app['port']), timeout=12)
         for log in self.logs: log.close()
+        for app in self.apps:
+            if (app['runtime'] / 'context.json').exists():
+                for kind in ('control', 'compose'):
+                    path = socket_path(app, kind)
+                    if path.is_socket() and not socket_live(path): path.unlink()
+                try: socket_path(app, 'control').parent.rmdir()
+                except OSError: pass
     def details(self):
         return {'fixture': str(self.root), 'https_port': self.https, 'http_port': self.http}
 
@@ -246,7 +260,7 @@ def graceful_stop(f):
     assert f.session(app)['status'] == 'stopped'
     assert (app['runtime'] / 'shutdown-completed').exists(), 'stop success requires completed native shutdown'
     assert not listener_pids(app['port']), 'stop success must not leave a supervised listener'
-    assert not (app['runtime'] / 'pc.sock').exists(), 'normal shutdown must remove its native socket'
+    assert not socket_path(app, 'compose').exists(), 'normal shutdown must remove its native socket'
     assert owner.wait(timeout=5) == 0
     retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
@@ -302,7 +316,7 @@ def lost_stop_reply(f):
     owner = f.start(app)
     session = f.session(app)
     with socket.socket(socket.AF_UNIX) as client:
-        client.connect(str(app['runtime'] / 'ctl.sock'))
+        client.connect(str(socket_path(app, 'control')))
         client.sendall((json.dumps({'environment_id': app['id'], 'token': session['token'], 'generation': session['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
     wait_for(lambda: f.session(app)['status'] in ['stopping', 'stopped'])
     retry = f.cli(app['path'], 'down')
@@ -365,7 +379,7 @@ def interrupted_stop(f):
     owner = f.start(app)
     session = f.session(app)
     with socket.socket(socket.AF_UNIX) as client:
-        client.connect(str(app['runtime'] / 'ctl.sock'))
+        client.connect(str(socket_path(app, 'control')))
         client.sendall((json.dumps({'environment_id': app['id'], 'token': session['token'], 'generation': session['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
     wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
     owner.kill()
@@ -385,7 +399,7 @@ def ongoing_stop_retry(f):
     owner = f.start(app)
     session = f.session(app)
     with socket.socket(socket.AF_UNIX) as client:
-        client.connect(str(app['runtime'] / 'ctl.sock'))
+        client.connect(str(socket_path(app, 'control')))
         client.sendall((json.dumps({'environment_id': app['id'], 'token': session['token'], 'generation': session['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
     wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
     owner.kill()
@@ -499,7 +513,7 @@ os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *s
     assert retry.returncode != 0, 'uncertain allocation must not be silently replayed'
     assert f.session(app)['token'] == session['token'] and f.session(app)['status'] == 'starting'
     assert marker.read_text() == 'preserve allocation fixture'
-    assert not (app['runtime'] / 'pc.sock').exists() and not listening(app['port'])
+    assert not socket_path(app, 'compose').exists() and not listening(app['port'])
     assert f.request(app)[0] == 503
     return {'unknown_allocation_refused': True, 'lease_retained': True, 'source_data_preserved': True}
 
@@ -558,7 +572,7 @@ def replaced_native_socket(f):
     owner = f.start(app)
     owner.kill()
     owner.wait(timeout=5)
-    path = app['runtime'] / 'pc.sock'
+    path = socket_path(app, 'compose')
     retained = app['runtime'] / 'retained.sock'
     path.rename(retained)
     try:
@@ -570,7 +584,7 @@ def replaced_native_socket(f):
             assert down.returncode != 0, 'replaced native socket must not authorize shutdown'
             assert path.stat().st_ino == inode, 'foreign socket must be preserved'
             assert listening(app['port']), 'original graph must not be signaled'
-            assert (app['runtime'] / 'ctl.sock').exists(), 'refusal must preserve original control evidence'
+            assert socket_path(app, 'control').exists(), 'refusal must preserve original control evidence'
             wait_for(lambda: f.request(app)[0] == 503)
     finally:
         path.unlink()
@@ -774,7 +788,7 @@ def detached_stopped_recovery(f, finish_first):
     original = f.session(app)
     with socket.socket(socket.AF_UNIX) as control:
         control.settimeout(5)
-        control.connect(str(app['runtime'] / 'ctl.sock'))
+        control.connect(str(socket_path(app, 'control')))
         control.sendall((json.dumps({'environment_id': app['id'], 'generation': original['generation'], 'token': original['token'], 'action': {'type': 'stop'}}) + '\n').encode())
         with control.makefile('rb') as response:
             reply = json.loads(response.readline())
@@ -811,7 +825,7 @@ def crash_whole_tree(f, app):
         try: os.kill(process['pid'], signal.SIGKILL)
         except ProcessLookupError: pass
     wait_for(lambda: not listening(app['port']))
-    assert (app['runtime'] / 'pc.sock').exists() and (app['runtime'] / 'ctl.sock').exists(), 'a crash leaves stale sockets'
+    assert socket_path(app, 'compose').exists() and socket_path(app, 'control').exists(), 'a crash leaves stale sockets'
     assert f.session(app)['status'] == 'ready'
     return before
 
@@ -823,7 +837,7 @@ def crashed_tree_down(f):
     assert json.loads(first.stdout)['state'] == 'stopped'
     second = f.cli(app['path'], 'down')
     assert second.returncode == 0 and json.loads(second.stdout)['already_stopped'] is True, second.stderr
-    assert not (app['runtime'] / 'pc.sock').exists() and not (app['runtime'] / 'ctl.sock').exists()
+    assert not socket_path(app, 'compose').exists() and not socket_path(app, 'control').exists()
     assert f.request(app)[0] == 503
     retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr

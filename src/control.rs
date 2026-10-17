@@ -122,11 +122,8 @@ pub struct Server {
 impl Server {
     pub fn bind(runtime: &Path) -> Result<Self> {
         private::directory(runtime)?;
-        let path = runtime.join("ctl.sock");
-        ensure!(
-            path.as_os_str().len() < 100,
-            "runtime path too long for owner control socket"
-        );
+        let path = crate::sockets::environment(runtime)?.control;
+        crate::sockets::prepare(&path)?;
         let listener = UnixListener::bind(&path).context(
             "owner control socket already exists or is unavailable; no takeover performed",
         )?;
@@ -191,7 +188,8 @@ impl Drop for Server {
 
 pub fn request(runtime: &Path, session: &Session, action: Action) -> Result<Value> {
     private::existing_directory(runtime)?;
-    let path = runtime.join("ctl.sock");
+    let path = crate::sockets::environment(runtime)?.control;
+    crate::sockets::verify(&path).context("live owner unavailable; older or interrupted runs require explicit reconciliation, never PID signaling")?;
     let metadata = fs::symlink_metadata(&path).context("live owner unavailable; older or interrupted runs require explicit reconciliation, never PID signaling")?;
     // SAFETY: getuid has no pointers or failure case.
     ensure!(

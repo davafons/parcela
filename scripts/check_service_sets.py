@@ -172,7 +172,7 @@ process_compose:
         note('per-endpoint-health')
         frontend_pid = request('sets.localhost')['pid']
         unhealthy.touch()
-        subprocess.run([args.process_compose, '--use-uds', '--unix-socket', str(runtime / 'pc.sock'),
+        subprocess.run([args.process_compose, '--use-uds', '--unix-socket', json.loads((runtime / 'context.json').read_text())['sockets']['compose'],
                         '--token-file', str(runtime / 'pc.token'), '--log-file', str(runtime / 'log/probe.log'),
                         'process', 'restart', 'backend'], check=True, capture_output=True, timeout=10)
         wait_for(lambda: status(primary)['state'] == 'starting', [proxy])

@@ -184,9 +184,10 @@ pub fn run(
         let mut resolved_workspace = registry.current(&workspace.source, manifest)?;
         resolved_workspace.generation = session.generation;
         let env = session_environment(manifest, &resolved_workspace, &path, &session)?;
+        let sockets = crate::sockets::environment(&path)?;
         private::write_json(
             &path.join("context.json"),
-            &json!({"session":session,"environment":env,"source":workspace.source,"isolation":"routing-only; project must consume declared private paths"}),
+            &json!({"session":session,"environment":env,"source":workspace.source,"sockets":{"control":sockets.control,"compose":sockets.compose},"isolation":"routing-only; project must consume declared private paths"}),
         )?;
         Ok((resolved_workspace, env))
     })();
@@ -248,11 +249,8 @@ fn launch_and_monitor(
                     .context("up requires process_compose native graph")?;
                 let graph_path = path.join("process-compose.json");
                 private::write_json(&graph_path, graph)?;
-                let socket = path.join("pc.sock");
-                ensure!(
-                    socket.as_os_str().len() < 100,
-                    "runtime path too long for Process Compose Unix socket"
-                );
+                let socket = crate::sockets::environment(path)?.compose;
+                crate::sockets::prepare(&socket)?;
                 ensure!(
                     !socket.exists(),
                     "existing Process Compose socket requires explicit reconciliation"
@@ -327,7 +325,7 @@ fn launch_and_monitor(
         owner: crate::process::Identity::read(std::process::id())?
             .context("owner birth unavailable")?,
         lock: owner_lock.identity()?,
-        control: private::Identity::read(&path.join("ctl.sock"))?,
+        control: private::Identity::read(&crate::sockets::environment(path)?.control)?,
         supervisor: supervisor.identity().clone(),
         processes: vec![supervisor.identity().clone()],
         native,
@@ -529,11 +527,7 @@ pub fn preflight(
                     .is_some()),
             "every routed service must name a native graph process"
         );
-        ensure!(
-            path.join("ctl.sock").as_os_str().len() < 100
-                && path.join("pc.sock").as_os_str().len() < 100,
-            "runtime path too long for private control sockets"
-        );
+        crate::sockets::environment(&path)?;
         use std::os::unix::fs::PermissionsExt;
         let scratch = tempfile::Builder::new()
             .prefix("pc-preflight-")
@@ -801,7 +795,7 @@ fn monitor(
     if let Some(native) = &record.native
         && let Some(identity) = &native.socket
     {
-        identity.remove_socket(&path.join("pc.sock"))?;
+        identity.remove_socket(&crate::sockets::environment(path)?.compose)?;
     }
     registry.session_status(&session, "stopped")?;
     result
@@ -824,6 +818,7 @@ pub fn recover(
     );
     let path = registry.runtime_path(workspace);
     private::existing_directory(&path)?;
+    let sockets = crate::sockets::environment(&path)?;
     let budget = crate::owner::Record::read(&path, &session)?
         .manifest
         .shutdown_timeout_seconds;
@@ -846,7 +841,7 @@ pub fn recover(
             record.phase,
             crate::owner::Phase::Starting | crate::owner::Phase::Running
         ) && record.owner.alive()
-            && record.control.matches(&path.join("ctl.sock"))
+            && record.control.matches(&sockets.control)
             && record.lock.locked(&path.join("owner.lock"))?
         {
             let _ = control::request(&path, expected, Action::Stop);
@@ -870,11 +865,11 @@ pub fn recover(
         );
     }
     record.authenticate(&path, workspace)?;
-    record.control.remove_socket(&path.join("ctl.sock"))?;
+    record.control.remove_socket(&sockets.control)?;
     let control = control::Server::bind(&path)?;
     record.owner = crate::process::Identity::read(std::process::id())?
         .context("recovery owner birth unavailable")?;
-    record.control = private::Identity::read(&path.join("ctl.sock"))?;
+    record.control = private::Identity::read(&sockets.control)?;
     record.phase = if stop
         || session.status == "stopping"
         || matches!(
@@ -929,11 +924,12 @@ fn converge_crashed(
     }
     record.phase = crate::owner::Phase::Stopped;
     record.save(path)?;
-    record.control.remove_socket(&path.join("ctl.sock"))?;
+    let sockets = crate::sockets::environment(path)?;
+    record.control.remove_socket(&sockets.control)?;
     if let Some(native) = &record.native
         && let Some(socket) = &native.socket
     {
-        socket.remove_socket(&path.join("pc.sock"))?;
+        socket.remove_socket(&sockets.compose)?;
     }
     registry.session_status(session, "stopped")?;
     if let Ok(router) = router::current(registry.state_path()) {
@@ -1090,7 +1086,7 @@ fn compose_read(
     let mut command = Command::new(binary);
     command
         .args(["--use-uds", "--unix-socket"])
-        .arg(runtime.join("pc.sock"))
+        .arg(crate::sockets::environment(runtime)?.compose)
         .arg("--token-file")
         .arg(runtime.join("pc.token"))
         .arg("--log-file")

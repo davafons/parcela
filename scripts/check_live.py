@@ -19,6 +19,9 @@ def free_port():
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
 
+def control_socket(runtime):
+    return Path(json.loads((runtime / 'context.json').read_text())['sockets']['control'])
+
 def wait_for(check, processes=(), timeout=20):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -150,7 +153,7 @@ process_compose:
             (runtime / 'unhealthy').unlink()
             stopped = json.loads(cli(copies[2][0], 'down').stdout)
             assert stopped['state'] == 'stopped' and compose.wait(timeout=10) == 0
-            assert not (runtime / 'ctl.sock').exists()
+            assert not control_socket(runtime).exists()
             assert b'503' in request('auth-live.localhost', request_host='compose-live.localhost', raw=True).split(b'\r\n', 1)[0]
             assert json.loads(cli(copies[2][0], 'down').stdout)['already_stopped']
             first = json.loads(cli(copies[2][0], 'up', '--detach', '--process-compose', args.process_compose).stdout)
@@ -164,7 +167,7 @@ process_compose:
             assert request('compose-live.localhost')['generation'] == str(second['session']['generation'])
             with socket.socket(socket.AF_UNIX) as stale:
                 stale.settimeout(3)
-                stale.connect(str(runtime / 'ctl.sock'))
+                stale.connect(str(control_socket(runtime)))
                 stale.sendall((json.dumps({'environment_id': copies[2][1], 'token': first['session']['token'],
                                           'generation': first['session']['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
                 reply = json.loads(stale.makefile().readline())
@@ -179,14 +182,14 @@ process_compose:
             assert json.loads(cli(copies[2][0], 'stop').stdout)['state'] == 'stopped'
             assert (runtime / 'data' / 'retain.txt').read_text() == 'preserve application data'
             with socket.socket(socket.AF_UNIX) as foreign_control:
-                foreign_control.bind(str(runtime / 'ctl.sock'))
+                foreign_control.bind(str(control_socket(runtime)))
                 failed = cli(copies[2][0], 'up', '--process-compose', args.process_compose, check=False)
-                assert failed.returncode != 0 and (runtime / 'ctl.sock').exists()
-            (runtime / 'ctl.sock').unlink()
+                assert failed.returncode != 0 and control_socket(runtime).exists()
+            control_socket(runtime).unlink()
             failed = cli(copies[2][0], 'up', '--detach', '--process-compose', '/nonexistent/parcela-test-compose', check=False)
             assert failed.returncode != 0
             assert json.loads(cli(copies[2][0], 'status').stdout)['state'] == 'stopped'
-            assert not (runtime / 'ctl.sock').exists()
+            assert not control_socket(runtime).exists()
             assert request('auth-live.localhost')['id'] == copies[1][1]
             print(json.dumps({'verified': ['owned Caddy TLS/CA without trust', 'two simultaneous routes', 'literal argv', 'forwarded scheme/host spoof rejection',
                           'SSE', 'WebSocket upgrade', 'unknown host rejection', 'duplicate ownership', 'SIGTERM', 'exit status', 'foreign port safety',

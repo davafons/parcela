@@ -20,7 +20,7 @@ class LocalHTTPS(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(socket.create_connection(('127.0.0.1', self.port), timeout=5), server_hostname=self.host)
 
 def compose_processes(process_compose, runtime, log_path):
-    socket_path = runtime / 'pc.sock'
+    socket_path = json.loads((runtime / 'context.json').read_text()).get('sockets', {}).get('compose', runtime / 'pc.sock')
     output = subprocess.check_output([process_compose, '--use-uds', '--unix-socket', str(socket_path), '--token-file', str(runtime / 'pc.token'), '--log-file', str(log_path), 'process', 'list', '--output', 'json'], text=True, stderr=subprocess.DEVNULL)
     records = json.loads(output)
     if isinstance(records, dict):

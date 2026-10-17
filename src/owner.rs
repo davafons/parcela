@@ -87,10 +87,12 @@ impl Record {
         }
         if let Some(native) = &mut self.native
             && native.socket.is_none()
-            && path.join("pc.sock").exists()
         {
-            native.socket = Some(private::Identity::read(&path.join("pc.sock"))?);
-            self.save(path)?;
+            let compose = crate::sockets::environment(path)?.compose;
+            if compose.exists() {
+                native.socket = Some(private::Identity::read(&compose)?);
+                self.save(path)?;
+            }
         }
         if self.processes != previous {
             self.save(path)?;
@@ -123,11 +125,12 @@ impl Record {
             self.supervisor.alive(),
             "native supervisor birth identity is unavailable; no PID was signaled"
         );
+        let compose = crate::sockets::environment(path)?.compose;
         ensure!(
             native
                 .socket
                 .as_ref()
-                .is_some_and(|identity| identity.matches(&path.join("pc.sock")))
+                .is_some_and(|identity| identity.matches(&compose))
                 && native.token.matches(&path.join("pc.token")),
             "native control evidence was replaced; no takeover performed"
         );
@@ -135,7 +138,7 @@ impl Record {
         let mut command = Command::new(&native.binary);
         command
             .args(["--use-uds", "--unix-socket"])
-            .arg(path.join("pc.sock"))
+            .arg(compose)
             .arg("--token-file")
             .arg(path.join("pc.token"))
             .arg("--log-file")

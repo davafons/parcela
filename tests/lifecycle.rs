@@ -14,6 +14,10 @@ use std::{
 use tempfile::TempDir;
 use uuid::Uuid;
 
+fn control_socket(runtime: &std::path::Path) -> std::path::PathBuf {
+    parcela::sockets::environment(runtime).unwrap().control
+}
+
 fn fixture() -> (
     TempDir,
     Registry,
@@ -81,7 +85,7 @@ fn stale_nonce_or_generation_never_reaches_owner_actions() {
             stale.generation += 1;
         }
         use std::io::{Read, Write};
-        let mut stream = std::os::unix::net::UnixStream::connect(path.join("ctl.sock")).unwrap();
+        let mut stream = std::os::unix::net::UnixStream::connect(control_socket(&path)).unwrap();
         let request = serde_json::json!({"environment_id": stale.environment_id, "token": stale.token, "generation": stale.generation, "action": {"type": "stop"}});
         writeln!(stream, "{request}").unwrap();
         assert!(server.receive(&session).unwrap().is_none());
@@ -104,7 +108,7 @@ fn stale_nonce_or_generation_never_reaches_owner_actions() {
         .unwrap();
     assert_eq!(client.join().unwrap().unwrap()["verified"], true);
     drop(server);
-    assert!(!path.join("ctl.sock").exists());
+    assert!(!control_socket(&path).exists());
 }
 
 #[test]
@@ -115,7 +119,7 @@ fn disconnected_caller_retains_complete_stop_and_cannot_fail_owner() {
     let path = registry.runtime_path(&workspace);
     let server = Server::bind(&path).unwrap();
     let request = serde_json::json!({"environment_id": session.environment_id, "token": session.token, "generation": session.generation, "action": {"type": "stop"}});
-    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    let mut caller = UnixStream::connect(control_socket(&path)).unwrap();
     writeln!(caller, "{request}").unwrap();
     caller.shutdown(std::net::Shutdown::Both).unwrap();
     drop(caller);
@@ -131,7 +135,7 @@ fn disconnected_caller_retains_complete_stop_and_cannot_fail_owner() {
     );
     assert!(server.receive(&session).unwrap().is_none());
 
-    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    let mut caller = UnixStream::connect(control_socket(&path)).unwrap();
     caller.write_all(b"{\"action\":").unwrap();
     drop(caller);
     assert!(server.receive(&session).unwrap().is_none());
@@ -142,21 +146,23 @@ fn control_server_never_replaces_or_removes_foreign_sockets_or_links() {
     let (_temp, registry, workspace, session) = fixture();
     let path = registry.runtime_path(&workspace);
     private::directory(&path).unwrap();
-    let foreign = UnixListener::bind(path.join("ctl.sock")).unwrap();
+    parcela::sockets::prepare(&control_socket(&path)).unwrap();
+    let foreign = UnixListener::bind(control_socket(&path)).unwrap();
     assert!(Server::bind(&path).is_err());
-    assert!(path.join("ctl.sock").exists());
+    assert!(control_socket(&path).exists());
     drop(foreign);
-    fs::remove_file(path.join("ctl.sock")).unwrap();
+    fs::remove_file(control_socket(&path)).unwrap();
     let owner = Server::bind(&path).unwrap();
-    fs::rename(path.join("ctl.sock"), path.join("original.sock")).unwrap();
-    let replacement = UnixListener::bind(path.join("ctl.sock")).unwrap();
+    fs::rename(control_socket(&path), path.join("original.sock")).unwrap();
+    let replacement = UnixListener::bind(control_socket(&path)).unwrap();
     drop(owner);
-    assert!(path.join("ctl.sock").exists());
+    assert!(control_socket(&path).exists());
     drop(replacement);
-    fs::remove_file(path.join("ctl.sock")).unwrap();
-    symlink(path.join("original.sock"), path.join("ctl.sock")).unwrap();
+    fs::remove_file(control_socket(&path)).unwrap();
+    symlink(path.join("original.sock"), control_socket(&path)).unwrap();
     assert!(control::request(&path, &session, Action::Stop).is_err());
-    assert!(path.join("ctl.sock").is_symlink());
+    assert!(control_socket(&path).is_symlink());
+    fs::remove_file(control_socket(&path)).unwrap();
 }
 
 #[test]
@@ -231,7 +237,7 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         phase: Phase::Running,
         owner: identity.clone(),
         lock: lock.identity().unwrap(),
-        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        control: private::Identity::read(&control_socket(&path)).unwrap(),
         supervisor: identity.clone(),
         processes: vec![identity],
         native: None,
@@ -267,7 +273,7 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         "stopped"
     );
     assert_eq!(Record::read(&path, &session).unwrap().phase, Phase::Stopped);
-    assert!(!path.join("ctl.sock").exists());
+    assert!(!control_socket(&path).exists());
     assert_eq!(
         lifecycle::down(&registry, &workspace).unwrap()["already_stopped"],
         true
@@ -300,7 +306,7 @@ fn contending_stop(replace_session: bool) {
         phase: Phase::Stopping,
         owner: identity.clone(),
         lock: lock.identity().unwrap(),
-        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        control: private::Identity::read(&control_socket(&path)).unwrap(),
         supervisor: identity.clone(),
         processes: vec![identity],
         native: None,
@@ -381,7 +387,7 @@ fn waiting_stop(replace_control: bool) {
         phase: Phase::Starting,
         owner: process::Identity::read(std::process::id()).unwrap().unwrap(),
         lock: lock.identity().unwrap(),
-        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        control: private::Identity::read(&control_socket(&path)).unwrap(),
         supervisor: identity.clone(),
         processes: vec![identity],
         native: None,
@@ -393,7 +399,7 @@ fn waiting_stop(replace_control: bool) {
     };
     record.save(&path).unwrap();
     let (control, retained_control) = if replace_control {
-        fs::rename(path.join("ctl.sock"), path.join("retained.sock")).unwrap();
+        fs::rename(control_socket(&path), path.join("retained.sock")).unwrap();
         (Server::bind(&path).unwrap(), Some(control))
     } else {
         (control, None)
@@ -458,7 +464,7 @@ fn fragmented_owner_request_waits_for_the_complete_frame() {
     let (_temp, registry, workspace, session) = fixture();
     let path = registry.runtime_path(&workspace);
     let server = Server::bind(&path).unwrap();
-    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    let mut caller = UnixStream::connect(control_socket(&path)).unwrap();
     caller
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
@@ -498,7 +504,7 @@ fn unfinished_open_owner_request_is_rejected_within_a_bounded_wait() {
     let (_temp, registry, workspace, session) = fixture();
     let path = registry.runtime_path(&workspace);
     let server = Server::bind(&path).unwrap();
-    let mut caller = UnixStream::connect(path.join("ctl.sock")).unwrap();
+    let mut caller = UnixStream::connect(control_socket(&path)).unwrap();
     caller
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
@@ -522,8 +528,10 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     let path = registry.runtime_path(&workspace);
     private::directory(&path).unwrap();
     let lock = private::Lock::acquire(&path.join("owner.lock")).unwrap();
-    let control = UnixListener::bind(path.join("ctl.sock")).unwrap();
-    let native_socket = UnixListener::bind(path.join("pc.sock")).unwrap();
+    let sockets = parcela::sockets::environment(&path).unwrap();
+    parcela::sockets::prepare(&sockets.control).unwrap();
+    let control = UnixListener::bind(&sockets.control).unwrap();
+    let native_socket = UnixListener::bind(&sockets.compose).unwrap();
     private::write_bytes(&path.join("pc.token"), b"crash-test-token").unwrap();
 
     let mut owner = Command::new("sleep").arg("60").spawn().unwrap();
@@ -545,13 +553,13 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
         phase: Phase::Running,
         owner: owner_identity.clone(),
         lock: lock.identity().unwrap(),
-        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        control: private::Identity::read(&sockets.control).unwrap(),
         supervisor: supervisor_identity.clone(),
         processes: tree.clone(),
         native: Some(Native {
             binary: "/nonexistent/process-compose".into(),
             token: private::Identity::read(&path.join("pc.token")).unwrap(),
-            socket: Some(private::Identity::read(&path.join("pc.sock")).unwrap()),
+            socket: Some(private::Identity::read(&sockets.compose).unwrap()),
         }),
         manifest: serde_saphyr::from_str(
             "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
@@ -613,8 +621,8 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     );
     record = Record::read(&path, &record.session).unwrap();
     assert_eq!(record.phase, Phase::Stopped);
-    assert!(!path.join("ctl.sock").exists());
-    assert!(!path.join("pc.sock").exists());
+    assert!(!sockets.control.exists());
+    assert!(!sockets.compose.exists());
     assert_eq!(
         lifecycle::down(&registry, &workspace).unwrap()["already_stopped"],
         true

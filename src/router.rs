@@ -44,12 +44,7 @@ fn proxy_dir(state: &Path) -> PathBuf {
     state.join("proxy")
 }
 fn socket(state: &Path) -> Result<PathBuf> {
-    let path = proxy_dir(state).join("admin.sock");
-    ensure!(
-        path.as_os_str().len() < 100,
-        "state path too long for private Unix socket; use a shorter --state-dir"
-    );
-    Ok(path)
+    crate::sockets::proxy_admin(state)
 }
 pub fn current(state: &Path) -> Result<Router> {
     let router: Router = private::read_json(&proxy_dir(state).join("router.json"))
@@ -301,6 +296,7 @@ pub fn run(
     let _lifetime = Lock::acquire(&directory.join("owner.lock"))?;
     let _update = Lock::wait(&directory.join("updates.lock"))?;
     let admin_socket = socket(state)?;
+    crate::sockets::prepare(&admin_socket)?;
     let mut recovered = None;
     if admin_socket.exists() {
         let evidence: ProxyEvidence = private::read_json(&directory.join("owner.json"))

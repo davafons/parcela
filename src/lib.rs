@@ -11,4 +11,5 @@ pub mod process;
 pub mod registry;
 pub mod router;
 pub mod runtime;
+pub mod sockets;
 pub mod startup;
