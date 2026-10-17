@@ -156,11 +156,23 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `workspace adopt --role primary\|preview --label LABEL` | Optional explicit registration; `up` does this automatically |
 | `workspace list [--all]` | This project's registered environments, or every project's |
 | `workspace discover` | Read-only sibling jj/Git checkout paths, revisions, refs and registration IDs; no manifest or registry required |
-| `proxy run [--caddy PATH]` | Dedicated foreground Caddy; default 80/443; no sudo/trust/takeover |
-| `proxy run --test-profile --http-port N --https-port N` | Explicit disposable high-port profile |
-| `proxy run --forwarded-standard-ports --http-port 8080 --https-port 8443` | Explicit external 80/443 forwarding, canonical port-free URL |
-| `proxy status` | Verify the owned Caddy admin marker; the mapped profile also verifies the port-80 front door |
+| `proxy start [--port N]` | Start the dedicated Caddy proxy in the background and wait until it answers; `--port` saves a port profile; a busy port fails naming its holder; no sudo, trust change, takeover or fallback |
+| `proxy stop` | Signal the recorded proxy process by birth identity and wait until it and its Caddy exit; environments keep running without routes |
+| `proxy restart [--port N]` | Stop, then start on `--port`, the running front door or the saved one |
+| `proxy status` | Mode, port, process IDs, log and the Parcela version that started the proxy; verifies the owned Caddy admin marker, and in standard mode the port-80 front door; exits 1 when not running |
+| `trust [--print]` | Run `caddy trust` against Parcela's private CA storage and admin socket; `--print` prints the CA certificate path and changes nothing |
 | `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
+
+### Front door
+
+The proxy serves the front-door profile saved in `<state>/proxy/frontdoor.json`. `up`, `restart` and `run` start the proxy on it after their launch preflight passes, when no proxy is running, and print one stderr line saying so. Concurrent starts share one proxy. Every printed URL (`init`, `up`, `url`, `status`, `ls`, `context`, `PARCELA_URL`) follows the running proxy, or the saved profile when nothing runs.
+
+| Profile | URL | Listeners |
+|---|---|---|
+| `{"mode": "port", "https": 1355}` | `https://notes.localhost:1355` | HTTPS on `127.0.0.1:1355` only |
+| `{"mode": "standard", "https": 8443, "http": 8080}` | `https://notes.localhost` | `127.0.0.1:8443` and `:8080`, behind an external 443/80 forwarder |
+
+With no saved profile the default is port mode on 1355, or on `PARCELA_HTTPS_PORT` when that is set. `proxy start --port N` and `proxy restart --port N` save a port profile once the proxy answers; a failed start leaves the saved profile unchanged. Listeners must be 1024 or higher; Parcela never binds privileged ports itself. Standard mode needs the profile saved before the proxy starts and checks that port 80 reaches the owned proxy. The proxy runs as a detached `parcela proxy run` (hidden from help, usable in the foreground for debugging or a boot service) with output in `<state>/proxy/proxy.log`. A proxy started by another Parcela version keeps serving, with a warning to run `parcela proxy restart`.
 
 `parcela` with no command prints the current checkout's status when it is registered, and otherwise the next command to run. Rarely needed flags are accepted but hidden from help: `--human`, `doctor --caddy PATH --process-compose PATH`, `--process-compose PATH` on `up` and `restart`, and `--readiness-timeout SEC` on `up`, `restart` and `run`. They default to the binaries on `PATH` and 60 seconds (30 for `run`). `doctor` exits 1 until every check passes.
 

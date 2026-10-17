@@ -25,7 +25,7 @@ parcela --path "$CHECKOUT" context
 parcela --path "$CHECKOUT" status
 ```
 
-`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `context` requires a registered configured checkout and returns its identity, planned URLs and caveats. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Report failed checks and their `fix`; do not apply a fix that installs tools, changes trust or starts the proxy without authorization.
+`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `context` requires a registered configured checkout and returns its identity, planned URLs and caveats. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
 
 If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a one-line short-form manifest with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
 
@@ -46,12 +46,13 @@ A preview name and distinct URL do not isolate databases, uploads, secrets or qu
 
 ## Start and verify
 
-Check the configured dependencies and owned front door before startup:
+Check the environment before startup:
 
 ```sh
-parcela proxy status
 parcela --path "$CHECKOUT" status
 ```
+
+An authorized `up`, `restart` or `run` starts Parcela's shared HTTPS proxy when none runs and says so in one stderr line. `parcela proxy status` reports it without starting anything. The proxy serves every environment on the machine: do not stop or restart it unless the user asks. URLs carry the proxy port (`:1355` by default) until standard-port forwarding is set up, so always use the URLs Parcela returns. For TLS checks without changing system trust, use `curl --cacert "$(parcela trust --print)"`. `parcela trust` changes system trust; run it only when the user asks.
 
 If already ready, reuse the environment unless the user requests a restart. If prerequisites are absent, report them. Do not automatically install backends, start Docker or a GUI, reuse another agent's dependencies, repair forwarding, trust a CA, change global firewall rules or take over listeners. Do not open an installed registry for writing with a newer binary while an older proxy or controller still serves it; an upgrade requires an explicit coordinated plan.
 

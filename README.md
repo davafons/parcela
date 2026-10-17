@@ -28,10 +28,10 @@ Keep your primary checkout and previews identifiable, with their own service gra
 
 | Environment | URL |
 | --- | --- |
-| Primary checkout | `https://notes.localhost` |
-| Preview named `auth` | `https://auth-notes.localhost` |
+| Primary checkout | `https://notes.localhost:1355` |
+| Preview named `auth` | `https://auth-notes.localhost:1355` |
 
-- **Named HTTPS.** Flat hostnames, standard ports, and exact-host routing through Caddy.
+- **Named HTTPS.** Flat hostnames and exact-host routing through Caddy, on a no-sudo HTTPS port by default and on standard ports once host forwarding is set up.
 - **Stable workspace identities.** UUIDs survive bookmark and branch changes. Startup registers the selected jj, Git or plain-directory checkout automatically.
 - **Native service graphs.** Process Compose runs the web service and workers. Each environment gets a private control socket.
 - **Explicit lifecycle control.** Start, stop, restart, inspect, and recover qualified native graphs without guessing which PID to kill.
@@ -66,20 +66,22 @@ cargo install --git https://github.com/davafons/parcela --locked
 
 Neither installer starts a proxy, binds a port, or trusts a CA. Backends are never installed by an ordinary Parcela command.
 
-### Set up the HTTPS front door
+### The HTTPS front door
 
-Normal URLs use ports 80 and 443. Listener ownership, forwarding where needed, and CA trust require explicit host setup before starting an application.
+`parcela up` starts Parcela's proxy in the background the first time it is needed. The proxy serves HTTPS on port 1355, so URLs look like `https://notes.localhost:1355`. It needs no sudo, port forwarding or trust change, and it keeps running for every project until `parcela proxy stop`.
 
-Parcela never takes over an occupied listener, silently falls back to a high port, or installs CA trust during startup. The macOS [operator helper](scripts/setup_macos.py) provides guarded loopback forwarding and explicit trust setup. Review the [host setup and verification notes](docs/implementation.md#real-machine-cutover-state) before using it.
+To use another port, run `parcela proxy start --port 4443` once; the port is saved for later starts. If the port is busy, Parcela names the process holding it and stops. It never takes over a listener or falls back to another port.
 
-High ports are available through an explicit test profile. They are not the normal no-port workflow.
+Browsers warn about the certificate until you trust Parcela's local certificate authority. Run `parcela trust` once; it says what it will add, then asks for your password. `parcela trust --print` prints the certificate path for `curl --cacert` and changes nothing.
+
+URLs without a port need ports 443 and 80 forwarded to the proxy. The macOS [operator helper](scripts/setup_macos.py) installs guarded loopback forwarding. Review the [host setup and verification notes](docs/implementation.md#real-machine-cutover-state) before using it.
 
 ## Quickstart
 
-After building Parcela and completing host setup, create a `parcela.yaml` in your project:
+After building Parcela, create a `parcela.yaml` in your project and start it:
 
 ```sh
-parcela init
+parcela init && parcela up
 ```
 
 `init` guesses the dev server command from `package.json`, a Rails app or Django, and otherwise serves the directory with Python. The result is one line you can edit:
@@ -90,37 +92,18 @@ web: python3 -m http.server $PORT --bind 127.0.0.1
 
 The project is named after the checkout directory. Each service must listen on `127.0.0.1:$PORT`. The [configuration reference](docs/configuration.md) covers several services, workers and the full schema.
 
-Check that the machine and the project are ready. Every ✗ line names its fix:
+A project in a `notes` directory gets `https://notes.localhost:1355`. The first `up` also starts the proxy and says so on one line. `up` stays in the foreground by default; `--detach` returns once the services answer and keeps them running in the background.
+
+If something is missing, `parcela doctor` checks the machine and the project. Every ✗ line names its fix.
+
+Inspect a running environment:
 
 ```sh
-parcela doctor
-```
-
-If the dedicated front door is already running, check it with `parcela proxy status`. Otherwise, run it in a separate terminal with the profile selected during host setup.
-
-For direct standard-port listeners:
-
-```sh
-parcela proxy run
-```
-
-For an explicitly configured macOS forwarding setup:
-
-```sh
-parcela proxy run --forwarded-standard-ports --http-port 8080 --https-port 8443
-```
-
-Then start the environment and inspect it:
-
-```sh
-parcela up --detach
 parcela status
 parcela services
 parcela url
 parcela logs web --tail 100
 ```
-
-With the standard front door configured, a project in a `notes` directory gets `https://notes.localhost`. `up` stays in the foreground by default. `--detach` returns only after the live owner reports readiness.
 
 When you finish:
 
@@ -156,6 +139,8 @@ A project file defines what starts, not how to install its dependencies or prepa
 | `url [--service NAME]` | Print the reserved URL, not a guarantee that it is reachable. |
 | `rm [--prune]` | Forget a stopped environment and release its hostnames. Source and data stay on disk. |
 | `doctor` | Check tools, configuration, state and the proxy, with a fix for each failure. |
+| `proxy start [--port N]`, `stop`, `restart`, `status` | Manage the background HTTPS proxy. `up` starts it when needed. |
+| `trust [--print]` | Trust Parcela's local certificate authority, or print its certificate path. |
 | `config check` | Validate `parcela.yaml` and that every service has a command. |
 | `run -- COMMAND...` | Run a literal command that consumes its assigned endpoint. |
 | `recover [--detach]` | Take back control of services that kept running after an interruption, without restarting them. |

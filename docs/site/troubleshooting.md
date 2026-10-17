@@ -20,13 +20,21 @@ Use a native process name from `services`. Preserve the diagnostic without publi
 
 ## Front-door or certificate failure
 
-Run `parcela proxy status` before modifying the host. Check the selected binary and registry, owned Caddy admin endpoint, actual listeners and the intended standard-port mapping.
+Run `parcela proxy status` before modifying the host. It reports the mode, port, process IDs, log path and the Parcela version that started the proxy. Read `<state>/proxy/proxy.log` for the proxy's own errors.
 
-A forwarded profile's internal 8080/8443 listeners do not prove effective 80/443 forwarding. A successful PF rule load does not prove that loopback traffic reaches them. Do not flush global firewall state or change a skip setting blindly.
+| Observation | Next check |
+|---|---|
+| `port N is already in use by ...` | Stop that process yourself, or choose a free port with `parcela proxy start --port <n>` |
+| `the running proxy is from Parcela X` | `parcela proxy restart` once nothing depends on the old proxy's routes |
+| `started by an older Parcela` | Stop that `parcela proxy run` (Ctrl-C or its launch agent), then `parcela proxy start` |
+| URLs answer `503` | The environment is registered but not ready; check `parcela status` |
+| Browser certificate warning | `parcela trust`, then restart the browser |
 
-If TLS trust fails, identify the exact CA and hostname before an explicit trust operation. Do not disable verification. If `.localhost` resolves to `::1` while the owned front door listens on IPv4, configure the project's client address-family behavior without exposing a new listener or weakening TLS.
+In standard mode, internal listeners do not prove effective 443/80 forwarding. A successful PF rule load does not prove that loopback traffic reaches them. Do not flush global firewall state or change a skip setting blindly.
 
-A high-port disposable test can isolate backend behavior. It does not fix or certify the installed standard front door. See [host setup](install.md#prepare-the-front-door-explicitly).
+If TLS trust fails, identify the exact CA and hostname before an explicit trust operation. `parcela trust --print` names the certificate. Do not disable verification. If `.localhost` resolves to `::1` while the owned front door listens on IPv4, configure the project's client address-family behavior without exposing a new listener or weakening TLS.
+
+A disposable test proxy on another port can isolate backend behavior. It does not fix or certify the installed front door. See [the front door](install.md#the-front-door).
 
 ## Backend port or readiness failure
 

@@ -2,7 +2,7 @@
 
 We will run a static frontend, a separate API origin and a worker in one environment. The demo has no database, setup task or external worker effects.
 
-Complete [build and host setup](install.md) first. Keep the owned proxy running in a separate shell. These commands assume a working standard HTTPS front door and its explicitly trusted CA.
+Complete the [build](install.md) first. `parcela up` starts the HTTPS proxy when it is not running. The URLs below carry the proxy port, `:1355` by default. The certificate checks need Parcela's CA trusted with `parcela trust`, or `--cacert "$(parcela trust --print)"` on each `curl`.
 
 ## Prepare the demo
 
@@ -69,7 +69,7 @@ curl --noproxy '*' --fail "$FRONTEND_URL/"
 curl --noproxy '*' --fail "$API_URL/status.json"
 ```
 
-The frontend response contains `Parcela demo frontend`. The API returns `{"service":"backend","ready":true}`. These requests retain normal certificate verification. A test profile requires its explicit CA and returned port-qualified URLs instead.
+The frontend response contains `Parcela demo frontend`. The API returns `{"service":"backend","ready":true}`. These requests keep normal certificate verification, so they need the trusted CA or `--cacert` from above.
 
 Inspect the worker log:
 

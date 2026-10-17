@@ -66,50 +66,56 @@ Doctor probes `process-compose` and `caddy` on `PATH`, `lsof`, `ps`, the nearest
 
 The native acceptance fixtures use Caddy 2.11.7 and Process Compose 1.122.0. Other versions require their own verification. A successful version probe does not prove graph compatibility or application health.
 
-## Prepare the front door explicitly
+## The front door
 
-Normal browser URLs use HTTPS 443 and HTTP 80. The listeners stay on loopback. Caddy uses dedicated config, storage and an admin socket, separate from another Caddy installation.
+Parcela's proxy is a dedicated Caddy with its own config, storage and admin socket, separate from any other Caddy installation. It listens on loopback only. `parcela up` starts it in the background when it is not running, so there is no separate proxy terminal.
 
-Before starting a proxy, check existing listeners and decide how your host will provide those ports. Do not stop an unknown listener or silently choose a different port.
-
-On a host where the selected unprivileged process can bind the standard loopback ports, the foreground command is:
+By default the proxy serves HTTPS on port 1355 and every URL carries that port, for example `https://notes.localhost:1355`. This needs no sudo and no port forwarding. To choose another port, start the proxy once with it; the port is saved for later starts:
 
 ```sh
-parcela proxy run --caddy caddy
+parcela proxy start --port 4443
 ```
 
-On a host with explicitly configured external forwarding, run the owned unprivileged listeners instead:
+If the port is busy, the command fails and names the process holding it. Parcela never stops an unknown listener or falls back to another port. While nothing has been saved, `PARCELA_HTTPS_PORT` replaces the default 1355.
 
-```sh
-parcela proxy run --caddy caddy --forwarded-standard-ports \
-  --http-port 8080 --https-port 8443
-```
-
-That flag does not create forwarding. It describes a mapping you have already configured. Do not use it as a fallback after a port conflict.
-
-The source tree has an operator-only macOS helper at `scripts/setup_macos.py`. Its full setup configures guarded PF forwarding, a forwarding boot job and System-keychain CA trust. Those are separate privileged host changes. Review the helper and obtain explicit authorization before running it. Ordinary `up` never invokes it. Custom PF state, loopback skip settings and partial setup need operator diagnosis, not a blind global reload.
-
-Caddy does not install its CA trust automatically in Parcela's profile. Trust the intended CA only through an explicit host procedure. Do not use `curl -k` or disable TLS checks to hide a trust failure.
-
-## Verify the front door
-
-From a separate shell using the same binary and registry:
+Check the proxy from any shell that uses the same binary and state directory:
 
 ```sh
 parcela proxy status
 ```
 
-The forwarded profile also checks that the standard HTTP front door matches the owned router. If it fails, diagnose [forwarding and ownership](troubleshooting.md#front-door-or-certificate-failure) before starting applications.
+It prints the mode, port, process IDs, log path and the Parcela version that started the proxy. After upgrading Parcela, `parcela proxy restart` replaces a proxy started by the old version; Parcela warns about the mismatch but never restarts it by itself. `parcela proxy stop` stops it. Running services keep running, but their URLs stop answering until the proxy starts again.
 
-## Use an isolated test profile when needed
+## Trust the local certificate authority
 
-Disposable acceptance tests can explicitly use available unprivileged ports and a private registry:
+Caddy issues certificates from a private certificate authority in Parcela's state directory. Browsers warn until that authority is trusted. Parcela changes system trust only when you run:
 
 ```sh
-parcela --state-dir "$TEST_STATE" proxy run --test-profile \
-  --http-port "$TEST_HTTP_PORT" --https-port "$TEST_HTTPS_PORT"
+parcela trust
 ```
 
-Choose a new private test state directory and independently verified free ports. Test URLs include the HTTPS port. Validate TLS with that test profile's CA without changing system trust. This is a separate test setup, not proof that standard ports or browser trust work.
+It says which certificate it adds and how to undo it, then runs `caddy trust` against Parcela's own storage and admin socket. Caddy may ask for your password. To use the certificate without trusting it, for example with `curl --cacert`, print its path:
+
+```sh
+parcela trust --print
+```
+
+Do not use `curl -k` or disable TLS checks to hide a trust failure.
+
+## Standard ports
+
+URLs without a port need ports 443 and 80 forwarded to the proxy's unprivileged internal listeners. That is a separate, explicitly authorized host change. The source tree has an operator-only macOS helper at `scripts/setup_macos.py` that configures guarded PF forwarding and a forwarding boot job. Review the helper before running it. Ordinary commands never invoke it. Custom PF state, loopback skip settings and partial setup need operator diagnosis, not a blind global reload.
+
+With forwarding in place, the proxy runs in standard mode from the saved front-door profile described in the [configuration reference](../configuration.md#front-door). Its status check also confirms that the forwarded port 80 reaches the owned proxy. If it fails, diagnose [forwarding and ownership](troubleshooting.md#front-door-or-certificate-failure) before starting applications.
+
+## Use an isolated test setup when needed
+
+Disposable acceptance tests use a private state directory and an explicit free port:
+
+```sh
+parcela --state-dir "$TEST_STATE" proxy start --port "$TEST_HTTPS_PORT"
+```
+
+Validate TLS with the certificate from `parcela --state-dir "$TEST_STATE" trust --print` without changing system trust, and stop the proxy with `proxy stop` when done.
 
 Once the intended front door passes its checks, [run the first environment](first-environment.md).
