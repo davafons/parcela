@@ -11,7 +11,7 @@ import ssl
 import subprocess
 import tempfile
 
-from check_live import BINARY, ROOT, free_port, wait_for
+from check_live import BINARY, ROOT, free_port, register, wait_for
 
 
 def main():
@@ -87,15 +87,14 @@ def main():
             (path / '.docs-dev-fixture.json').write_text(json.dumps({'source': str(path)}) + '\n')
             assert next(c for c in json.loads(cli(path, '--json', 'doctor', check=False).stdout)['checks'] if c['name'] == 'config')['ok']
         operation = jj(primary, '--ignore-working-copy', 'op', 'log', '--limit', '1', '--no-graph', '-T', 'id')
-        discovery = json.loads(cli(primary, 'workspace', 'discover').stdout)
-        assert {row['source'] for row in discovery['checkouts']} == {str(primary), str(preview)}
-        assert all(row['vcs'] == 'jj' and row['manifest_exists'] for row in discovery['checkouts'])
-        assert not discovery['automatic_adoption'] and not state.exists()
+        listing = json.loads(cli(primary, 'ls').stdout)
+        assert {(row['workspace']['source'], row['workspace']['label'], row['state']) for row in listing['unregistered']} == \
+            {(str(primary), 'primary', 'not started'), (str(preview), 'review', 'not started')}, listing
+        assert not listing['workspaces'] and not state.exists()
         assert operation == jj(primary, '--ignore-working-copy', 'op', 'log', '--limit', '1', '--no-graph', '-T', 'id')
-        report['verified'].append('Real sibling jj discovery is read-only and finds the maintained root manifest')
+        report['verified'].append('Real sibling jj workspaces appear in a read-only ls and carry the maintained root manifest')
         for path, role, label in [(primary, 'primary', 'primary'), (preview, 'preview', 'review')]:
-            adopted = json.loads(cli(path, 'workspace', 'adopt', '--role', role, '--label', label).stdout)
-            assert adopted['workspace']['role'] == role
+            register(state, path, role, label)
         log = open(root / 'proxy.log', 'w')
         handles.append(log)
         proxy = subprocess.Popen([str(BINARY), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,

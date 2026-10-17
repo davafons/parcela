@@ -16,7 +16,7 @@ const SESSION_COLUMNS: &str =
     "environment_id, token, router_token, generation, backend_port, status, kind, public_url";
 const COLUMNS: &str = "id, project_id, source, role, label, hostname, generation, vcs";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     Primary,

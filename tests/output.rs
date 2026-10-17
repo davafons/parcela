@@ -44,16 +44,18 @@ fn project() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
 #[test]
 fn piped_stdout_is_json_and_json_flag_forces_it_on_a_terminal() {
     let (_t, path, state) = project();
-    let empty = serde_json::json!({"runtime_verified": false, "workspaces": []});
+    let empty =
+        serde_json::json!({"runtime_verified": false, "workspaces": [], "unregistered": []});
+    let outside = path.parent().unwrap();
     for args in [&["status", "--all"][..], &["--json", "status", "--all"]] {
-        let output = piped(&path, &state, args);
+        let output = piped(outside, &state, args);
         assert!(output.status.success());
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
             empty
         );
     }
-    let forced = terminal(&path, &state, &["--json", "status", "--all"]);
+    let forced = terminal(outside, &state, &["--json", "status", "--all"]);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&forced).unwrap(),
         empty
@@ -73,8 +75,15 @@ fn the_human_flag_is_gone() {
 fn a_terminal_gets_aligned_text() {
     let (_t, path, state) = project();
     assert_eq!(
-        terminal(&path, &state, &["status", "--all"]),
+        terminal(path.parent().unwrap(), &state, &["status", "--all"]),
         "No environments registered. Start one with parcela up.\n"
+    );
+    assert_eq!(
+        terminal(&path, &state, &["ls"]),
+        format!(
+            "PROJECT      NAME     STATE        URL                          PATH\noutput-test  primary  not started  https://demo.localhost:1443  {}\n",
+            path.display()
+        )
     );
     let manifest = Manifest::load(&path.join("parcela.yaml")).unwrap();
     Registry::open(&state, true)

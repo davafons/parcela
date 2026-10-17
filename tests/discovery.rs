@@ -1,8 +1,8 @@
 use parcela::{
     config::Manifest,
-    discovery,
     registry::{Registry, Role},
 };
+use serde_json::{Value, json};
 use std::{
     fs,
     path::Path,
@@ -10,8 +10,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-const MANIFEST: &str =
-    "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n";
+const MANIFEST: &str = "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {processes: {web: {command: bin/web}}}\n";
 fn output(command: &mut Command) -> Output {
     let result = command.output().unwrap();
     assert!(
@@ -41,10 +40,60 @@ fn git(source: &Path, args: &[&str]) -> String {
     );
     String::from_utf8(output(Command::new("git").arg("-C").arg(source).args(args)).stdout).unwrap()
 }
+fn ls(path: &Path, state: &Path) -> Value {
+    serde_json::from_slice(
+        &output(
+            Command::new(env!("CARGO_BIN_EXE_parcela"))
+                .arg("--path")
+                .arg(path)
+                .arg("--state-dir")
+                .arg(state)
+                .env("PARCELA_HTTPS_PORT", "47443")
+                .arg("ls"),
+        )
+        .stdout,
+    )
+    .unwrap()
+}
+/// `(label, role, url, source)` of each unregistered checkout.
+fn unregistered(listing: &Value) -> Vec<(String, String, String, String)> {
+    listing["unregistered"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            assert_eq!(row["state"], "not started");
+            let workspace = &row["workspace"];
+            (
+                workspace["label"].as_str().unwrap().to_owned(),
+                workspace["role"].as_str().unwrap().to_owned(),
+                row["url"].as_str().unwrap().to_owned(),
+                workspace["source"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+fn operation(source: &Path) -> String {
+    jj(
+        source,
+        &[
+            "--ignore-working-copy",
+            "--at-op=@",
+            "op",
+            "log",
+            "--limit",
+            "1",
+            "--template",
+            "id",
+        ],
+    )
+}
+
 #[test]
-fn jj_discovery_prefers_jj_and_does_not_snapshot_or_adopt_siblings() {
+fn ls_shows_unregistered_jj_workspaces_without_snapshotting_or_registering() {
     let temp = TempDir::new().unwrap();
-    let source = temp.path().join("source");
+    let root = temp.path().canonicalize().unwrap();
+    let source = root.join("source");
     output(
         Command::new("jj")
             .args(["git", "init", "--colocate"])
@@ -53,7 +102,7 @@ fn jj_discovery_prefers_jj_and_does_not_snapshot_or_adopt_siblings() {
     fs::write(source.join("parcela.yaml"), MANIFEST).unwrap();
     jj(&source, &["bookmark", "set", "main"]);
     jj(&source, &["new", "main"]);
-    let sibling = temp.path().join("sibling with spaces");
+    let sibling = root.join("sibling with spaces");
     jj(
         &source,
         &[
@@ -71,66 +120,59 @@ fn jj_discovery_prefers_jj_and_does_not_snapshot_or_adopt_siblings() {
         "keep this edit outside jj's operation log",
     )
     .unwrap();
-    let operation = jj(
-        &source,
-        &[
-            "--ignore-working-copy",
-            "--at-op=@",
-            "op",
-            "log",
-            "--limit",
-            "1",
-            "--template",
-            "id",
-        ],
+    let before = operation(&source);
+    let state = root.join("state");
+    assert_eq!(
+        unregistered(&ls(&source, &state)),
+        [
+            (
+                "primary".into(),
+                "primary".into(),
+                "https://app.localhost:47443".into(),
+                source.display().to_string()
+            ),
+            (
+                "preview".into(),
+                "preview".into(),
+                "https://preview-app.localhost:47443".into(),
+                sibling.display().to_string()
+            ),
+        ]
     );
-    let state = temp.path().join("state");
-    let mut registry = Registry::open(&state, true).unwrap().unwrap();
+    assert!(!state.exists());
+
     let manifest = Manifest::load(&source.join("parcela.yaml")).unwrap();
-    let adopted = registry
-        .adopt(&manifest, &source, Role::Primary, "main")
+    let adopted = Registry::open(&state, true)
+        .unwrap()
+        .unwrap()
+        .adopt(&manifest, &source, Role::Primary, "primary")
         .unwrap();
-    let rows = discovery::discover(&source, Some(&registry)).unwrap();
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.vcs == "jj"));
+    let listing = ls(&sibling, &state);
     assert_eq!(
-        rows.iter()
-            .find(|row| row.name.as_deref() == Some("default"))
-            .unwrap()
-            .adopted_environment_id,
-        Some(adopted.id)
+        listing["workspaces"][0]["workspace"]["id"],
+        json!(adopted.id)
     );
-    assert!(
-        rows.iter()
-            .find(|row| row.name.as_deref() == Some("preview"))
-            .unwrap()
-            .adopted_environment_id
-            .is_none()
+    assert_eq!(
+        unregistered(&listing)
+            .into_iter()
+            .map(|row| row.0)
+            .collect::<Vec<_>>(),
+        ["preview"]
     );
+    let registry = Registry::open(&state, false).unwrap().unwrap();
     assert_eq!(registry.list(None).unwrap().len(), 1);
-    assert_eq!(
-        operation,
-        jj(
-            &source,
-            &[
-                "--ignore-working-copy",
-                "--at-op=@",
-                "op",
-                "log",
-                "--limit",
-                "1",
-                "--template",
-                "id"
-            ]
-        )
-    );
+    assert_eq!(before, operation(&source));
 }
+
 #[test]
-fn git_discovery_lists_detached_worktrees_without_changing_history() {
+fn ls_names_an_unregistered_git_worktree_after_its_directory() {
     let temp = TempDir::new().unwrap();
-    let source = temp.path().join("source");
+    let root = temp.path().canonicalize().unwrap();
+    let source = root.join("source");
     fs::create_dir(&source).unwrap();
     git(&source, &["init", "--initial-branch", "main"]);
+    fs::write(source.join("parcela.yaml"), MANIFEST).unwrap();
+    git(&source, &["add", "parcela.yaml"]);
     git(
         &source,
         &[
@@ -141,53 +183,40 @@ fn git_discovery_lists_detached_worktrees_without_changing_history() {
             "-c",
             "commit.gpgsign=false",
             "commit",
-            "--allow-empty",
             "-m",
             "fixture",
         ],
     );
-    let sibling = temp.path().join("detached with spaces");
+    let sibling = root.join("detached");
     git(
         &source,
         &["worktree", "add", "--detach", sibling.to_str().unwrap()],
     );
     let head = git(&source, &["rev-parse", "HEAD"]);
-    let rows = discovery::discover(&source, None).unwrap();
-    assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.vcs == "git"));
+    let state = root.join("state");
+    let rows = unregistered(&ls(&sibling, &state));
     assert_eq!(
         rows.iter()
-            .find(|row| row.source == source.canonicalize().unwrap())
-            .unwrap()
-            .refs,
-        ["main"]
-    );
-    assert!(
-        rows.iter()
-            .find(|row| row.source == sibling.canonicalize().unwrap())
-            .unwrap()
-            .refs
-            .is_empty()
+            .map(|row| (row.0.as_str(), row.2.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("primary", "https://app.localhost:47443"),
+            ("detached", "https://detached-app.localhost:47443")
+        ]
     );
     assert_eq!(head, git(&source, &["rev-parse", "HEAD"]));
+    assert!(!state.exists());
 }
+
 #[test]
-fn plain_discovery_and_global_status_do_not_create_state() {
+fn ls_outside_a_project_shows_only_registered_environments() {
     let temp = TempDir::new().unwrap();
-    let state = temp.path().join("absent-state");
-    for args in [["workspace", "discover"], ["status", "--all"]] {
-        output(
-            Command::new(env!("CARGO_BIN_EXE_parcela"))
-                .arg("--path")
-                .arg(temp.path())
-                .arg("--state-dir")
-                .arg(&state)
-                .args(args),
-        );
-        assert!(!state.exists());
-    }
-    let rows = discovery::discover(temp.path(), None).unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].vcs, "plain");
-    assert!(!rows[0].manifest_exists);
+    let root = temp.path().canonicalize().unwrap();
+    let state = root.join("absent-state");
+    let listing = ls(&root, &state);
+    assert_eq!(
+        listing,
+        json!({"runtime_verified": false, "workspaces": [], "unregistered": []})
+    );
+    assert!(!state.exists());
 }

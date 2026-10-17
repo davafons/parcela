@@ -1,5 +1,5 @@
 use super::{
-    args::{Cli, Command, Global, WorkspaceCommand},
+    args::{Cli, Command, Global},
     output::{Output, status_diagnostics},
     render,
 };
@@ -10,7 +10,7 @@ use parcela::{
     control::Action,
     frontdoor::FrontDoor,
     lifecycle,
-    registry::{Registry, Role, Workspace},
+    registry::{Registry, Workspace},
     startup,
 };
 use std::path::{Path, PathBuf};
@@ -71,27 +71,12 @@ fn startup_registry(
     let workspace = registry.adopt(manifest, source, identity.role, &identity.label)?;
     Ok((registry, workspace))
 }
-fn inventory(state: &Path, project: Option<&str>, out: Output) -> Result<()> {
-    let mut rows = Vec::new();
-    if let Some(registry) = Registry::open(state, false)? {
-        for workspace in registry.list(project)? {
-            rows.push(lifecycle::status(&registry, &workspace)?);
-        }
-    }
-    if out == Output::Human {
-        status_diagnostics(&rows);
-    }
-    out.emit(
-        &serde_json::json!({"runtime_verified": !rows.is_empty() && rows.iter().all(|row| row["live_health_verified"] == true), "workspaces": rows}),
-        |style| render::inventory(&rows, style),
-    )
-}
 fn inspect(cli: Cli, out: Output) -> Result<()> {
     match cli.command {
         Command::Status { all } => {
             let state = state_dir(cli.state_dir)?;
             if all {
-                inventory(&state, None, out)
+                super::inventory::list(&state, &cli.path, out)
             } else {
                 let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
                 let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
@@ -137,54 +122,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
                 _ => unreachable!(),
             }
         }
-        Command::Workspace {
-            command: WorkspaceCommand::Discover,
-        } => {
-            let source = cli
-                .path
-                .canonicalize()
-                .context("discovery requires an existing directory")?;
-            let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?;
-            let rows = parcela::discovery::discover(&source, registry.as_ref())?;
-            let result = serde_json::json!({"checkouts": rows, "automatic_adoption": false});
-            out.emit(&result, |style| render::discover(&result, style))
-        }
-        Command::Workspace {
-            command: WorkspaceCommand::List { all },
-        } => {
-            let manifest = if all {
-                None
-            } else {
-                Some(project(&cli.path)?.1)
-            };
-            let state = state_dir(cli.state_dir)?;
-            inventory(
-                &state,
-                manifest
-                    .as_ref()
-                    .map(|manifest| manifest.project.id.as_str()),
-                out,
-            )
-        }
-        Command::Workspace {
-            command: WorkspaceCommand::Adopt { role, label },
-        } => {
-            let (source, manifest) = project(&cli.path)?;
-            // Fail invalid names before even creating registry state.
-            manifest.hostname(role == Role::Primary, &label)?;
-            let state = state_dir(cli.state_dir)?;
-            let mut registry =
-                Registry::open(&state, true)?.context("cannot create the registry")?;
-            let workspace = registry.adopt(&manifest, &source, role, &label)?;
-            let result =
-                serde_json::to_value(ResolvedContext::new(&registry, &manifest, workspace)?)?;
-            out.emit(&result, |style| render::context(&result, style))
-        }
-        Command::Context
-        | Command::Workspace {
-            command: WorkspaceCommand::Inspect,
-        } => {
+        Command::Context => {
             let (source, manifest) = project(&cli.path)?;
             let state = state_dir(cli.state_dir)?;
             let Some(registry) = Registry::open(&state, false)? else {
@@ -480,7 +418,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             super::inventory::down_all(&state, project.as_deref(), out)
         }
         Command::Ls => {
-            inventory(&state_dir(cli.state_dir)?, None, out)?;
+            super::inventory::list(&state_dir(cli.state_dir)?, &cli.path, out)?;
             Ok(0)
         }
         Command::Rm { prune } => {

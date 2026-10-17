@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use parcela::registry::Role;
 use std::path::PathBuf;
 
 /// Run each checkout's services at named HTTPS URLs (experimental).
@@ -114,11 +113,11 @@ pub enum Command {
     },
     /// Show whether this checkout's services are running and answering, with each process.
     Status {
-        /// Show every registered environment (same as parcela ls).
+        /// Show every environment (same as parcela ls).
         #[arg(long, conflicts_with = "workspace")]
         all: bool,
     },
-    /// List every registered environment across projects.
+    /// List every registered environment, plus this project's checkouts that were never started.
     Ls,
     /// Print recent output of one service. Defaults to the web service.
     Logs {
@@ -198,11 +197,6 @@ pub enum Command {
     /// Print this checkout's environment: URLs, paths and ID.
     #[command(hide = true)]
     Context,
-    /// Register, list and discover checkouts. Never edits source or VCS history.
-    Workspace {
-        #[command(subcommand)]
-        command: WorkspaceCommand,
-    },
     /// Print the agent skill bundled with this binary.
     #[command(long_flag = "skill")]
     Skill,
@@ -240,27 +234,4 @@ pub struct Listen {
     /// Caddy binary.
     #[arg(long, default_value = "caddy", hide = true)]
     pub caddy: String,
-}
-
-#[derive(Subcommand)]
-pub enum WorkspaceCommand {
-    /// List sibling jj workspaces and Git worktrees without registering them.
-    Discover,
-    /// Register this checkout explicitly. parcela up does this automatically.
-    Adopt {
-        /// primary uses the project URL; preview prefixes it with --label.
-        #[arg(long, value_enum)]
-        role: Role,
-        /// Name for this checkout; becomes part of a preview's hostname.
-        #[arg(long)]
-        label: String,
-    },
-    /// List this project's registered checkouts.
-    List {
-        /// List every project's checkouts (same as parcela ls).
-        #[arg(long)]
-        all: bool,
-    },
-    /// Print this checkout's environment (same as parcela context).
-    Inspect,
 }

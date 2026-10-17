@@ -39,6 +39,17 @@ def on_terminal(argv, timeout=15):
     assert process.wait(timeout=timeout) == 0, (argv, output)
     return output.decode().replace('\r\n', '\n')
 
+def register(state, path, role, label, binary=BINARY):
+    """Register a checkout as its first `up` does, stopping at a missing Process Compose binary."""
+    naming = ['--primary'] if role == 'primary' else ['--name', label]
+    base = [str(binary), '--path', str(path), '--state-dir', str(state)]
+    started = subprocess.run([*base, 'up', *naming, '--process-compose', '/nonexistent/parcela-register-only'],
+                             capture_output=True, text=True, timeout=15)
+    assert started.returncode == 1 and 'backend executable unavailable' in started.stderr, started.stderr
+    workspace = json.loads(subprocess.run([*base, '--json', 'status'], capture_output=True, text=True, check=True, timeout=15).stdout)['workspace']
+    assert (workspace['role'], workspace['label']) == (role, label), workspace
+    return workspace
+
 def control_socket(runtime):
     return Path(json.loads((runtime / 'context.json').read_text())['sockets']['control'])
 
@@ -116,8 +127,7 @@ process_compose:
     worker:
       command: python3 -c 'import time; print("cli-worker-ready", flush=True); time.sleep(600)'
 ''')
-                adopted = json.loads(cli(path, 'workspace', 'adopt', '--role', role, '--label', name).stdout)
-                copies.append((path, adopted['workspace']['id']))
+                copies.append((path, register(state, path, role, name)['id']))
             proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--port', str(https))
             wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
             primary = spawn(copies[0][0], 'run', '--', 'python3', str(FIXTURE), 'literal argument with spaces', '--flag')

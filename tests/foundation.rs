@@ -33,6 +33,18 @@ fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
         .output()
         .unwrap()
 }
+/// Register through a first `up` that stops at the missing Process Compose binary.
+fn register(path: &Path, state: &Path, flags: &[&str]) -> Output {
+    let mut args = vec![
+        "up",
+        "--process-compose",
+        "/nonexistent/parcela-test-process-compose",
+    ];
+    args.extend_from_slice(flags);
+    let output = cli(path, state, &args);
+    assert_eq!(output.status.code(), Some(1));
+    output
+}
 fn value(output: &Output) -> serde_json::Value {
     assert!(
         output.status.success(),
@@ -209,37 +221,18 @@ fn symlinked_source_is_same_identity_and_nested_path_finds_checkout() {
     );
 }
 #[test]
-fn inspection_does_not_create_state_and_cli_requires_explicit_role() {
+fn inspection_and_invalid_names_do_not_create_state() {
     let temp = TempDir::new().unwrap();
     let path = checkout(temp.path(), "app");
     let state = temp.path().join("state");
     assert_eq!(
-        value(&cli(&path, &state, &["workspace", "list"]))["workspaces"],
+        value(&cli(&path, &state, &["ls"]))["workspaces"],
         serde_json::json!([])
     );
-    value(&cli(temp.path(), &state, &["workspace", "list", "--all"]));
+    value(&cli(temp.path(), &state, &["status", "--all"]));
     assert!(!cli(&path, &state, &["context"]).status.success());
-    assert!(
-        !cli(&path, &state, &["workspace", "adopt", "--label", "auth"])
-            .status
-            .success()
-    );
-    assert!(
-        !cli(
-            &path,
-            &state,
-            &[
-                "workspace",
-                "adopt",
-                "--role",
-                "preview",
-                "--label",
-                "../bad"
-            ]
-        )
-        .status
-        .success()
-    );
+    let invalid = cli(&path, &state, &["up", "--name", "../bad"]);
+    assert_eq!(invalid.status.code(), Some(1));
     assert!(!state.exists());
 }
 #[test]
@@ -248,26 +241,23 @@ fn cli_json_errors_and_source_preservation() {
     let path = checkout(temp.path(), "app");
     let state = temp.path().join("state");
     let before = fs::read(path.join("parcela.yaml")).unwrap();
-    let adopted = value(&cli(
-        &path,
-        &state,
-        &["workspace", "adopt", "--role", "preview", "--label", "auth"],
-    ));
+    let first = register(&path, &state, &["--name", "auth"]);
+    assert!(first.stdout.is_empty());
     let context = value(&cli(&path, &state, &["context"]));
-    assert_eq!(adopted, context);
+    assert_eq!(
+        (
+            &context["workspace"]["role"],
+            &context["workspace"]["label"]
+        ),
+        (&serde_json::json!("preview"), &serde_json::json!("auth"))
+    );
     assert_eq!(before, fs::read(path.join("parcela.yaml")).unwrap());
     assert_eq!(fs::read_dir(&path).unwrap().count(), 1);
-    let unsupported = cli(&path, &state, &["up"]);
-    assert!(!unsupported.status.success() && unsupported.stdout.is_empty());
-    let error = cli(
-        &path,
-        &state,
-        &["workspace", "adopt", "--role", "primary", "--label", "main"],
-    );
-    assert!(!error.status.success() && error.stdout.is_empty());
+    let error = register(&path, &state, &["--primary"]);
+    assert!(error.stdout.is_empty());
     assert_eq!(
         String::from_utf8_lossy(&error.stderr),
-        "parcela: this checkout is already registered as preview \"auth\"; omit the naming flags to reuse it\n"
+        "parcela: checkout already uses preview identity \"auth\"; omit the naming flags to reuse it or select another checkout; no identity was changed\n"
     );
 }
 #[test]
@@ -346,11 +336,7 @@ fn missing_source_is_retained_not_deleted() {
         .unwrap();
     fs::remove_dir_all(path).unwrap();
     assert_eq!(registry.list(None).unwrap().len(), 1);
-    let output = value(&cli(
-        temp.path(),
-        &temp.path().join("state"),
-        &["workspace", "list", "--all"],
-    ));
+    let output = value(&cli(temp.path(), &temp.path().join("state"), &["ls"]));
     assert_eq!(output["workspaces"][0]["source_exists"], false);
 }
 #[test]
@@ -366,17 +352,17 @@ fn concurrent_cli_adoption_is_idempotent_with_one_owner() {
             let barrier = barrier.clone();
             thread::spawn(move || {
                 barrier.wait();
-                value(&cli(
-                    &path,
-                    &state,
-                    &["workspace", "adopt", "--role", "preview", "--label", "auth"],
-                ))["workspace"]["id"]
-                    .clone()
+                String::from_utf8(register(&path, &state, &["--name", "auth"]).stderr).unwrap()
             })
         })
         .collect();
-    let ids: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-    assert!(ids.iter().all(|id| id == &ids[0]));
+    for handle in handles {
+        let stderr = handle.join().unwrap();
+        assert!(
+            stderr.contains("backend executable unavailable"),
+            "{stderr}"
+        );
+    }
     let registry = Registry::open(&state, false).unwrap().unwrap();
     assert_eq!(registry.list(None).unwrap().len(), 1);
 }
@@ -394,13 +380,9 @@ fn concurrent_conflicting_adoption_has_exactly_one_winner() {
             let barrier = barrier.clone();
             thread::spawn(move || {
                 barrier.wait();
-                cli(
-                    &path,
-                    &state,
-                    &["workspace", "adopt", "--role", "primary", "--label", "main"],
-                )
-                .status
-                .success()
+                String::from_utf8(register(&path, &state, &["--primary"]).stderr)
+                    .unwrap()
+                    .contains("backend executable unavailable")
             })
         })
         .collect();
@@ -459,12 +441,9 @@ fn uuid_target_inspection_and_stop_survive_missing_source() {
     let temp = TempDir::new().unwrap();
     let path = checkout(temp.path(), "app");
     let state = temp.path().join("state");
-    let adopted = value(&cli(
-        &path,
-        &state,
-        &["workspace", "adopt", "--role", "preview", "--label", "auth"],
-    ));
-    let id = adopted["workspace"]["id"].as_str().unwrap();
+    register(&path, &state, &["--name", "auth"]);
+    let context = value(&cli(&path, &state, &["context"]));
+    let id = context["workspace"]["id"].as_str().unwrap();
     fs::remove_file(path.join("parcela.yaml")).unwrap();
     fs::remove_dir(&path).unwrap();
     for command in ["status", "down", "url"] {

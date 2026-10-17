@@ -9,7 +9,7 @@ import ssl
 import subprocess
 import tempfile
 
-from check_live import BINARY, FIXTURE, free_port, wait_for
+from check_live import BINARY, FIXTURE, free_port, register, wait_for
 
 
 def main():
@@ -97,8 +97,7 @@ process_compose:
     worker:
       command: python3 -c 'import time; print("service-set-worker", flush=True); time.sleep(600)'
 ''')
-            workspace = json.loads(cli(source, 'workspace', 'adopt', '--role', role, '--label', label).stdout)['workspace']
-            sources.append((source, workspace))
+            sources.append((source, register(state, source, role, label)))
         primary, workspace = sources[0]
         preview, _ = sources[1]
         if args.agent_recipe:
@@ -106,7 +105,7 @@ process_compose:
             context = json.loads(cli(primary, 'context').stdout)
             assert context['workspace']['id'] == workspace['id'] and context['workspace']['role'] == 'primary'
             assert set(context['planned_urls']) == {'frontend', 'backend'}
-            inventory = json.loads(cli(root, 'workspace', 'list', '--all').stdout)['workspaces']
+            inventory = json.loads(cli(root, 'ls').stdout)['workspaces']
             assert {row['workspace']['id'] for row in inventory} == {entry['id'] for _, entry in sources}
             assert status(primary)['state'] == 'stopped'
         proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--port', str(https))
@@ -159,8 +158,8 @@ process_compose:
         collision = root / 'collision'
         collision.mkdir()
         (collision / 'parcela.yaml').write_text((primary / 'parcela.yaml').read_text())
-        refused = cli(collision, 'workspace', 'adopt', '--role', 'preview', '--label', 'api', check=False)
-        assert refused.returncode != 0, refused
+        refused = cli(collision, 'up', '--name', 'api', '--process-compose', '/nonexistent/parcela-register-only', check=False)
+        assert refused.returncode == 1 and 'is already used by' in refused.stderr, refused
         assert request('api-sets.localhost')['id'] == workspace['id']
         note('secondary-host-cannot-be-another-worktree-base')
         unhealthy = state / 'environments' / workspace['id'] / 'unhealthy-backend'
@@ -242,7 +241,7 @@ process_compose:
     server:
       command: python3 {FIXTURE}
 ''')
-        legacy_workspace = json.loads(cli(legacy, 'workspace', 'adopt', '--role', 'preview', '--label', 'legacy').stdout)['workspace']
+        legacy_workspace = register(state, legacy, 'preview', 'legacy')
         sources.append((legacy, legacy_workspace))
         single = json.loads(cli(legacy, 'up', '--detach', '--process-compose', args.process_compose).stdout)
         ports.append(single['session']['backend_port'])

@@ -23,7 +23,7 @@ parcela --json --path "$CHECKOUT" doctor
 parcela --path "$CHECKOUT" status
 ```
 
-`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `status` requires a registered configured checkout and returns its `.workspace` identity, `.url` and live state. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Its `config` check reports the same validation error `up` would print. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
+`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. Run inside a project, it also returns `.unregistered`: that project's jj workspaces and Git worktrees that were never started, with `state` `not started` and the `url` `up` would give them. Listing them registers nothing. `status` requires a registered configured checkout and returns its `.workspace` identity, `.url` and live state. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Its `config` check reports the same validation error `up` would print. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
 
 If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a one-line short-form manifest with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
 
@@ -35,11 +35,11 @@ parcela --workspace "$ENVIRONMENT_ID" status
 
 `--path` and `--workspace` conflict. Keep an explicit `--state-dir` prefix on every call if using a nondefault registry. UUID targeting does not select another machine. Missing source paths do not authorize source or registry deletion.
 
-For sibling checkouts, `workspace discover` is read-only VCS discovery. Read the selected checkout's project instructions, `parcela.yaml` and data bindings before startup. `up` registers only the selected checkout automatically when startup is authorized. It does not create worktrees or change VCS history.
+For sibling checkouts, read `ls` `.unregistered`. Read the selected checkout's project instructions, `parcela.yaml` and data bindings before startup. `up` registers only the selected checkout automatically when startup is authorized. It does not create worktrees or change VCS history.
 
 On first startup, main jj/Git checkouts and plain directories use the project base URL. Linked jj workspaces use their workspace name; linked Git worktrees use their directory name. Use `--name NAME` for an explicit preview name. Use `--primary` only when the user intends that checkout to own the base URL. Unknown or conflicting identities fail rather than taking another environment's namespace. Existing registered names and roles remain stable after VCS metadata changes.
 
-A preview name and distinct URL do not isolate databases, uploads, secrets or queues. Refuse startup until the project's bindings and external-effect policy are appropriate. The advanced `workspace adopt` command is optional, not a prerequisite.
+A preview name and distinct URL do not isolate databases, uploads, secrets or queues. Refuse startup until the project's bindings and external-effect policy are appropriate.
 
 ## Start and verify
 

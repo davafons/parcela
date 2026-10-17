@@ -274,8 +274,7 @@ fn primary_override_is_explicit_and_inspection_never_registers() {
     );
     let state = t.path().join("state");
     for args in [
-        vec!["workspace", "discover"],
-        vec!["workspace", "list", "--all"],
+        vec!["ls"],
         vec!["status", "--all"],
         vec!["context"],
         vec!["url"],

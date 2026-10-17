@@ -100,7 +100,7 @@ fn infer(source: &Path) -> Result<Identity> {
             repository.is_file(),
             "jj repository location is not a regular workspace pointer"
         );
-        let checkout = discovery::discover(root, None)?
+        let checkout = discovery::discover(root)?
             .into_iter()
             .find(|checkout| checkout.source == root)
             .context("current jj workspace is absent from its inventory")?;

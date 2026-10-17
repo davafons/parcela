@@ -116,9 +116,9 @@ class Fixture:
                     'process_compose': {'version': '0.5', 'processes': {'web': {'entrypoint': ['python3', str(path / 'service.py')],
                        'availability': {'restart': 'no'}, 'shutdown': {'signal': 15, 'timeout_seconds': 15}}}}}
         (path / 'parcela.yaml').write_text(json.dumps(manifest))
-        adopted = self.cli(path, 'workspace', 'adopt', '--role', 'preview', '--label', label)
-        assert adopted.returncode == 0, adopted.stderr
-        identity = json.loads(adopted.stdout)['workspace']['id']
+        registered = self.cli(path, 'up', '--name', label, '--process-compose', '/nonexistent/parcela-register-only')
+        assert registered.returncode == 1 and 'backend executable unavailable' in registered.stderr, registered.stderr
+        identity = json.loads(self.cli(path, '--json', 'status').stdout)['workspace']['id']
         app = {'path': path, 'id': identity, 'host': f'{label}-review.localhost', 'runtime': self.state / 'environments' / identity,
                'port': free_port([self.https]), 'manifest': manifest}
         self.apps.append(app)

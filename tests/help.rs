@@ -51,5 +51,5 @@ fn every_command_and_flag_is_described_in_plain_words() {
             assert!(!text.to_lowercase().contains(word), "{argv:?} says {word}");
         }
     }
-    assert!(seen > 25, "walked only {seen} help pages");
+    assert!(seen > 17, "walked only {seen} help pages");
 }

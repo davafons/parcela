@@ -141,7 +141,7 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `down --all` / `down --all-projects` | Stop every running environment of this project, or of every project; prints the targets first and exits 1 if any stop fails |
 | `restart [--detach] [--backend-port N]` | Check the replacement before stopping the healthy run, then start a new run; does not replay arbitrary `run` argv |
 | `status [--all]` | Live supervisor, loopback HTTP and router probes, with recorded state reported separately; a single environment's status also lists each Process Compose service and worker as `processes: [{name, state, pid}]` |
-| `ls` | Every registered environment across projects: project, name, state, URL and path |
+| `ls` | Every registered environment across projects: project, name, state, URL and path. Inside a project it also lists that project's unregistered jj workspaces and Git worktrees as `not started` with the URL `up` would give them (JSON `unregistered`); it never registers them |
 | `logs [SERVICE] --tail N` | Plain-text log tail; default is the routed service; 1–10,000 lines |
 | `url [--service NAME]` | Plain-text default or selected service URL; does not certify reachability |
 | `rm` | Forget the selected stopped environment and release its hostnames and port leases; refuses a running one; keeps source and runtime data |
@@ -150,10 +150,7 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `run [--name NAME\|--primary] [--backend-port N] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
 | `recover [--detach]` | Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
-| `context` / `workspace inspect` | Hidden from help. Planned context; no live-health guarantees |
-| `workspace adopt --role primary\|preview --label LABEL` | Optional explicit registration; `up` does this automatically |
-| `workspace list [--all]` | This project's registered environments, or every project's |
-| `workspace discover` | Read-only sibling jj/Git checkout paths, revisions, refs and registration IDs; no manifest or registry required |
+| `context` | Hidden from help. Planned context; no live-health guarantees |
 | `proxy start [--port N]` | Start the dedicated Caddy proxy in the background and wait until it answers; `--port` saves a port profile; a busy port fails naming its holder; no sudo, trust change, takeover or fallback |
 | `proxy stop` | Signal the recorded proxy process by birth identity and wait until it and its Caddy exit; environments keep running without routes |
 | `proxy restart [--port N]` | Stop, then start on `--port`, the running front door or the saved one |

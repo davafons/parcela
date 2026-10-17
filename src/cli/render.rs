@@ -1,5 +1,5 @@
 //! Human renderings of command results. JSON output never passes through here.
-use super::output::{Style, cell, status_rows, table, url_of};
+use super::output::{Style, cell, table, url_of};
 use serde_json::Value;
 
 pub fn status(row: &Value, style: &Style) -> String {
@@ -69,10 +69,6 @@ fn ports(value: &Value) -> String {
             )
         })
         .collect()
-}
-
-pub fn inventory(rows: &[Value], style: &Style) -> String {
-    status_rows(rows, style)
 }
 
 pub fn context(value: &Value, style: &Style) -> String {
@@ -223,25 +219,4 @@ pub fn proxy_stopped(value: &Value, style: &Style) -> String {
     } else {
         format!("{} The Parcela proxy was not running\n", style.ok())
     }
-}
-
-pub fn discover(value: &Value, _style: &Style) -> String {
-    let rows: Vec<Vec<String>> = value["checkouts"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|row| {
-            vec![
-                cell(&row["vcs"]),
-                cell(&row["name"]),
-                row["refs"]
-                    .as_array()
-                    .map(|refs| refs.iter().map(cell).collect::<Vec<_>>().join(","))
-                    .unwrap_or_default(),
-                cell(&row["adopted_environment_id"]),
-                cell(&row["source"]),
-            ]
-        })
-        .collect();
-    table(&["VCS", "NAME", "REFS", "ENVIRONMENT", "PATH"], &rows)
 }
