@@ -32,6 +32,8 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -54,13 +56,15 @@ jobs:
         env:
           DOCS_SITE: https://parcela.davafons.com
           DOCS_BASE: /docs/
-      - uses: actions/upload-artifact@v4
+      - name: Assemble the Pages site
+        run: |
+          mkdir -p target/pages
+          mv target/docs target/pages/docs
+          cp target/pages/docs/404.html target/pages/404.html
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=/docs/"><link rel="canonical" href="https://parcela.davafons.com/docs/"><a href="/docs/">Parcela docs</a>\n' > target/pages/index.html
+      - uses: actions/upload-pages-artifact@v3
         with:
-          name: parcela-docs
-          path: |
-            target/docs
-            docs-check.json
-          if-no-files-found: error
+          path: target/pages
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -68,25 +72,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
-      group: docs-deploy
+      group: pages
       cancel-in-progress: false
     environment:
-      name: docs
-      url: https://parcela.davafons.com/docs/
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}docs/
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: docs/website/package-lock.json
-      - run: npm ci --prefix docs/website
-      - name: Deploy to Cloudflare Workers
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::Add a CLOUDFLARE_API_TOKEN repository secret (Workers Scripts:Edit, Workers Routes:Edit, Zone:Read for davafons.com) to deploy the docs."
-            exit 1
-          fi
-          npm run deploy --prefix docs/website
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -62,11 +62,4 @@ The first runs the Getting started app from `examples/docs-demo/` in a main chec
 
 ## Deploy
 
-Every push to `main` deploys the site through the `Documentation` workflow. It runs `npm run deploy --prefix docs/website` with the `CLOUDFLARE_API_TOKEN` secret. The token needs Workers Scripts:Edit and Workers Routes:Edit on the `davafons` account and Zone:Read on `davafons.com`.
-
-The site is a Cloudflare Worker named `parcela-docs`, declared in `docs/website/wrangler.jsonc`. To check a deployment without publishing, or to deploy by hand:
-
-```sh
-npm run deploy --prefix docs/website -- --dry-run
-npm run deploy --prefix docs/website
-```
+Every push to `main` that touches the docs builds the site and publishes it to GitHub Pages through the `Documentation` workflow. The site is built with `DOCS_SITE=https://parcela.davafons.com` and `DOCS_BASE=/docs/`; the workflow adds a root page that redirects to `/docs/` and a copy of the 404 page. The custom domain `parcela.davafons.com` is set in the repository's Pages settings and needs a DNS `CNAME` to `davafons.github.io`.
