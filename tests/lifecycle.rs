@@ -244,11 +244,6 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
     record.save(&path).unwrap();
     drop(control);
     drop(lock);
-    assert!(lifecycle::down(&registry, &workspace).is_err());
-    assert_ne!(
-        registry.session(&workspace.id).unwrap().unwrap().status,
-        "stopped"
-    );
 
     let mut survivor = process::OwnedChild::spawn(Command::new("sleep").arg("60")).unwrap();
     let survivor_identity = process::Identity::read(survivor.id()).unwrap().unwrap();
@@ -516,4 +511,122 @@ fn unfinished_open_owner_request_is_rejected_within_a_bounded_wait() {
     let response: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert!(response["error"].is_string());
     assert_eq!(response["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
+    use parcela::owner::{Native, Phase, Record};
+
+    let (_temp, mut registry, workspace, session) = fixture();
+    registry.session_status(&session, "ready").unwrap();
+    let path = registry.runtime_path(&workspace);
+    private::directory(&path).unwrap();
+    let lock = private::Lock::acquire(&path.join("owner.lock")).unwrap();
+    let control = UnixListener::bind(path.join("ctl.sock")).unwrap();
+    let native_socket = UnixListener::bind(path.join("pc.sock")).unwrap();
+    private::write_bytes(&path.join("pc.token"), b"crash-test-token").unwrap();
+
+    let mut owner = Command::new("sleep").arg("60").spawn().unwrap();
+    let owner_identity = process::Identity::read(owner.id()).unwrap().unwrap();
+    let mut supervisor = Command::new("sh")
+        .args(["-c", "sleep 60 & sleep 60 & wait"])
+        .spawn()
+        .unwrap();
+    let supervisor_identity = process::Identity::read(supervisor.id()).unwrap().unwrap();
+    let tree = loop {
+        let tree = process::tree(&supervisor_identity).unwrap();
+        if tree.len() == 3 {
+            break tree;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let mut record = Record {
+        session: registry.session(&workspace.id).unwrap().unwrap(),
+        phase: Phase::Running,
+        owner: owner_identity.clone(),
+        lock: lock.identity().unwrap(),
+        control: private::Identity::read(&path.join("ctl.sock")).unwrap(),
+        supervisor: supervisor_identity.clone(),
+        processes: tree.clone(),
+        native: Some(Native {
+            binary: "/nonexistent/process-compose".into(),
+            token: private::Identity::read(&path.join("pc.token")).unwrap(),
+            socket: Some(private::Identity::read(&path.join("pc.sock")).unwrap()),
+        }),
+        manifest: serde_saphyr::from_str(
+            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        )
+        .unwrap(),
+        diagnostic: None,
+    };
+    record.save(&path).unwrap();
+    drop(control);
+    drop(native_socket);
+    drop(lock);
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+
+    let survivor = tree
+        .iter()
+        .find(|identity| identity.pid != supervisor_identity.pid)
+        .unwrap()
+        .clone();
+    for identity in &tree {
+        if identity != &survivor {
+            unsafe { libc::kill(identity.pid as i32, libc::SIGKILL) };
+        }
+    }
+    supervisor.wait().unwrap();
+    assert!(!supervisor_identity.alive() && survivor.alive());
+    assert!(lifecycle::down(&registry, &workspace).is_err());
+    assert!(
+        survivor.alive(),
+        "a recorded survivor keeps the run active and is never signaled"
+    );
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().status,
+        "ready"
+    );
+
+    unsafe { libc::kill(survivor.pid as i32, libc::SIGKILL) };
+    while survivor.alive() {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        registry
+            .begin_session(
+                &workspace,
+                &Uuid::new_v4().to_string(),
+                32001,
+                "compose",
+                "https://auth-app.localhost",
+            )
+            .is_err(),
+        "a crashed environment blocks up until it converges"
+    );
+    let stopped = lifecycle::down(&registry, &workspace).unwrap();
+    assert_eq!(stopped["state"], "stopped");
+    assert_eq!(stopped["generation"], session.generation);
+    assert_eq!(
+        registry.session(&workspace.id).unwrap().unwrap().status,
+        "stopped"
+    );
+    record = Record::read(&path, &record.session).unwrap();
+    assert_eq!(record.phase, Phase::Stopped);
+    assert!(!path.join("ctl.sock").exists());
+    assert!(!path.join("pc.sock").exists());
+    assert_eq!(
+        lifecycle::down(&registry, &workspace).unwrap()["already_stopped"],
+        true
+    );
+    let next = registry
+        .begin_session(
+            &workspace,
+            &Uuid::new_v4().to_string(),
+            32001,
+            "compose",
+            "https://auth-app.localhost",
+        )
+        .unwrap();
+    assert_eq!(next.generation, session.generation + 1);
 }

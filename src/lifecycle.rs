@@ -130,6 +130,11 @@ pub fn detached(
     let path = registry.runtime_path(workspace);
     private::directory(&path)?;
     let _launch = private::Lock::acquire(&path.join("launch.lock"))?;
+    if let Some(owner) = private::Lock::try_acquire(&path.join("owner.lock"))? {
+        let mut writer =
+            Registry::open(registry.state_path(), true)?.context("registry missing")?;
+        crate::runtime::converge_crashed_session(&mut writer, workspace, &owner)?;
+    }
     let previous = registry.session(&workspace.id)?;
     ensure!(
         previous
@@ -292,11 +297,7 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
         !evidence.owner.alive(),
         "owner is still alive; use status/down"
     );
-    if !matches!(
-        evidence.phase,
-        crate::owner::Phase::Stopping | crate::owner::Phase::Stopped
-    ) || !evidence.quiescent()
-    {
+    if !evidence.quiescent() {
         evidence.authenticate(&path, workspace)?;
     }
     let _launch = private::Lock::acquire(&path.join("launch.lock"))?;

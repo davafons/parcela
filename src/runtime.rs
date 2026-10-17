@@ -164,6 +164,7 @@ pub fn run(
     let router = router::current(registry.state_path())?;
     let path = runtime(registry, workspace)?;
     let _owner = Lock::acquire(&path.join("owner.lock"))?;
+    converge_crashed_session(registry, workspace, &_owner)?;
     let (endpoints, probes) = allocate(registry, manifest, workspace, &router, backend_port)?;
     let default = endpoints
         .iter()
@@ -866,20 +867,7 @@ pub fn recover(
         !record.owner.alive() && lock.identity()? == record.lock,
         "original owner or ownership lock is not safely recoverable"
     );
-    if matches!(
-        record.phase,
-        crate::owner::Phase::Stopping | crate::owner::Phase::Stopped
-    ) && record.quiescent()
-    {
-        record.phase = crate::owner::Phase::Stopped;
-        record.save(&path)?;
-        record.control.remove_socket(&path.join("ctl.sock"))?;
-        if let Some(native) = &record.native
-            && let Some(socket) = &native.socket
-        {
-            socket.remove_socket(&path.join("pc.sock"))?;
-        }
-        registry.session_status(&session, "stopped")?;
+    if converge_crashed(registry, &path, &session, &lock)? {
         return Ok(
             json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","recovered":true}),
         );
@@ -926,6 +914,49 @@ pub fn recover(
     Ok(
         json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","recovered":true}),
     )
+}
+
+/// Marks a run stopped once its owner and every recorded process are gone by birth identity.
+/// It signals nothing; any surviving or unprovable identity leaves the session untouched.
+fn converge_crashed(
+    registry: &mut Registry,
+    path: &std::path::Path,
+    session: &Session,
+    lock: &Lock,
+) -> Result<bool> {
+    let Ok(mut record) = crate::owner::Record::read(path, session) else {
+        return Ok(false);
+    };
+    if record.owner.alive() || lock.identity()? != record.lock || !record.quiescent() {
+        return Ok(false);
+    }
+    record.phase = crate::owner::Phase::Stopped;
+    record.save(path)?;
+    record.control.remove_socket(&path.join("ctl.sock"))?;
+    if let Some(native) = &record.native
+        && let Some(socket) = &native.socket
+    {
+        socket.remove_socket(&path.join("pc.sock"))?;
+    }
+    registry.session_status(session, "stopped")?;
+    if let Ok(router) = router::current(registry.state_path()) {
+        let _ = router::sync(registry, &router);
+    }
+    Ok(true)
+}
+
+/// Lets a new run replace a predecessor that crashed together with its whole recorded tree.
+pub fn converge_crashed_session(
+    registry: &mut Registry,
+    workspace: &Workspace,
+    lock: &Lock,
+) -> Result<()> {
+    if let Some(session) = registry.session(&workspace.id)?
+        && session.status != "stopped"
+    {
+        converge_crashed(registry, &registry.runtime_path(workspace), &session, lock)?;
+    }
+    Ok(())
 }
 
 pub fn task(

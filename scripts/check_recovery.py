@@ -798,12 +798,59 @@ def detached_stopped_recovery(f, finish_first):
     return {'recover_exit': 0, 'state': 'stopped', 'same_generation': True, 'finished_before_recover': finish_first}
 
 
+def crash_whole_tree(f, app):
+    f.start_proxy()
+    owner = f.start(app)
+    before = f.session(app)
+    service = int((app['runtime'] / 'service-started').read_text())
+    wait_for(lambda: any(process['pid'] == service for process in json.loads((app['runtime'] / 'owner.json').read_text())['processes']))
+    record = json.loads((app['runtime'] / 'owner.json').read_text())
+    owner.kill()
+    owner.wait(timeout=5)
+    for process in record['processes']:
+        try: os.kill(process['pid'], signal.SIGKILL)
+        except ProcessLookupError: pass
+    wait_for(lambda: not listening(app['port']))
+    assert (app['runtime'] / 'pc.sock').exists() and (app['runtime'] / 'ctl.sock').exists(), 'a crash leaves stale sockets'
+    assert f.session(app)['status'] == 'ready'
+    return before
+
+def crashed_tree_down(f):
+    app = f.app('crashdown')
+    before = crash_whole_tree(f, app)
+    first = f.cli(app['path'], 'down')
+    assert first.returncode == 0, first.stderr
+    assert json.loads(first.stdout)['state'] == 'stopped'
+    second = f.cli(app['path'], 'down')
+    assert second.returncode == 0 and json.loads(second.stdout)['already_stopped'] is True, second.stderr
+    assert not (app['runtime'] / 'pc.sock').exists() and not (app['runtime'] / 'ctl.sock').exists()
+    assert f.request(app)[0] == 503
+    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    assert retry.returncode == 0, retry.stderr
+    after = f.session(app)
+    assert after['generation'] == before['generation'] + 1 and after['status'] == 'ready'
+    assert f.request(app)[0] == 200
+    assert f.cli(app['path'], 'down').returncode == 0
+    return {'first_down': 'stopped', 'second_down': 'already_stopped', 'next_generation': after['generation'], 'https_code': 200}
+
+def crashed_tree_up(f):
+    app = f.app('crashup')
+    before = crash_whole_tree(f, app)
+    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    assert retry.returncode == 0, retry.stderr
+    after = f.session(app)
+    assert after['generation'] == before['generation'] + 1 and after['status'] == 'ready'
+    assert f.request(app)[0] == 200
+    assert f.cli(app['path'], 'down').returncode == 0
+    return {'up_after_crash_exit': 0, 'next_generation': after['generation'], 'https_code': 200}
+
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
          replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
          recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop, shirabe_native_inspection,
          occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
-         detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization]
+         detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization,
+         crashed_tree_down, crashed_tree_up]
 
 
 def main():
