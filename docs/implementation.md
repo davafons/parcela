@@ -6,7 +6,7 @@ Parcela is a Rust control plane with external Caddy and Process Compose. Project
 
 - Strict manifest validation, immutable identities, private SQLite registry, explicit adoption and inventory/context.
 - Schema 1 -> 2 migration, generation/nonce-protected session and endpoint leases.
-- Background `proxy start/stop/restart/status` with automatic start from `up`, `restart` and `run`, a saved front-door profile (port 1355 by default), `trust [--print]`, literal `run`, native `up`, finite `task`, live `status`, optional version probes in `doctor`.
+- Background `proxy start/stop/restart/status` with automatic start from `up`, `restart` and `run`, a saved front-door profile (port 1443 by default), `trust [--print]`, literal `run`, native `up`, finite `task`, live `status`, optional version probes in `doctor`.
 - Dedicated Caddy config/storage/admin socket; serialized exact-host route updates, internal CA, trust installation disabled by default.
 - Private runtime/locks, retained child groups, owned listener ancestry, initial/re-established readiness, route revocation before normal teardown.
 - Native Process Compose graph export, explicit private Unix-socket mode, no dotenv/watch/TUI.

@@ -86,7 +86,7 @@ fn human_output_is_aligned_text_without_color_when_piped() {
     assert_eq!(
         stdout(&cli(&path, &state, &["--human", "status", "--all"])),
         format!(
-            "PROJECT      NAME     STATE    URL                          PATH\noutput-test  primary  stopped  https://demo.localhost:1355  {}\n",
+            "PROJECT      NAME     STATE    URL                          PATH\noutput-test  primary  stopped  https://demo.localhost:1443  {}\n",
             path.display()
         )
     );

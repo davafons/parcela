@@ -245,7 +245,7 @@ pub enum ProxyCommand {
 
 #[derive(clap::Args)]
 pub struct Listen {
-    /// HTTPS port to serve on, saved for later starts. Defaults to the saved port, then PARCELA_HTTPS_PORT, then 1355.
+    /// HTTPS port to serve on, saved for later starts. Defaults to the saved port, then PARCELA_HTTPS_PORT, then 1443.
     #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
     pub port: Option<u16>,
     /// Caddy binary.

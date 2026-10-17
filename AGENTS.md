@@ -5,7 +5,7 @@ Use jj for version control; preserve unrelated work and never use mutating Git c
 
 - Read docs/PRD.md and docs/implementation.md before architecture changes.
 - Keep Caddy routing/TLS and Process Compose supervision as maintained backends.
-- Defaults: HTTPS on the no-sudo port 1355, loopback only, flat names, tenants off.
+- Defaults: HTTPS on the no-sudo port 1443, loopback only, flat names, tenants off.
 - Never take over listeners, trust a CA, expose LAN/tailnet services, or delete source/data implicitly.
 - Keep project commands/data policy in configuration; no framework assumptions in core.
 - Run cargo fmt --check, cargo clippy --all-targets -- -D warnings, cargo test, and scripts/check for code changes.

@@ -169,10 +169,10 @@ The proxy serves the front-door profile saved in `<state>/proxy/frontdoor.json`.
 
 | Profile | URL | Listeners |
 |---|---|---|
-| `{"mode": "port", "https": 1355}` | `https://notes.localhost:1355` | HTTPS on `127.0.0.1:1355` only |
+| `{"mode": "port", "https": 1443}` | `https://notes.localhost:1443` | HTTPS on `127.0.0.1:1443` only |
 | `{"mode": "standard", "https": 8443, "http": 8080}` | `https://notes.localhost` | `127.0.0.1:8443` and `:8080`, behind an external 443/80 forwarder |
 
-With no saved profile the default is port mode on 1355, or on `PARCELA_HTTPS_PORT` when that is set. `proxy start --port N` and `proxy restart --port N` save a port profile once the proxy answers; a failed start leaves the saved profile unchanged. Listeners must be 1024 or higher; Parcela never binds privileged ports itself. Standard mode needs the profile saved before the proxy starts and checks that port 80 reaches the owned proxy. The proxy runs as a detached `parcela proxy run` (hidden from help, usable in the foreground for debugging or a boot service) with output in `<state>/proxy/proxy.log`. A proxy started by another Parcela version keeps serving, with a warning to run `parcela proxy restart`.
+With no saved profile the default is port mode on 1443, or on `PARCELA_HTTPS_PORT` when that is set. `proxy start --port N` and `proxy restart --port N` save a port profile once the proxy answers; a failed start leaves the saved profile unchanged. Listeners must be 1024 or higher; Parcela never binds privileged ports itself. Standard mode needs the profile saved before the proxy starts and checks that port 80 reaches the owned proxy. The proxy runs as a detached `parcela proxy run` (hidden from help, usable in the foreground for debugging or a boot service) with output in `<state>/proxy/proxy.log`. A proxy started by another Parcela version keeps serving, with a warning to run `parcela proxy restart`.
 
 `parcela` with no command prints the current checkout's status when it is registered, and otherwise the next command to run. Rarely needed flags are accepted but hidden from help: `--human`, `doctor --caddy PATH --process-compose PATH`, `--process-compose PATH` on `up` and `restart`, and `--readiness-timeout SEC` on `up`, `restart` and `run`. They default to the binaries on `PATH` and 60 seconds (30 for `run`). `doctor` exits 1 until every check passes.
 

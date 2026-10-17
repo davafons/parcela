@@ -52,7 +52,7 @@ Check the environment before startup:
 parcela --path "$CHECKOUT" status
 ```
 
-An authorized `up`, `restart` or `run` starts Parcela's shared HTTPS proxy when none runs and says so in one stderr line. `parcela proxy status` reports it without starting anything. The proxy serves every environment on the machine: do not stop or restart it unless the user asks. URLs carry the proxy port (`:1355` by default) until standard-port forwarding is set up, so always use the URLs Parcela returns. For TLS checks without changing system trust, use `curl --cacert "$(parcela trust --print)"`. `parcela trust` changes system trust; run it only when the user asks.
+An authorized `up`, `restart` or `run` starts Parcela's shared HTTPS proxy when none runs and says so in one stderr line. `parcela proxy status` reports it without starting anything. The proxy serves every environment on the machine: do not stop or restart it unless the user asks. URLs carry the proxy port (`:1443` by default) until standard-port forwarding is set up, so always use the URLs Parcela returns. For TLS checks without changing system trust, use `curl --cacert "$(parcela trust --print)"`. `parcela trust` changes system trust; run it only when the user asks.
 
 If already ready, reuse the environment unless the user requests a restart. If prerequisites are absent, report them. Do not automatically install backends, start Docker or a GUI, reuse another agent's dependencies, repair forwarding, trust a CA, change global firewall rules or take over listeners. Do not open an installed registry for writing with a newer binary while an older proxy or controller still serves it; an upgrade requires an explicit coordinated plan.
 

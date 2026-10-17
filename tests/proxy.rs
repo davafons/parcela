@@ -77,7 +77,7 @@ fn the_saved_profile_beats_the_default_and_parcela_https_port_only_replaces_the_
     assert_eq!(status.status.code(), Some(1));
     assert_eq!(
         json_of(&status)["front_door"],
-        json!({"mode": "port", "https": 1355})
+        json!({"mode": "port", "https": 1443})
     );
     let overridden = Command::new(env!("CARGO_BIN_EXE_parcela"))
         .arg("--state-dir")

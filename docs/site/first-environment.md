@@ -2,7 +2,7 @@
 
 We will run a static frontend, a separate API origin and a worker in one environment. The demo has no database, setup task or external worker effects.
 
-Complete the [build](install.md) first. `parcela up` starts the HTTPS proxy when it is not running. The URLs below carry the proxy port, `:1355` by default. The certificate checks need Parcela's CA trusted with `parcela trust`, or `--cacert "$(parcela trust --print)"` on each `curl`.
+Complete the [build](install.md) first. `parcela up` starts the HTTPS proxy when it is not running. The URLs below carry the proxy port, `:1443` by default. The certificate checks need Parcela's CA trusted with `parcela trust`, or `--cacert "$(parcela trust --print)"` on each `curl`.
 
 ## Prepare the demo
 

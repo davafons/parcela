@@ -54,7 +54,7 @@ fn init_writes_a_valid_one_line_manifest_named_after_the_directory() {
         serde_json::json!({
             "created": path.join("parcela.yaml"),
             "project": "notes-app",
-            "url": "https://notes-app.localhost:1355",
+            "url": "https://notes-app.localhost:1443",
             "services": {"web": "python3 -m http.server $PORT --bind 127.0.0.1"}
         })
     );

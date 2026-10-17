@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// The HTTPS port used until the person picks another one or enables standard ports.
-pub const DEFAULT_HTTPS_PORT: u16 = 1355;
+pub const DEFAULT_HTTPS_PORT: u16 = 1443;
 /// Overrides [`DEFAULT_HTTPS_PORT`] while no profile has been saved.
 pub const PORT_ENV: &str = "PARCELA_HTTPS_PORT";
 
@@ -113,8 +113,8 @@ mod tests {
     #[test]
     fn urls_carry_the_port_only_in_port_mode() {
         assert_eq!(
-            FrontDoor::Port { https: 1355 }.url("notes.localhost"),
-            "https://notes.localhost:1355"
+            FrontDoor::Port { https: 1443 }.url("notes.localhost"),
+            "https://notes.localhost:1443"
         );
         assert_eq!(
             FrontDoor::Standard {
@@ -137,14 +137,14 @@ mod tests {
             .validate()
             .is_err()
         );
-        assert!(FrontDoor::Port { https: 1355 }.validate().is_ok());
+        assert!(FrontDoor::Port { https: 1443 }.validate().is_ok());
     }
 
     #[test]
     fn profile_serializes_with_a_mode_tag() {
         assert_eq!(
-            serde_json::to_value(FrontDoor::Port { https: 1355 }).unwrap(),
-            serde_json::json!({"mode": "port", "https": 1355})
+            serde_json::to_value(FrontDoor::Port { https: 1443 }).unwrap(),
+            serde_json::json!({"mode": "port", "https": 1443})
         );
     }
 }
