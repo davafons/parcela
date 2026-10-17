@@ -1,0 +1,13 @@
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.33.0"
+ci = []
+installers = []
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+source-tarball = false
+auto-includes = false
+include = ["LICENSE", "COPYRIGHT", "docs/source-build.md", "target/release-source/THIRD_PARTY_NOTICES.txt"]
+checksum = "sha256"
+unix-archive = ".tar.gz"
