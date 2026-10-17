@@ -168,10 +168,7 @@ fn proxy(state: &Path) -> Check {
     match parcela::router::current(&state) {
         Ok(router) => Check::pass(
             "proxy",
-            format!(
-                "running (HTTPS {}, HTTP {})",
-                router.https_port, router.http_port
-            ),
+            format!("running, {}", router.front_door.describe()),
         ),
         Err(error) => Check::fail("proxy", format!("not running: {:#}", error), fix),
     }

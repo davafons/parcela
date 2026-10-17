@@ -1,5 +1,6 @@
 use parcela::{
     config::Manifest,
+    frontdoor::FrontDoor,
     private,
     registry::{Registry, Role},
     router::{self, Router},
@@ -100,10 +101,8 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
     let (_temp, mut registry, _manifest, workspace) = fixture();
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        https_port: 34443,
-        http_port: 34080,
-        test_profile: true,
-        forwarded_standard_ports: false,
+        front_door: FrontDoor::Port { https: 34443 },
+        version: router::VERSION.into(),
     };
     let session = registry
         .begin_session(
@@ -124,6 +123,17 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
     );
     registry.session_status(&session, "ready").unwrap();
     let config = router::configuration(&registry, &router).unwrap();
+    assert_eq!(session.public_url, "https://auth-app.localhost:34443");
+    assert_eq!(
+        config["apps"]["http"]["servers"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        ["https"],
+        "port mode serves no plain-HTTP listener"
+    );
+    assert!(config["apps"]["http"].get("http_port").is_none());
     assert_eq!(config["admin"]["config"]["persist"], false);
     assert_eq!(
         config["apps"]["pki"]["certificate_authorities"]["local"]["install_trust"],
@@ -241,10 +251,11 @@ fn explicit_forwarding_keeps_public_url_port_free_without_changing_listeners() {
     let (_temp, registry, _manifest, _workspace) = fixture();
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        https_port: 8443,
-        http_port: 8080,
-        test_profile: false,
-        forwarded_standard_ports: true,
+        front_door: FrontDoor::Standard {
+            https: 8443,
+            http: 8080,
+        },
+        version: router::VERSION.into(),
     };
     assert_eq!(
         router.url("auth-app.localhost"),

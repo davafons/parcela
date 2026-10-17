@@ -32,11 +32,12 @@ pub struct Capabilities {
 impl ResolvedContext {
     pub fn new(registry: &Registry, manifest: &Manifest, workspace: Workspace) -> Result<Self> {
         let reserved = registry.hosts(&workspace.id)?;
+        let front_door = crate::frontdoor::FrontDoor::load(registry.state_path())?;
         let planned_urls = manifest
             .service_hosts(&workspace.hostname)?
             .into_iter()
             .filter(|(_, host)| reserved.values().any(|reserved| reserved == host))
-            .map(|(name, host)| (name, format!("https://{host}")))
+            .map(|(name, host)| (name, front_door.url(&host)))
             .collect();
         let ports = registry
             .session(&workspace.id)?

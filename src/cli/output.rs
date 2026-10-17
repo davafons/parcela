@@ -164,12 +164,9 @@ pub fn status_rows(rows: &[Value], style: &Style) -> String {
     table(&["PROJECT", "NAME", "STATE", "URL", "PATH"], &rows)
 }
 
-/// The recorded run URL when present, otherwise the reserved standard HTTPS URL.
+/// The URL `lifecycle::status` resolved for the row.
 pub fn url_of(row: &Value) -> String {
-    row["recorded_session"]["public_url"].as_str().map_or_else(
-        || format!("https://{}", cell(&row["workspace"]["hostname"])),
-        str::to_owned,
-    )
+    cell(&row["url"])
 }
 
 /// Diagnostics for status rows go to stderr so stdout stays a clean table.

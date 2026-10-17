@@ -21,8 +21,8 @@ def main():
     args = parser.parse_args()
     root = Path(tempfile.mkdtemp(prefix='pc-set-', dir='/tmp')).resolve()
     state = root / 'state'
-    https, http = free_port(), free_port()
-    report = {'complete': False, 'agent_recipe': args.agent_recipe, 'root': str(root), 'front_ports': [https, http], 'cases': []}
+    https = free_port()
+    report = {'complete': False, 'agent_recipe': args.agent_recipe, 'root': str(root), 'front_ports': [https], 'cases': []}
     children, handles, sources, ports = [], [], [], []
 
     def cli(path, *argv, check=True, timeout=20):
@@ -109,7 +109,7 @@ process_compose:
             inventory = json.loads(cli(root, 'workspace', 'list', '--all').stdout)['workspaces']
             assert {row['workspace']['id'] for row in inventory} == {entry['id'] for _, entry in sources}
             assert status(primary)['state'] == 'stopped'
-        proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--test-profile', '--https-port', str(https), '--http-port', str(http))
+        proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--port', str(https))
         wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
         environments = state / 'environments'
         environments.mkdir(mode=0o700, exist_ok=True)
@@ -264,7 +264,7 @@ process_compose:
             handle.close()
         report['backend_ports'] = sorted(set(ports))
         report['listeners_closed'] = True
-        for port in [https, http, *ports]:
+        for port in [https, *ports]:
             with socket.socket() as sock:
                 if sock.connect_ex(('127.0.0.1', port)) == 0:
                     report['listeners_closed'] = False

@@ -1,4 +1,5 @@
 use crate::{
+    frontdoor::FrontDoor,
     http,
     private::{self, Lock},
     process::{OwnedChild, Signals, exit_code, version},
@@ -17,58 +18,59 @@ use std::{
 use uuid::Uuid;
 
 pub const LEASE_MS: u64 = 3000;
+/// The Parcela release that started a proxy; another release warns instead of reusing silently.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The running proxy: its ownership token, the front door it serves and the release that started it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Router {
     pub token: String,
-    pub https_port: u16,
-    pub http_port: u16,
-    pub test_profile: bool,
-    #[serde(default)]
-    pub forwarded_standard_ports: bool,
+    pub front_door: FrontDoor,
+    pub version: String,
 }
 impl Router {
     pub fn url(&self, host: &str) -> String {
-        if self.https_port == 443 || self.forwarded_standard_ports {
-            format!("https://{host}")
-        } else {
-            format!("https://{host}:{}", self.https_port)
-        }
+        self.front_door.url(host)
+    }
+    /// Whether Caddy itself listens on `port`, so no backend may use it.
+    pub fn listens_on(&self, port: u16) -> bool {
+        self.front_door.listeners().contains(&port)
     }
     fn id(&self) -> String {
         format!("parcela-{}", self.token)
     }
 }
-fn proxy_dir(state: &Path) -> PathBuf {
+pub(crate) fn proxy_dir(state: &Path) -> PathBuf {
     state.join("proxy")
 }
 fn socket(state: &Path) -> Result<PathBuf> {
     crate::sockets::proxy_admin(state)
 }
+/// The verified running proxy. Fails when none answers on Parcela's private admin socket.
 pub fn current(state: &Path) -> Result<Router> {
-    let router: Router = private::read_json(&proxy_dir(state).join("router.json"))
-        .context("no managed router record; run proxy run first")?;
+    let file = proxy_dir(state).join("router.json");
+    let record: Value = private::read_json(&file)
+        .context("the Parcela proxy is not running; start it with `parcela proxy start`")?;
+    let router: Router = serde_json::from_value(record.clone()).map_err(|_| {
+        if record.get("version").is_none() {
+            anyhow::anyhow!(
+                "the running proxy was started by an older Parcela; stop that `parcela proxy run` (Ctrl-C or its launch agent), then run `parcela proxy start`"
+            )
+        } else {
+            anyhow::anyhow!(
+                "the proxy record {} is from Parcela {}; run `parcela proxy restart`",
+                file.display(),
+                record["version"]
+            )
+        }
+    })?;
     ensure!(
-        Uuid::parse_str(&router.token).is_ok()
-            && router.http_port != 0
-            && router.https_port != 0
-            && router.http_port != router.https_port,
+        Uuid::parse_str(&router.token).is_ok() && router.front_door.validate().is_ok(),
         "malformed router ownership record"
     );
-    ensure!(
-        !router.forwarded_standard_ports
-            || (!router.test_profile && router.http_port >= 1024 && router.https_port >= 1024),
-        "malformed forwarded-standard-port profile"
-    );
-    if !router.test_profile && !router.forwarded_standard_ports {
-        ensure!(
-            router.https_port == 443 && router.http_port == 80,
-            "nonstandard ports require explicit test profile"
-        );
-    }
     verify(state, &router)?;
-    if router.forwarded_standard_ports {
+    if router.front_door.http_listener().is_some() {
         http::front_door(80, &router.id())
             .context("standard-port forwarding is not active; complete explicit host setup")?;
     }
@@ -228,8 +230,7 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
                 "unreserved service route refused"
             );
             ensure!(
-                endpoint.backend_port != router.http_port
-                    && endpoint.backend_port != router.https_port,
+                !router.listens_on(endpoint.backend_port),
                 "proxy loop rejected"
             );
             routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
@@ -248,16 +249,23 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
     redirects.push(
         json!({"handle":[{"handler":"static_response", "status_code":404,"body":router.id()}], "terminal":true}),
     );
+    let https_port = router.front_door.https_listener();
+    let mut servers = json!({
+        "https":{"listen":[format!("127.0.0.1:{https_port}")], "protocols":["h1","h2"],
+            "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":routes}
+    });
+    let mut http_app = json!({"https_port": https_port});
+    if let Some(http_port) = router.front_door.http_listener() {
+        servers["redirect"] = json!({"listen":[format!("127.0.0.1:{http_port}")], "protocols":["h1"], "automatic_https":{"disable":true}, "routes":redirects});
+        http_app["http_port"] = json!(http_port);
+    }
+    http_app["servers"] = servers;
     let mut config = json!({
         "admin":{"listen":format!("unix/{}", socket(state)?.display()), "config":{"persist":false}},
         "storage":{"module":"file_system", "root":proxy_dir(state).join("data")},
         "apps":{
             "pki":{"certificate_authorities":{"local":{"install_trust":false}}},
-            "http":{"http_port":router.http_port,"https_port":router.https_port,"servers":{
-                "https":{"listen":[format!("127.0.0.1:{}",router.https_port)], "protocols":["h1","h2"],
-                    "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":routes},
-                "redirect":{"listen":[format!("127.0.0.1:{}",router.http_port)], "protocols":["h1"], "automatic_https":{"disable":true}, "routes":redirects}
-            }}
+            "http":http_app
         }
     });
     if !hosts.is_empty() {
@@ -265,26 +273,10 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
     }
     Ok(config)
 }
-pub fn run(
-    registry: &Registry,
-    binary: &str,
-    https_port: u16,
-    http_port: u16,
-    test_profile: bool,
-    forwarded_standard_ports: bool,
-) -> Result<i32> {
-    ensure!(
-        https_port != 0 && http_port != 0 && https_port != http_port,
-        "router ports must be nonzero and distinct"
-    );
-    ensure!(
-        test_profile || forwarded_standard_ports || (https_port == 443 && http_port == 80),
-        "nonstandard front-door ports require --test-profile; no implicit fallback"
-    );
-    ensure!(
-        !forwarded_standard_ports || (!test_profile && https_port >= 1024 && http_port >= 1024),
-        "forwarded standard ports require distinct unprivileged internal listeners and no test profile"
-    );
+/// Run Caddy in the foreground for `front_door` until a signal arrives. Saves the profile once
+/// Caddy answers, so the profile always names the last proxy that started.
+pub fn run(registry: &Registry, binary: &str, front_door: FrontDoor) -> Result<i32> {
+    front_door.validate()?;
     let backend = version(binary, "version")?;
     ensure!(
         backend.starts_with("v2."),
@@ -317,18 +309,14 @@ pub fn run(
         }
     }
     if recovered.is_none() {
-        for port in [https_port, http_port] {
-            let _probe = TcpListener::bind(("127.0.0.1", port)).with_context(|| {
-                format!("front-door port {port} unavailable; no listener takeover or fallback")
-            })?;
+        for port in front_door.listeners() {
+            probe_listener(port)?;
         }
     }
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        https_port,
-        http_port,
-        test_profile,
-        forwarded_standard_ports,
+        front_door,
+        version: VERSION.into(),
     };
     let config = configuration(registry, &router)?;
     let config_path = directory.join("caddy.json");
@@ -389,6 +377,8 @@ pub fn run(
     private::write_json(
         &directory.join("owner.json"),
         &ProxyEvidence {
+            daemon: crate::process::Identity::read(std::process::id())?
+                .context("proxy birth identity unavailable")?,
             child: identity.clone(),
             socket: private::Identity::read(&admin_socket)?,
             router: router.clone(),
@@ -396,10 +386,12 @@ pub fn run(
     )?;
     private::write_json(&directory.join("router.json"), &router)?;
     private::write_json(&directory.join("loaded.json"), &config)?;
+    front_door.save(state)?;
     drop(_update);
     eprintln!(
-        "parcela: Caddy {backend}, owned loopback front door {} (test_profile={test_profile}); CA trust unchanged",
-        router.url("<environment>")
+        "parcela: Caddy {backend} serving {} ({}); CA trust unchanged",
+        router.url("<name>.localhost"),
+        front_door.describe()
     );
     let mut refresh = Instant::now();
     let result = loop {
@@ -431,12 +423,28 @@ pub fn run(
     result
 }
 
+/// Who owns the running proxy: the `parcela proxy run` process, its Caddy child and admin socket.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ProxyEvidence {
-    child: crate::process::Identity,
-    socket: private::Identity,
-    router: Router,
+pub(crate) struct ProxyEvidence {
+    pub daemon: crate::process::Identity,
+    pub child: crate::process::Identity,
+    pub socket: private::Identity,
+    pub router: Router,
+}
+
+/// Refuse a busy port, naming who holds it. Parcela never takes a listener over or falls back.
+fn probe_listener(port: u16) -> Result<()> {
+    if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        return Ok(());
+    }
+    let holder = crate::process::port_holder(port).map_or_else(
+        || "another process".to_owned(),
+        |(pid, command)| format!("{command} (pid {pid})"),
+    );
+    anyhow::bail!(
+        "port {port} is already in use by {holder}; choose another port with `parcela proxy start --port <n>`"
+    )
 }
 fn stop_proxy(
     child: &mut Option<OwnedChild>,

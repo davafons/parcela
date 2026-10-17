@@ -1,6 +1,6 @@
 use super::output::Output;
 use anyhow::{Context, Result, bail};
-use parcela::config::Manifest;
+use parcela::{config::Manifest, frontdoor::FrontDoor};
 use std::{fs, io::Write, path::Path};
 
 const DOCS: &str = "https://github.com/davafons/parcela/blob/main/docs/configuration.md";
@@ -72,7 +72,13 @@ fn scalar(text: &str) -> String {
     }
 }
 
-pub fn run(directory: &Path, name: Option<&str>, command: Option<&str>, out: Output) -> Result<()> {
+pub fn run(
+    directory: &Path,
+    name: Option<&str>,
+    command: Option<&str>,
+    front_door: FrontDoor,
+    out: Output,
+) -> Result<()> {
     let directory = directory
         .canonicalize()
         .with_context(|| format!("resolve {}", directory.display()))?;
@@ -105,7 +111,7 @@ pub fn run(directory: &Path, name: Option<&str>, command: Option<&str>, out: Out
     let manifest = Manifest::parse(&text, &directory).context(
         "the generated parcela.yaml would be invalid; choose another --name or --command",
     )?;
-    let url = format!("https://{}", manifest.hostname(true, "primary")?);
+    let url = front_door.url(&manifest.hostname(true, "primary")?);
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)

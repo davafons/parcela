@@ -13,6 +13,7 @@ fn cli(path: &Path, args: &[&str]) -> Output {
         .arg(path)
         .arg("--state-dir")
         .arg(path.join("unused-state"))
+        .env_remove("PARCELA_HTTPS_PORT")
         .args(args)
         .output()
         .unwrap()
@@ -53,7 +54,7 @@ fn init_writes_a_valid_one_line_manifest_named_after_the_directory() {
         serde_json::json!({
             "created": path.join("parcela.yaml"),
             "project": "notes-app",
-            "url": "https://notes-app.localhost",
+            "url": "https://notes-app.localhost:1355",
             "services": {"web": "python3 -m http.server $PORT --bind 127.0.0.1"}
         })
     );
@@ -66,6 +67,25 @@ fn init_writes_a_valid_one_line_manifest_named_after_the_directory() {
     let check: serde_json::Value =
         serde_json::from_slice(&cli(&path, &["config", "check"]).stdout).unwrap();
     assert_eq!(check["project_id"], "notes-app");
+}
+
+#[test]
+fn init_prints_the_url_on_the_port_from_parcela_https_port() {
+    let t = TempDir::new().unwrap();
+    let path = directory(&t, "notes");
+    let output = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--path")
+        .arg(&path)
+        .arg("--state-dir")
+        .arg(path.join("unused-state"))
+        .env("PARCELA_HTTPS_PORT", "4433")
+        .args(["--json", "init"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["url"], "https://notes.localhost:4433");
+    assert!(!path.join("unused-state").exists());
 }
 
 #[test]

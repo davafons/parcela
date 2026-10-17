@@ -8,6 +8,7 @@ use parcela::{
     config::{Manifest, locate},
     context::ResolvedContext,
     control::Action,
+    frontdoor::FrontDoor,
     lifecycle,
     registry::{Registry, Role, Workspace},
     startup,
@@ -157,8 +158,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             command: ProxyCommand::Status,
         } => {
             let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-            let router = parcela::router::current(registry.state_path())?;
+            let router = parcela::router::current(&state)?;
             let result = serde_json::json!({"router":router,"owned_admin_verified":true,"browser_trust_verified":false});
             out.emit(&result, |style| render::proxy(&result, style))
         }
@@ -223,6 +223,13 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
         _ => bail!("runtime command reached inspection dispatcher"),
     }
 }
+/// An explicit `--port` is a port profile; otherwise the saved profile or the default.
+fn requested_front_door(state: &Path, port: Option<u16>) -> Result<FrontDoor> {
+    match port {
+        Some(https) => Ok(FrontDoor::Port { https }),
+        None => FrontDoor::load(state),
+    }
+}
 /// `parcela` alone: status inside a started checkout, otherwise the next command to run.
 pub fn bare(global: Global) -> Result<i32> {
     let out = Output::detect(global.json, global.human);
@@ -277,7 +284,14 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         return Ok(0);
     }
     if let Command::Init { name, command } = &cli.command {
-        super::init::run(&cli.path, name.as_deref(), command.as_deref(), out)?;
+        let front_door = FrontDoor::load(&state_dir(cli.state_dir.clone())?)?;
+        super::init::run(
+            &cli.path,
+            name.as_deref(),
+            command.as_deref(),
+            front_door,
+            out,
+        )?;
         return Ok(0);
     }
     if let Command::Doctor {
@@ -319,25 +333,12 @@ pub fn run(mut cli: Cli) -> Result<i32> {
     let restarting = matches!(cli.command, Command::Restart { .. });
     match cli.command {
         Command::Proxy {
-            command:
-                ProxyCommand::Run {
-                    caddy,
-                    https_port,
-                    http_port,
-                    test_profile,
-                    forwarded_standard_ports,
-                },
+            command: ProxyCommand::Run { listen },
         } => {
             let state = state_dir(cli.state_dir)?;
             let registry = Registry::open(&state, true)?.context("cannot create the registry")?;
-            parcela::router::run(
-                &registry,
-                &caddy,
-                https_port,
-                http_port,
-                test_profile,
-                forwarded_standard_ports,
-            )
+            let front_door = requested_front_door(registry.state_path(), listen.port)?;
+            parcela::router::run(&registry, &listen.caddy, front_door)
         }
         Command::Run {
             backend_port,

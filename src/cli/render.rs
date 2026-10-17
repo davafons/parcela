@@ -169,10 +169,11 @@ pub fn recovered(value: &Value, style: &Style) -> String {
 pub fn proxy(value: &Value, style: &Style) -> String {
     let router = &value["router"];
     format!(
-        "{} Proxy running (HTTPS {}, HTTP {})\n",
+        "{} Proxy running ({} mode, HTTPS :{}), Parcela {}\n",
         style.ok(),
-        cell(&router["https_port"]),
-        cell(&router["http_port"])
+        cell(&router["front_door"]["mode"]),
+        cell(&router["front_door"]["https"]),
+        cell(&router["version"]),
     )
 }
 

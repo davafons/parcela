@@ -123,8 +123,7 @@ def main():
     record = state / 'proxy/router.json'
     protected(record, uid)
     router = json.loads(record.read_text())
-    require(router.get('forwarded_standard_ports') is True and router.get('test_profile') is False and
-            router.get('https_port') == 8443 and router.get('http_port') == 8080, 'Expected the explicit 8080/8443 forwarding profile')
+    require(router.get('front_door') == {'mode': 'standard', 'https': 8443, 'http': 8080}, 'Expected the explicit 8080/8443 forwarding profile')
     certificate = state / 'proxy/data/pki/authorities/local/root.crt'
     protected(certificate, uid)
     tls_probe(8443, args.hostname, certificate)

@@ -46,7 +46,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='parcela-live-', dir='/tmp') as temporary:
         root = Path(temporary).resolve()
         state = root / 'state'
-        https, http = free_port(), free_port()
+        https = free_port()
         def cli(path, *argv, check=True):
             return subprocess.run([str(BINARY), '--path', str(path), '--state-dir', str(state), *argv],
                                   capture_output=True, text=True, check=check, timeout=15)
@@ -96,7 +96,7 @@ process_compose:
 ''')
                 adopted = json.loads(cli(path, 'workspace', 'adopt', '--role', role, '--label', name).stdout)
                 copies.append((path, adopted['workspace']['id']))
-            proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--test-profile', '--https-port', str(https), '--http-port', str(http))
+            proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--port', str(https))
             wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
             primary = spawn(copies[0][0], 'run', '--', 'python3', str(FIXTURE), 'literal argument with spaces', '--flag')
             preview = spawn(copies[1][0], 'run', '--', 'python3', str(FIXTURE))
@@ -195,7 +195,7 @@ process_compose:
                           'SSE', 'WebSocket upgrade', 'unknown host rejection', 'duplicate ownership', 'SIGTERM', 'exit status', 'foreign port safety',
                           'Process Compose web+worker private UDS', 'independent teardown', 'owner-mediated down/stop', 'detached startup/readiness',
                            'restart generation', 'unhealthy probe separate from recorded ready', 'stale command rejection', 'live/aggregate status and UUID targeting', 'service/log inspection',
-                           'data retention', 'foreign control socket refusal', 'failed detached startup cleanup'], 'test_ports': {'https': https, 'http': http}, 'standard_ports_verified': False}))
+                           'data retention', 'foreign control socket refusal', 'failed detached startup cleanup'], 'test_ports': {'https': https}, 'standard_ports_verified': False}))
         except Exception:
             for handle in handles:
                 handle.flush()

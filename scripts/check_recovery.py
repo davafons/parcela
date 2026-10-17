@@ -96,7 +96,6 @@ class Fixture:
         self.owners = []
         self.logs = []
         self.https = free_port()
-        self.http = free_port([self.https])
         self.proxy = None
         self.name = name
     def cli(self, path, *args, timeout=25):
@@ -121,11 +120,11 @@ class Fixture:
         assert adopted.returncode == 0, adopted.stderr
         identity = json.loads(adopted.stdout)['workspace']['id']
         app = {'path': path, 'id': identity, 'host': f'{label}-review.localhost', 'runtime': self.state / 'environments' / identity,
-               'port': free_port([self.https, self.http]), 'manifest': manifest}
+               'port': free_port([self.https]), 'manifest': manifest}
         self.apps.append(app)
         return app
     def start_proxy(self):
-        self.proxy = self.spawn(self.root, 'proxy', 'run', '--caddy', self.args.caddy, '--test-profile', '--https-port', str(self.https), '--http-port', str(self.http))
+        self.proxy = self.spawn(self.root, 'proxy', 'run', '--caddy', self.args.caddy, '--port', str(self.https))
         wait_for(lambda: self.cli(self.root, 'proxy', 'status').returncode == 0)
     def start(self, app, compose=None):
         owner = self.spawn(app['path'], 'up', '--process-compose', compose or self.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
@@ -217,7 +216,7 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
                 try: socket_path(app, 'control').parent.rmdir()
                 except OSError: pass
     def details(self):
-        return {'fixture': str(self.root), 'https_port': self.https, 'http_port': self.http}
+        return {'fixture': str(self.root), 'https_port': self.https}
 
 def owner_crash(f):
     app = f.app('crash')
@@ -680,13 +679,13 @@ def invalid_replacement_port(f):
     f.start_proxy()
     owner = f.start(app)
     original = f.session(app)
-    for port in [0, 80, f.http, f.https]:
+    for port in [0, 80, f.https]:
         restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(port))
         assert restart.returncode != 0, f'invalid replacement port {port} must be refused'
         assert owner.poll() is None, f'invalid replacement port {port} stopped original owner'
         assert f.session(app)['token'] == original['token']
         assert f.request(app)[0] == 200
-    return {'invalid_endpoints_refused': 4, 'original_owner_alive': True, 'https_code': 200}
+    return {'invalid_endpoints_refused': 3, 'original_owner_alive': True, 'https_code': 200}
 
 def restart_owned_port(f):
     app = f.app('reuse')

@@ -99,12 +99,23 @@ fn flat_planned_urls_and_explicit_no_runtime_claims() {
     let preview = registry
         .adopt(&m, &preview_path, Role::Preview, "auth")
         .unwrap();
-    let context = ResolvedContext::new(&registry, &m, preview).unwrap();
-    assert_eq!(context.planned_urls["web"], "https://auth-demo.localhost");
+    let context = ResolvedContext::new(&registry, &m, preview.clone()).unwrap();
+    assert_eq!(
+        context.planned_urls["web"],
+        "https://auth-demo.localhost:1355"
+    );
     assert_eq!(
         context.planned_urls["api"],
-        "https://api-auth-demo.localhost"
+        "https://api-auth-demo.localhost:1355"
     );
+    parcela::frontdoor::FrontDoor::Standard {
+        https: 8443,
+        http: 8080,
+    }
+    .save(registry.state_path())
+    .unwrap();
+    let standard = ResolvedContext::new(&registry, &m, preview).unwrap();
+    assert_eq!(standard.planned_urls["web"], "https://auth-demo.localhost");
     assert!(!context.capabilities.routing && !context.capabilities.data_isolation_verified);
     assert!(!context.runtime_dir.exists());
     assert!(context.source_exists);

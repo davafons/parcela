@@ -16,6 +16,7 @@ fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
         .arg(path)
         .arg("--state-dir")
         .arg(state)
+        .env_remove("PARCELA_HTTPS_PORT")
         .args(args)
         .output()
         .unwrap()
@@ -107,10 +108,10 @@ fn ls_lists_every_project_in_one_table() {
     assert_eq!(
         human(&cli(&f.root, &f.state, &["--human", "ls"])),
         format!(
-            "PROJECT  NAME     STATE    URL                             PATH\n\
-             notes    review   stopped  https://review-notes.localhost  {}\n\
-             notes    primary  stopped  https://notes.localhost         {}\n\
-             shop     primary  stopped  https://shop.localhost          {}\n",
+            "PROJECT  NAME     STATE    URL                                  PATH\n\
+             notes    review   stopped  https://review-notes.localhost:1355  {}\n\
+             notes    primary  stopped  https://notes.localhost:1355         {}\n\
+             shop     primary  stopped  https://shop.localhost:1355          {}\n",
             review.display(),
             notes.display(),
             shop.display()

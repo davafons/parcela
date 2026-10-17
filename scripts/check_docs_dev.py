@@ -29,8 +29,8 @@ def main():
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in inputs}
     root = Path(tempfile.mkdtemp(prefix='pdd-', dir='/tmp')).resolve()
     state = root / 'state'
-    https_port, http_port = free_port(), free_port()
-    report = {'complete': False, 'fixture': str(root), 'front_ports': [https_port, http_port],
+    https_port = free_port()
+    report = {'complete': False, 'fixture': str(root), 'front_ports': [https_port],
               'backend_ports': [], 'protocol_reports': [], 'verified': []}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + '\n')
@@ -99,7 +99,7 @@ def main():
         log = open(root / 'proxy.log', 'w')
         handles.append(log)
         proxy = subprocess.Popen([str(BINARY), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,
-                                  '--test-profile', '--http-port', str(http_port), '--https-port', str(https_port)],
+                                  '--port', str(https_port)],
                                  stdout=log, stderr=log)
         wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
         sessions, origins = [], []
@@ -179,7 +179,7 @@ def main():
         report['backend_ports'] = sorted(set(report['backend_ports']))
         report['source_unchanged'] = all(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest for name, digest in hashes.items())
         report['listeners_closed'] = True
-        for port in [https_port, http_port, *report['backend_ports']]:
+        for port in [https_port, *report['backend_ports']]:
             with socket.socket() as connection:
                 if connection.connect_ex(('127.0.0.1', port)) == 0:
                     report['listeners_closed'] = False

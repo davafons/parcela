@@ -15,6 +15,7 @@ fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
         .arg(state)
         .args(args)
         .env_remove("NO_COLOR")
+        .env_remove("PARCELA_HTTPS_PORT")
         .output()
         .unwrap()
 }
@@ -85,7 +86,7 @@ fn human_output_is_aligned_text_without_color_when_piped() {
     assert_eq!(
         stdout(&cli(&path, &state, &["--human", "status", "--all"])),
         format!(
-            "PROJECT      NAME     STATE    URL                     PATH\noutput-test  primary  stopped  https://demo.localhost  {}\n",
+            "PROJECT      NAME     STATE    URL                          PATH\noutput-test  primary  stopped  https://demo.localhost:1355  {}\n",
             path.display()
         )
     );

@@ -39,10 +39,7 @@ pub fn down_all(state: &Path, project: Option<&str>, out: Output) -> Result<i32>
             .map(|workspace| {
                 vec![
                     format!("  {}", render::name(&json!(workspace))),
-                    registry.session(&workspace.id).ok().flatten().map_or_else(
-                        || format!("https://{}", workspace.hostname),
-                        |session| session.public_url,
-                    ),
+                    lifecycle::url(&registry, workspace).unwrap_or_default(),
                 ]
             })
             .collect();

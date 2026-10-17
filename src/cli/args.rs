@@ -212,26 +212,24 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum ProxyCommand {
-    /// Run Caddy in the foreground as the HTTPS front door. Never installs, uses sudo or trusts a CA.
+    /// Run the proxy in the foreground, for debugging or a boot service. Never uses sudo or trusts a CA.
+    #[command(hide = true)]
     Run {
-        /// Caddy binary.
-        #[arg(long, default_value = "caddy")]
-        caddy: String,
-        /// HTTPS listener port.
-        #[arg(long, default_value_t = 443)]
-        https_port: u16,
-        /// HTTP listener port.
-        #[arg(long, default_value_t = 80)]
-        http_port: u16,
-        /// Allow nonstandard ports for a disposable test setup; URLs include the port.
-        #[arg(long)]
-        test_profile: bool,
-        /// Listen on these unprivileged ports behind host forwarding from 80/443; URLs omit the port.
-        #[arg(long)]
-        forwarded_standard_ports: bool,
+        #[command(flatten)]
+        listen: Listen,
     },
-    /// Check that Parcela's proxy is running.
+    /// Show whether the proxy is running, where it listens and which Parcela started it.
     Status,
+}
+
+#[derive(clap::Args)]
+pub struct Listen {
+    /// HTTPS port to serve on, saved for later starts. Defaults to the saved port, then PARCELA_HTTPS_PORT, then 1355.
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
+    pub port: Option<u16>,
+    /// Caddy binary.
+    #[arg(long, default_value = "caddy", hide = true)]
+    pub caddy: String,
 }
 
 #[derive(Subcommand)]

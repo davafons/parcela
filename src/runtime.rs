@@ -390,7 +390,7 @@ fn allocate(
         .iter()
         .filter(|session| session.status != "stopped")
         .flat_map(Session::leased_ports)
-        .chain([router.http_port, router.https_port])
+        .chain(router.front_door.listeners())
         .collect();
     let mut endpoints = Vec::new();
     let mut probes = Vec::new();
@@ -402,9 +402,7 @@ fn allocate(
         };
         let backend_port = probe.local_addr()?.port();
         ensure!(
-            backend_port >= 1024
-                && backend_port != router.http_port
-                && backend_port != router.https_port,
+            backend_port >= 1024 && !router.listens_on(backend_port),
             "backend endpoint conflicts with privileged/router ports"
         );
         endpoints.push(Endpoint {
@@ -561,7 +559,7 @@ pub fn preflight(
     let mut reusable = false;
     if let Some(port) = port {
         ensure!(
-            port >= 1024 && port != active_router.https_port && port != active_router.http_port,
+            port >= 1024 && !active_router.listens_on(port),
             "backend endpoint conflicts with privileged/router ports"
         );
         ensure!(
@@ -1088,10 +1086,7 @@ pub fn task(
     let path = runtime(registry, workspace)?;
     let _lock = Lock::acquire(&path.join("task.lock"))?;
     let session = registry.session(&workspace.id)?;
-    let url = session
-        .as_ref()
-        .map(|s| s.public_url.clone())
-        .unwrap_or_else(|| format!("https://{}", workspace.hostname));
+    let url = crate::lifecycle::url(registry, workspace)?;
     let env = if let Some(session) = &session {
         session_environment(manifest, workspace, &path, session)?
     } else {

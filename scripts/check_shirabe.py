@@ -43,7 +43,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='ps-', dir='/tmp') as directory:
         root = Path(directory).resolve()
         state = root / 'state'
-        https, http_port = free_port(), free_port()
+        https = free_port()
         copies = []
         def cli(path, *argv, timeout=180, check=True):
             output = subprocess.run([str(BINARY), '--path', str(path), '--state-dir', str(state), *argv],
@@ -92,7 +92,7 @@ def main():
                 cli(copy, 'task', 'prepare')
                 cli(copy, 'task', 'prepare')  # Same input fingerprints: no destructive re-preparation.
                 copies.append((copy, adopted['workspace']['id'], hashes))
-            proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--test-profile', '--https-port', str(https), '--http-port', str(http_port))
+            proxy = spawn(root, 'proxy', 'run', '--caddy', args.caddy, '--port', str(https))
             wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
             servers = []
             for copy, _, _ in copies:
@@ -166,7 +166,7 @@ def main():
                 'actual auth concern host-only secure cookies', 'cross-environment cookie rejection', 'independent teardown', 'native graph restart with retained data/auth', 'original tracked source unchanged'],
                 'native_css_jobs_verified_running': bool(native),
                 'dictionary': 'fresh schema only; no imported corpus', 'unverified': ['actual Cable transport in Shirabe', 'SDK watcher', 'full application regression', 'phone access', 'standard ports'],
-                'test_ports': {'https': https, 'http': http_port}}))
+                'test_ports': {'https': https}}))
         except Exception:
             for log in logs:
                 log.flush(); log.seek(0)

@@ -1,6 +1,7 @@
 //! Client-side local lifecycle commands. Effects go through the live owner, never saved PIDs.
 use crate::{
     control::{self, Action, LiveState, LiveStatus},
+    frontdoor::FrontDoor,
     private,
     process::{OwnedChild, Signals},
     registry::{Registry, Session, Workspace},
@@ -39,7 +40,7 @@ pub fn status(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         }
     }
     Ok(
-        json!({"workspace": workspace, "source_exists": workspace.source.is_dir(), "recorded_session": recorded,
+        json!({"workspace": workspace, "url": url(registry, workspace)?, "source_exists": workspace.source.is_dir(), "recorded_session": recorded,
         "state": state, "live_health_verified": live.is_some(), "live": live, "diagnostic": error}),
     )
 }
@@ -244,17 +245,24 @@ pub fn current_session(registry: &Registry, expected: &Session) -> Result<Sessio
     Ok(current)
 }
 
-/// A stopped environment's URL is still reserved; it is not proof that the service is reachable.
+fn active(registry: &Registry, workspace: &Workspace) -> Result<Option<Session>> {
+    Ok(registry
+        .session(&workspace.id)?
+        .filter(|session| session.status != "stopped"))
+}
+
+/// A running environment's routed URL, else its reserved URL on the saved front door.
+/// Neither proves that the service is reachable.
 pub fn url(registry: &Registry, workspace: &Workspace) -> Result<String> {
-    Ok(registry.session(&workspace.id)?.map_or_else(
-        || format!("https://{}", workspace.hostname),
-        |session| session.public_url,
-    ))
+    match active(registry, workspace)? {
+        Some(session) => Ok(session.public_url),
+        None => Ok(FrontDoor::load(registry.state_path())?.url(&workspace.hostname)),
+    }
 }
 
 pub fn service_url(registry: &Registry, workspace: &Workspace, service: &str) -> Result<String> {
     crate::config::dns_label(service)?;
-    let session = registry.session(&workspace.id)?;
+    let session = active(registry, workspace)?;
     if let Some(session) = &session
         && !session.endpoints.is_empty()
     {
@@ -269,14 +277,12 @@ pub fn service_url(registry: &Registry, workspace: &Workspace, service: &str) ->
     let hostname = hosts
         .get(service)
         .context("unknown routed service; legacy unnamed sessions expose only the default url")?;
-    Ok(session.map_or_else(
-        || format!("https://{hostname}"),
-        |session| {
-            session
-                .public_url
-                .replacen(&workspace.hostname, hostname, 1)
-        },
-    ))
+    match session {
+        Some(session) => Ok(session
+            .public_url
+            .replacen(&workspace.hostname, hostname, 1)),
+        None => Ok(FrontDoor::load(registry.state_path())?.url(hostname)),
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

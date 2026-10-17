@@ -78,7 +78,7 @@ tasks:
         alpha, beta = sources
         assert json.loads(cli(alpha, 'config', 'check').stdout)['valid']
         proxy = subprocess.Popen([str(BINARY), '--path', str(root), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,
-                                  '--test-profile', '--https-port', str(https), '--http-port', str(http)],
+                                  '--port', str(https)],
                                  stdout=(log := open(root / 'proxy.log', 'w')), stderr=log)
         children.append(proxy)
         handles.append(log)
