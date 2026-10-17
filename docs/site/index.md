@@ -23,7 +23,7 @@ Caddy handles HTTPS. Process Compose handles processes, dependencies, logs and s
 
 | You want to | Read |
 |---|---|
-| Build Parcela and prepare HTTPS | [Build and host setup](install.md) |
+| Install Parcela and its backends | [Install](install.md) |
 | Run your first frontend, API and worker | [First environment](first-environment.md) |
 | Keep primary and preview checkouts separate | [Manage worktrees](worktrees.md) |
 | Declare processes, ports and readiness | [Configure service sets](services.md) |

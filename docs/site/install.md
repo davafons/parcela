@@ -1,24 +1,16 @@
-# Build Parcela and prepare HTTPS
+# Install Parcela
 
 ## Install the CLI
 
 Use macOS or Linux.
 
-> **No release has been published yet.** The Homebrew and shell installer commands take effect once the first `v*` tag is released. Until then, build from source.
-
-With Homebrew, which also installs Caddy and Process Compose:
-
-```sh
-brew install davafons/tap/parcela
-```
-
-With the shell installer, which installs only the `parcela` binary into `~/.local/bin`:
+Install the binary into `~/.local/bin`:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
 ```
 
-Release builds target macOS on Apple silicon and Intel, and Linux on x86_64 and arm64 with glibc. Each archive includes `LICENSE`, `COPYRIGHT` and `THIRD_PARTY_NOTICES.txt`. The release also attaches the matching source archive.
+Release builds target macOS on Apple silicon and Intel, and Linux on x86_64 and arm64 with glibc 2.35 or newer. Each archive includes `LICENSE`, `COPYRIGHT` and `THIRD_PARTY_NOTICES.txt`. The release also attaches the matching source archive.
 
 From source, with Rust 1.89 or newer and a C toolchain for bundled SQLite:
 
@@ -50,11 +42,20 @@ The command prints Markdown without reading or creating project or registry stat
 
 > **Coordinate upgrades.**
 >
-> Schema 3 supports service-set hostname and port reservations. Do not let a new build open installed state for writing while an old binary still owns its proxy or application controllers. Stop or explicitly reconcile those owners as part of an authorized upgrade.
+> A new build can migrate the registry schema. Stop running environments and the proxy with the old binary (`parcela down --all-projects`, then `parcela proxy stop`) before upgrading.
 
 ## Check the backends
 
-Homebrew installs Caddy and Process Compose with Parcela. Otherwise, install Caddy 2.x and Process Compose 1.x through your chosen package or release workflow. Parcela also needs `lsof` and `ps` for Unix listener and process inspection. Python 3 is needed for the documentation demo, not for every project.
+Install Caddy 2.x and Process Compose 1.x once:
+
+```sh
+# macOS
+brew install caddy f1bonacc1/tap/process-compose
+
+# Linux: Caddy from your distribution or caddyserver.com, then Process Compose
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/F1bonacc1/process-compose/main/scripts/get-pc.sh)" -- -b ~/.local/bin
+```
+ Parcela also needs `lsof` and `ps` for Unix listener and process inspection. Python 3 is needed for the documentation demo, not for every project.
 
 Check that this machine is ready:
 
@@ -70,13 +71,13 @@ The native acceptance fixtures use Caddy 2.11.7 and Process Compose 1.122.0. Oth
 
 Parcela's proxy is a dedicated Caddy with its own config, storage and admin socket, separate from any other Caddy installation. It listens on loopback only. `parcela up` starts it in the background when it is not running, so there is no separate proxy terminal.
 
-By default the proxy serves HTTPS on port 1355 and every URL carries that port, for example `https://notes.localhost:1355`. This needs no sudo and no port forwarding. To choose another port, start the proxy once with it; the port is saved for later starts:
+By default the proxy serves HTTPS on port 1443 and every URL carries that port, for example `https://notes.localhost:1443`. This needs no sudo and no port forwarding. To choose another port, start the proxy once with it; the port is saved for later starts:
 
 ```sh
 parcela proxy start --port 4443
 ```
 
-If the port is busy, the command fails and names the process holding it. Parcela never stops an unknown listener or falls back to another port. While nothing has been saved, `PARCELA_HTTPS_PORT` replaces the default 1355.
+If the port is busy, the command fails and names the process holding it. Parcela never stops an unknown listener or falls back to another port. While nothing has been saved, `PARCELA_HTTPS_PORT` replaces the default 1443.
 
 Check the proxy from any shell that uses the same binary and state directory:
 
