@@ -1,5 +1,38 @@
 # Work with a coding agent
 
+Use your existing agent session to configure and operate a Parcela environment. The agent uses its current model, tools, billing and permissions. You do not need a separate AI setup service or a Parcela model API key.
+
+## TL;DR: ask your agent to configure this checkout
+
+If Parcela is already installed, paste this request into your coding agent:
+
+```text
+Configure only this checkout for Parcela.
+
+Read the project instructions and the output of `parcela --skill`.
+Read https://parcela.davafons.com/docs/services/ for the configuration contract.
+Inspect existing development and test entry points.
+Do not read .env files, credentials or native control tokens.
+
+Propose a service graph, readiness checks and primary/preview data bindings.
+Use the project's actual commands. Do not assume a framework or database layout.
+If database, storage or queue policy is unclear, ask before proceeding.
+
+Add or minimally update parcela.yaml. Preserve existing commands and configuration.
+Propose application-code or .env changes separately. Do not apply them without approval.
+Run `parcela config check` and report missing dependencies or unsupported behavior.
+
+Do not install tools, adopt a workspace, start services, run migrations, seed/reset data,
+change CA trust or forwarding, or edit global agent settings without separate approval.
+
+Return the configuration diff and exact adoption, startup, health-check and test commands.
+Distinguish completed validation from checks that still require approval or prerequisites.
+```
+
+This request authorizes project configuration, not host setup or application preparation. `config check` validates organizer fields; it does not prove native graph compatibility, data isolation or application health.
+
+If the binary is missing or lacks `--skill`, report that first and follow [build and host setup](install.md). The [downloadable operating instructions](../../.agents/skills/parcela/SKILL.md?raw=1) are also available without source-repository access. Reading them does not install the CLI.
+
 ## Load the operating instructions
 
 Use the same Parcela binary that the agent will operate:
@@ -11,6 +44,42 @@ parcela --skill
 `parcela skill` prints the same bundled Markdown. Neither command reads the project or registry, starts a backend or changes a profile. It works outside a configured checkout. It cannot be combined with a lifecycle command.
 
 An agent can load the returned text into its context. The [operating skill](../../.agents/skills/parcela/SKILL.md) is also readable here. [Download its Markdown](../../.agents/skills/parcela/SKILL.md?raw=1) and save it as `SKILL.md` if your agent runner supports skill directories. Parcela does not install a global skill automatically.
+
+## Install the skill for Claude Code
+
+[Claude Code discovers skills](https://code.claude.com/docs/en/skills) from `.claude/skills/<name>/SKILL.md` in a project. Run this block from the project root, using the Parcela binary that will operate its environments:
+
+```sh
+(
+	set -eu
+	skill_root=.claude
+	skill_dir="$skill_root/skills/parcela"
+	for skill_path in "$skill_root" "$skill_root/skills" "$skill_dir"; do
+		if test -L "$skill_path"; then
+			printf 'Refusing symlinked skill directory: %s\n' "$skill_path" >&2
+			exit 1
+		fi
+	done
+	mkdir -p "$skill_dir"
+	stage=$(mktemp -d "$skill_dir/.install.XXXXXX")
+	trap 'rm -f "$stage/SKILL.md"; rmdir "$stage"' EXIT
+	parcela --skill > "$stage/SKILL.md"
+	test -s "$stage/SKILL.md"
+	ln "$stage/SKILL.md" "$skill_dir/"
+)
+```
+
+The block installs the complete bundled Markdown and refuses to replace an existing `SKILL.md`. It also refuses symlinked skill directories before creating files, so an existing project path cannot silently redirect the install into personal scope. It does not install the CLI, edit Claude permissions, or start services. If an older binary lacks `--skill`, the command fails without publishing an empty skill.
+
+Open a Claude Code session in that project. At the Claude Code prompt, invoke the skill with a bounded request:
+
+```text
+/parcela Inspect this checkout's status and services. Do not start, stop or restart any environment.
+```
+
+For a personal skill available across projects, replace the `skill_root=.claude` line with `skill_root="$HOME/.claude"`. Choose that scope explicitly. Do not replace a customized skill without reviewing its differences. After a CLI upgrade, inspect `parcela --skill` before updating the installed copy.
+
+Without a compatible binary, [download the operating skill](../../.agents/skills/parcela/SKILL.md?raw=1) and save it as `.claude/skills/parcela/SKILL.md`. This is a standalone skill, not a published Claude plugin or marketplace installer. It covers operating configured environments; use the setup request above to configure a project first.
 
 ## Give the agent an explicit scope
 

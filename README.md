@@ -167,6 +167,8 @@ parcela --skill
 
 The skill covers explicit environment selection, JSON health, detached startup, service URLs/logs, whole-graph restart/stop, qualified recovery and project tasks. It does not grant permission for setup, data changes, host configuration or starting another environment. Parcela does not install the skill into a global agent profile automatically.
 
+The [agent guide](docs/site/agents.md#install-the-skill-for-claude-code) has a copyable Claude Code skill installation command and a [setup request](docs/site/agents.md#tldr-ask-your-agent-to-configure-this-checkout) for your existing agent session.
+
 ## How it works
 
 Parcela coordinates maintained backends rather than implementing another proxy or supervisor.
@@ -199,9 +201,15 @@ Still incomplete or unverified:
 - Concurrent startup and restart, immutable launch snapshots, stale successor cleanup, and reboot recovery.
 - Interactive attach, following logs, per-service restart, sharing, aliases, and tenant routing.
 - Active agent continuation, complete Mac-to-Linux-to-Mac handoff, and general data-isolation certification.
-- Release packaging and an independent review of the current lifecycle stack.
+- Release packaging.
 
-Parcela is not published to crates.io. A distribution license has not been selected. Passing disposable tests does not prove that an installed host's listeners, forwarding, and trust are configured correctly.
+Parcela is not published to crates.io. Passing disposable tests does not prove that an installed host's listeners, forwarding, and trust are configured correctly.
+
+## License
+
+Copyright © 2026 David Afonso. Parcela is licensed under the [GNU Affero General Public License, version 3 only](LICENSE), with the project notice in [COPYRIGHT](COPYRIGHT).
+
+The license permits commercial use and modification subject to its terms. It does not prohibit competing products. Distribution and network use of modified versions have source-sharing obligations. Third-party components retain their own licenses.
 
 ## Development and verification
 
