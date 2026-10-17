@@ -481,3 +481,39 @@ fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
         .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
         .unwrap();
 }
+
+#[test]
+fn task_runtime_has_only_generic_dirs_and_strips_only_supervisor_controls() {
+    let temp = TempDir::new().unwrap();
+    let source = temp.path().join("source");
+    fs::create_dir(&source).unwrap();
+    let yaml = "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\ntasks:\n  probe:\n    argv: [sh, -c, 'cd \"$PARCELA_RUNTIME_DIR\" && ls -p && find tmp -mindepth 1 && echo \"${PORTLESS_PROBE-unset} ${PC_PROBE-unset} ${PARCELA_PROBE-unset}\"']\n    timeout_seconds: 10\n";
+    fs::write(source.join("parcela.yaml"), yaml).unwrap();
+    let manifest: Manifest = serde_saphyr::from_str(yaml).unwrap();
+    let state = temp.path().join("state");
+    Registry::open(&state, true)
+        .unwrap()
+        .unwrap()
+        .adopt(&manifest, &source, Role::Preview, "probe")
+        .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--path")
+        .arg(&source)
+        .arg("--state-dir")
+        .arg(&state)
+        .args(["task", "probe"])
+        .env("PORTLESS_PROBE", "inherited")
+        .env("PC_PROBE", "inherited")
+        .env("PARCELA_PROBE", "inherited")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "cache/\ndata/\nlog/\ntask.lock\ntmp/\ninherited unset unset\n"
+    );
+}

@@ -58,7 +58,7 @@ Service names become uppercase in variable names; hyphens become underscores. Ea
 
 Core creates private runtime directories, not application schemas or baseline data. Your code must consume the bindings. Define primary versus preview database, upload, secret and queue policy in the project. Runtime paths are operational ownership boundaries, not a sandbox.
 
-`inherit_environment` defaults to true. With false, PATH and HOME remain and other inherited values are cleared. Parcela removes inherited `PORTLESS_*`, `PC_*` and `PARCELA_*` controls before applying its resolved context. Application code can still read files, load dotenv and make network requests.
+`inherit_environment` defaults to true. With false, PATH and HOME remain and other inherited values are cleared. Parcela removes inherited `PC_*` and `PARCELA_*` controls before applying its resolved context. Application code can still read files, load dotenv and make network requests.
 
 ## Choose readiness paths
 

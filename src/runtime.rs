@@ -120,11 +120,9 @@ pub(crate) fn command_env(
             command.env("HOME", home);
         }
     }
-    // Avoid accidentally entering the old launcher or loading another supervisor's controls.
+    // Avoid loading another supervisor's or another environment's controls.
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("PORTLESS_")
-            || key.to_string_lossy().starts_with("PC_")
-            || key.to_string_lossy().starts_with("PARCELA_")
+        if key.to_string_lossy().starts_with("PC_") || key.to_string_lossy().starts_with("PARCELA_")
         {
             command.env_remove(key);
         }
@@ -135,10 +133,9 @@ fn runtime(registry: &Registry, workspace: &Workspace) -> Result<PathBuf> {
     private::directory(&registry.state_path().join("environments"))?;
     let path = registry.runtime_path(workspace);
     private::directory(&path)?;
-    for name in ["data", "tmp", "log", "uploads", "cache"] {
+    for name in ["data", "tmp", "log", "cache"] {
         private::directory(&path.join(name))?;
     }
-    private::directory(&path.join("tmp/pids"))?;
     Ok(path)
 }
 

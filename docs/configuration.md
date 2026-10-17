@@ -75,9 +75,9 @@ Registration reserves every service hostname atomically, including collisions wi
 
 `run/up/task` supply `PARCELA_PROJECT_ID`, `PARCELA_ENVIRONMENT_ID`, `PARCELA_ROLE`, `PARCELA_GENERATION`, `PARCELA_RUNTIME_DIR`, `PARCELA_URL`, `PARCELA_HOSTNAME`, `HOST=127.0.0.1`, and `PORT` when allocated/recorded. Each declared service also receives `PARCELA_SERVICE_<NAME>_URL` and `_HOSTNAME`, plus `_PORT` when allocated or recorded. Names become uppercase and hyphens become underscores. `PORT`, `PARCELA_URL` and `PARCELA_HOSTNAME` remain default-service aliases. `--backend-port` selects only the default service's port; other service ports are allocated automatically. These reserved keys cannot be overridden by organizer configuration. Manifest environment values support `${...}` substitution from the supplied context; unresolved placeholders fail.
 
-`inherit_environment` defaults to true. With false, PATH/HOME are retained and other inherited values are cleared. Inherited `PORTLESS_*`, `PC_*` and `PARCELA_*` controls are removed before resolved context is applied. This is not sandboxing: project code can read files, load dotenv and make network requests.
+`inherit_environment` defaults to true. With false, PATH/HOME are retained and other inherited values are cleared. Inherited `PC_*` and `PARCELA_*` controls are removed before resolved context is applied. This is not sandboxing: project code can read files, load dotenv and make network requests.
 
-The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core creates paths, not database schemas or baseline data. `context.json` records the launch generation. Tasks write `last-task.json`. Projects must consume paths explicitly; `up` never invokes preparation automatically.
+The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any other directories they need, such as uploads or PID-file parents. Core creates paths, not database schemas or baseline data. `context.json` records the launch generation. Tasks write `last-task.json`. Projects must consume paths explicitly; `up` never invokes preparation automatically.
 
 ## Commands
 
