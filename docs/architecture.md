@@ -13,7 +13,7 @@ Parcela is a Rust CLI that coordinates two maintained programs. It does not impl
 
 - `config` parses `parcela.yaml`, expands the short form and keeps `process_compose` data as-is.
 - `registry` is the SQLite store of projects, environments, sessions and reservations.
-- `startup` and `runtime` register a checkout, lease ports, launch Process Compose and wait for readiness.
+- `startup` and `runtime` register a checkout, launch Process Compose and wait for readiness. `ports` leases the backend ports.
 - `owner`, `control` and `lifecycle` run the per-environment owner process and the stop, restart and recover requests sent to it.
 - `router`, `proxy` and `frontdoor` generate Caddy config, run the background proxy and pick its listen port.
 - `process` and `http` check listener ownership and readiness. `http` is a client, never a proxy.
