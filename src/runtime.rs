@@ -194,7 +194,7 @@ pub fn run(
                 command
             }
             Launch::Compose(binary) => {
-                // Re-checked at launch: scripts/check_recovery.py gates this call to crash before the graph starts.
+                // Re-checked at launch: scripts/live/recovery.py gates this call to crash before the graph starts.
                 let graph = compose_graph(manifest, binary)?;
                 let graph_path = path.join("process-compose.json");
                 private::write_json(&graph_path, graph)?;
