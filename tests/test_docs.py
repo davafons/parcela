@@ -1,3 +1,5 @@
+import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -18,6 +20,68 @@ class DocumentationSources(unittest.TestCase):
                                         cwd=WEBSITE, capture_output=True, text=True, timeout=10)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('Public Markdown cannot load extra sources', result.stderr)
+
+
+class DocumentationRegeneration(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.website = self.root / 'docs/website'
+        self.website.mkdir(parents=True)
+        shutil.copyfile(WEBSITE / 'content.mjs', self.website / 'content.mjs')
+        program = "import {groups, downloads} from './content.mjs'; console.log(JSON.stringify([...groups.flatMap(g => g.pages.map(p => p[2])), ...Object.values(downloads)]));"
+        sources = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', program], cwd=WEBSITE, text=True))
+        for name in sources:
+            destination = self.root / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(WEBSITE.parent.parent / name, destination)
+
+    def run_node(self, program):
+        result = subprocess.run(['node', '--input-type=module', '-e', program], cwd=self.website,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_regeneration_updates_the_existing_served_tree(self):
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {appendFileSync, readFileSync} from 'node:fs';
+import {prepareContent} from './content.mjs';
+const initial = prepareContent('/docs/');
+appendFileSync('../site/index.md', '\n\nLive canonical update proof.\n');
+const refreshed = prepareContent('/docs/', initial.srcDir);
+assert.match(readFileSync(initial.srcDir + '/index.md', 'utf8'), /Live canonical update proof\./);
+assert.equal(refreshed.srcDir, initial.srcDir);
+""")
+
+    def test_unchanged_regeneration_preserves_output_mtime(self):
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {statSync, utimesSync} from 'node:fs';
+import {prepareContent} from './content.mjs';
+const {srcDir} = prepareContent('/');
+const page = srcDir + '/index.md';
+utimesSync(page, 1, 1);
+const refreshed = prepareContent('/', srcDir);
+assert.equal(refreshed.srcDir, srcDir);
+assert.equal(statSync(page).mtimeMs, 1000);
+""")
+
+    def test_invalid_source_does_not_partially_refresh_other_outputs(self):
+        self.run_node(r"""
+import assert from 'node:assert/strict';
+import {appendFileSync, readFileSync} from 'node:fs';
+import {prepareContent} from './content.mjs';
+const {srcDir} = prepareContent('/');
+const index = readFileSync(srcDir + '/index.md');
+const logo = readFileSync(srcDir + '/public/assets/logo.svg');
+appendFileSync('../site/index.md', '\n\nDo not publish this partial update.\n');
+appendFileSync('../../logo.svg', '\n');
+appendFileSync('../site/agents.md', '\n\n{{ 7 * 7 }}\n');
+assert.throws(() => prepareContent('/', srcDir), /Public Markdown cannot load extra sources/);
+assert.deepEqual(readFileSync(srcDir + '/index.md'), index);
+assert.deepEqual(readFileSync(srcDir + '/public/assets/logo.svg'), logo);
+""")
 
 
 class DocumentationLinks(unittest.TestCase):
