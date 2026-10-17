@@ -1,6 +1,58 @@
-#!/bin/sh
-set -eu
-cd "$(dirname "$0")/.."
-# Explicit backend paths; nothing is installed and no trust is changed.
-cargo build --locked
-exec python3 scripts/check_live.py "$@"
+#!/usr/bin/env python3
+"""Run Parcela's live suites against real Caddy and Process Compose.
+
+Each fixture gets its own /tmp root, state directory, test CA and ports in 30000-32767.
+Nothing is installed or trusted. A passing fixture removes its root; a failing one keeps it.
+"""
+import argparse
+import importlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+
+ROOT = Path(__file__).resolve().parent.parent
+SUITES = {'core': 'core', 'service-sets': 'service_sets', 'ports': 'ports', 'docs-example': 'docs_example', 'recovery': 'recovery'}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('suites', nargs='*', metavar='suite', help=f'any of {", ".join(SUITES)} (default: all)')
+    parser.add_argument('--caddy', default=shutil.which('caddy'), help='Caddy binary (default: caddy on PATH)')
+    parser.add_argument('--process-compose', default=shutil.which('process-compose'), help='Process Compose binary (default: on PATH)')
+    parser.add_argument('--output', type=Path, help='report directory (default: a new temporary directory)')
+    parser.add_argument('--case', action='append', help='run only this recovery case; repeatable')
+    args = parser.parse_args()
+    unknown = set(args.suites) - set(SUITES)
+    if unknown:
+        parser.error(f'unknown suite: {", ".join(sorted(unknown))}')
+    if not args.caddy or not args.process_compose:
+        parser.error('caddy and process-compose must be on PATH or passed with --caddy and --process-compose')
+    output = args.output or Path(tempfile.mkdtemp(prefix='pcl-live-reports-'))
+    output.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['cargo', 'build', '--locked'], cwd=ROOT, check=True)
+
+    failed = []
+    for suite in args.suites or SUITES:
+        print(f'{suite}: running', flush=True)
+        started = time.monotonic()
+        try:
+            module = importlib.import_module(f'live.{SUITES[suite]}')
+            record = {'ok': True, 'report': module.run(args.caddy, args.process_compose, cases=args.case)}
+        except Exception:
+            record = {'ok': False, 'error': traceback.format_exc()}
+            failed.append(suite)
+        record['seconds'] = round(time.monotonic() - started, 1)
+        report = output / f'{suite}.json'
+        report.write_text(json.dumps({'suite': suite, **record}, indent=2) + '\n')
+        print(f"{suite}: {'ok' if record['ok'] else 'FAILED'} in {record['seconds']}s, report {report}", flush=True)
+    print(f'failed: {", ".join(failed)}' if failed else 'all live suites passed')
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == '__main__':
+    main()

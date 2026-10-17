@@ -1,4 +1,4 @@
-import argparse
+"""Owner, proxy and Process Compose crash, stop and recovery races. Each case runs in its own fixture."""
 import json
 import os
 from pathlib import Path
@@ -8,12 +8,13 @@ import socket
 import sqlite3
 import ssl
 import subprocess
-import tempfile
 import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import HTTPResponse
+
+from live.common import BINARY, Live, free_port, wait_for
 
 SERVICE = '''import json, os, signal, time
 from pathlib import Path
@@ -48,33 +49,12 @@ server = ThreadingHTTPServer(('127.0.0.1', int(os.environ['PORT'])), Handler)
 server.serve_forever()
 '''
 
-def free_port(exclude=()):
-    while True:
-        with socket.socket() as sock:
-            sock.bind(('127.0.0.1', 0))
-            port = sock.getsockname()[1]
-        if port not in exclude:
-            return port
-
 def socket_path(app, kind):
     return Path(json.loads((app['runtime'] / 'context.json').read_text())['sockets'][kind])
 
 def socket_live(path):
     with socket.socket(socket.AF_UNIX) as probe:
         return probe.connect_ex(str(path)) == 0
-
-def wait_for(check, timeout=15):
-    deadline = time.monotonic() + timeout
-    last = None
-    while time.monotonic() < deadline:
-        try:
-            value = check()
-            if value:
-                return value
-        except (OSError, ValueError, subprocess.CalledProcessError) as failure:
-            last = repr(failure)
-        time.sleep(.05)
-    raise RuntimeError(f'fixture wait timed out: {last}')
 
 def listener_pids(port):
     binary = '/usr/sbin/lsof' if Path('/usr/sbin/lsof').exists() else 'lsof'
@@ -87,25 +67,12 @@ def listener_pids(port):
 def listening(port):
     return bool(listener_pids(port))
 
-class Fixture:
-    def __init__(self, args, name):
-        self.args = args
-        self.root = Path(tempfile.mkdtemp(prefix='pcli-r-', dir='/tmp')).resolve()
-        self.state = self.root / 's'
+class Fixture(Live):
+    def __init__(self, caddy, compose):
+        super().__init__('r', caddy, compose)
         self.apps = []
-        self.owners = []
-        self.logs = []
-        self.https = free_port()
-        self.proxy = None
-        self.name = name
-    def cli(self, path, *args, timeout=25):
-        return subprocess.run([self.args.binary, '--path', str(path), '--state-dir', str(self.state), *args], capture_output=True, text=True, timeout=timeout)
-    def spawn(self, path, *args, env=None):
-        log = open(self.root / f'child-{len(self.owners)}.log', 'w')
-        self.logs.append(log)
-        child = subprocess.Popen([self.args.binary, '--path', str(path), '--state-dir', str(self.state), *args], stdout=log, stderr=log, env=env)
-        self.owners.append(child)
-        return child
+    def cli(self, path, *args, check=False, timeout=25):
+        return super().cli(path, *args, check=check, timeout=timeout)
     def app(self, label, delay=0):
         path = self.root / label
         path.mkdir()
@@ -116,25 +83,21 @@ class Fixture:
                     'process_compose': {'version': '0.5', 'processes': {'web': {'entrypoint': ['python3', str(path / 'service.py')],
                        'availability': {'restart': 'no'}, 'shutdown': {'signal': 15, 'timeout_seconds': 15}}}}}
         (path / 'parcela.yaml').write_text(json.dumps(manifest))
-        registered = self.cli(path, 'up', '--name', label, '--process-compose', '/nonexistent/parcela-register-only')
-        assert registered.returncode == 1 and 'backend executable unavailable' in registered.stderr, registered.stderr
-        identity = json.loads(self.cli(path, '--json', 'status').stdout)['workspace']['id']
+        identity = self.register(path, 'preview', label)['id']
         app = {'path': path, 'id': identity, 'host': f'{label}-review.localhost', 'runtime': self.state / 'environments' / identity,
-               'port': free_port([self.https]), 'manifest': manifest}
+               'port': free_port(), 'manifest': manifest}
         self.apps.append(app)
+        self.ports.append(app['port'])
         return app
-    def start_proxy(self):
-        self.proxy = self.spawn(self.root, 'proxy', 'run', '--caddy', self.args.caddy, '--port', str(self.https))
-        wait_for(lambda: self.cli(self.root, 'proxy', 'status').returncode == 0)
     def start(self, app, compose=None):
-        owner = self.spawn(app['path'], 'up', '--process-compose', compose or self.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+        owner = self.spawn(app['path'], 'up', '--process-compose', compose or self.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
         app['owner'] = owner
-        wait_for(lambda: self.request(app)[0] == 200)
+        wait_for(lambda: self.probe(app)[0] == 200)
         return owner
     def start_pending(self, app):
         app['manifest']['environment']['READINESS_GATED'] = 'yes'
         (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
-        owner = self.spawn(app['path'], 'up', '--process-compose', self.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '30')
+        owner = self.spawn(app['path'], 'up', '--process-compose', self.compose, '--backend-port', str(app['port']), '--readiness-timeout', '30')
         app['owner'] = owner
         def recorded():
             pid = int((app['runtime'] / 'service-started').read_text())
@@ -142,7 +105,7 @@ class Fixture:
             return record['phase'] == 'starting' and record['native']['socket'] and any(process['pid'] == pid for process in record['processes'])
         wait_for(recorded)
         assert self.session(app)['status'] == 'starting'
-        assert self.request(app)[0] == 503
+        assert self.probe(app)[0] == 503
         return owner
     def gated_compose(self):
         wrapper = self.root / 'pc-gate'
@@ -156,7 +119,7 @@ if sys.argv[-1] == 'down':
 if 'list' in sys.argv and (root / 'gate-enabled').exists():
     (root / 'gate-entered').write_text('entered')
     time.sleep(1)
-os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + ''', *sys.argv[1:]])
+os.execv(''' + repr(self.compose) + ''', [''' + repr(self.compose) + ''', *sys.argv[1:]])
 ''')
         wrapper.chmod(0o700)
         return str(wrapper)
@@ -164,18 +127,9 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
         with sqlite3.connect(f'file:{self.state / "registry.sqlite3"}?mode=ro', uri=True) as db:
             db.row_factory = sqlite3.Row
             return dict(db.execute('SELECT * FROM sessions WHERE environment_id=?', (app['id'],)).fetchone())
-    def request(self, app):
-        context = ssl.create_default_context(cafile=str(self.state / 'proxy/data/pki/authorities/local/root.crt'))
-        with context.wrap_socket(socket.create_connection(('127.0.0.1', self.https), timeout=2), server_hostname=app['host']) as stream:
-            stream.settimeout(2)
-            stream.sendall(f'GET /ready HTTP/1.1\r\nHost: {app["host"]}\r\nConnection: close\r\n\r\n'.encode())
-            data = b''
-            while True:
-                chunk = stream.recv(65536)
-                if not chunk: break
-                data += chunk
-        head, body = data.split(b'\r\n\r\n', 1)
-        return int(head.split(b' ', 2)[1]), body.decode()
+    def probe(self, app):
+        code, _, body = self.fetch(app['host'], timeout=2)
+        return code, body.decode()
     def caddy_config(self):
         with socket.socket(socket.AF_UNIX) as stream:
             stream.settimeout(3)
@@ -189,7 +143,7 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
         context = json.loads((app['runtime'] / 'context.json').read_text())
         assert context['session']['environment_id'] == app['id']
         token = ['--token-file', str(app['runtime'] / 'pc.token')] if (app['runtime'] / 'pc.token').exists() else []
-        return subprocess.run([self.args.compose, *token, '--use-uds', '--unix-socket', str(socket_path(app, 'compose')), '--log-file', str(self.root / 'native-client.log'), 'down'],
+        return subprocess.run([self.compose, *token, '--use-uds', '--unix-socket', str(socket_path(app, 'compose')), '--log-file', str(self.root / 'native-client.log'), 'down'],
                               capture_output=True, text=True, timeout=20)
     def close(self):
         for app in self.apps:
@@ -198,16 +152,7 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
                     self.cli(app['path'], 'down')
                     if socket_path(app, 'compose').exists(): self.pc_down(app)
                 except (OSError, subprocess.TimeoutExpired): pass
-        for child in reversed(self.owners):
-            if child.poll() is None:
-                child.terminate()
-                try: child.wait(timeout=12)
-                except subprocess.TimeoutExpired:
-                    child.kill()
-                    child.wait(timeout=3)
-        for app in self.apps:
-            wait_for(lambda: not listening(app['port']), timeout=12)
-        for log in self.logs: log.close()
+        super().close()
         for app in self.apps:
             if (app['runtime'] / 'context.json').exists():
                 for kind in ('control', 'compose'):
@@ -215,8 +160,6 @@ os.execv(''' + repr(self.args.compose) + ''', [''' + repr(self.args.compose) + '
                     if path.is_socket() and not socket_live(path): path.unlink()
                 try: socket_path(app, 'control').parent.rmdir()
                 except OSError: pass
-    def details(self):
-        return {'fixture': str(self.root), 'https_port': self.https}
 
 def owner_crash(f):
     app = f.app('crash')
@@ -226,7 +169,7 @@ def owner_crash(f):
     assert owner.wait(timeout=5) == -signal.SIGKILL
     status = json.loads(f.cli(app['path'], 'status').stdout)
     assert status['state'] == 'unknown'
-    wait_for(lambda: f.request(app)[0] == 503, timeout=10)
+    wait_for(lambda: f.probe(app)[0] == 503, timeout=10)
     down = f.cli(app['path'], 'down')
     assert down.returncode == 0, down.stderr
     assert not listening(app['port']), 'recovered stop must finish the actual graph'
@@ -242,7 +185,7 @@ def owner_crash(f):
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     try:
-        code, body = f.request(app)
+        code, body = f.probe(app)
         assert code == 503 and 'FOREIGN-BACKEND' not in body, 'stale hostname must not serve an unowned reused port'
     finally:
         server.shutdown()
@@ -261,7 +204,7 @@ def graceful_stop(f):
     assert not listener_pids(app['port']), 'stop success must not leave a supervised listener'
     assert not socket_path(app, 'compose').exists(), 'normal shutdown must remove its native socket'
     assert owner.wait(timeout=5) == 0
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
     return {'down_exit': down.returncode, 'shutdown_completed': True, 'subsequent_up_exit': retry.returncode}
 
@@ -269,7 +212,7 @@ def duplicate_stop(f):
     app = f.app('duplicate', delay=3)
     f.start_proxy()
     owner = f.start(app)
-    command = [f.args.binary, '--path', str(app['path']), '--state-dir', str(f.state), 'down']
+    command = [str(BINARY), '--path', str(app['path']), '--state-dir', str(f.state), 'down']
     first = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
     second = f.cli(app['path'], 'down')
@@ -289,7 +232,7 @@ def restart_preflight(f):
     assert restart.returncode != 0
     assert owner.poll() is None, 'failed replacement preflight must preserve the original owner'
     assert f.session(app)['token'] == original['token']
-    assert f.request(app)[0] == 200, 'failed preflight must preserve the healthy route'
+    assert f.probe(app)[0] == 200, 'failed preflight must preserve the healthy route'
     return {'restart_exit': restart.returncode, 'original_owner_alive': True, 'https_code': 200}
 
 def proxy_outage(f):
@@ -304,7 +247,7 @@ def proxy_outage(f):
     assert all(listening(app['port']) for app in apps)
     f.start_proxy()
     for app, old in zip(apps, original):
-        wait_for(lambda: f.request(app)[0] == 200)
+        wait_for(lambda: f.probe(app)[0] == 200)
         assert f.session(app)['token'] == old['token']
         assert f.session(app)['generation'] == old['generation']
     return {'application_owners_preserved': True, 'routes_recovered': 2, 'application_generations_preserved': True}
@@ -328,14 +271,14 @@ def recover_surviving_graph(f):
     f.start_proxy()
     owner = f.start(app)
     before = f.session(app)
-    service = json.loads(f.request(app)[1])
+    service = json.loads(f.probe(app)[1])
     owner.kill()
     owner.wait(timeout=5)
     recovered = f.cli(app['path'], 'recover', '--detach')
     assert recovered.returncode == 0, recovered.stderr
     after = f.session(app)
     assert after['token'] == before['token'] and after['generation'] == before['generation']
-    assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'recovery must not replay or replace service processes'
+    assert json.loads(f.probe(app)[1])['pid'] == service['pid'], 'recovery must not replay or replace service processes'
     return {'controller_recovered': True, 'service_pid_preserved': True, 'generation_preserved': True}
 
 def up_recovers_surviving_graph(f):
@@ -343,22 +286,22 @@ def up_recovers_surviving_graph(f):
     f.start_proxy()
     owner = f.start(app)
     before = f.session(app)
-    service = json.loads(f.request(app)[1])
+    service = json.loads(f.probe(app)[1])
     owner.kill()
     owner.wait(timeout=5)
-    recovered = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    recovered = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
     assert recovered.returncode == 0, recovered.stderr
     assert 'taking back control of its running services' in recovered.stderr, recovered.stderr
     result = json.loads(recovered.stdout)
     assert result['recovered'] is True and result['detached'] is True and result['live']['state'] == 'ready', result
     after = f.session(app)
     assert (after['token'], after['generation'], after['status']) == (before['token'], before['generation'], 'ready')
-    assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'up must reattach, not replay the service'
+    assert json.loads(f.probe(app)[1])['pid'] == service['pid'], 'up must reattach, not replay the service'
     status = json.loads(f.cli(app['path'], 'status').stdout)
     assert status['state'] == 'ready' and [process['name'] for process in status['processes']] == ['web'], status
     assert status['processes'][0]['state'] == 'running' and status['processes'][0]['pid'], status
-    duplicate = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
-    assert duplicate.returncode != 0 and json.loads(f.request(app)[1])['pid'] == service['pid'], 'a live owner is never replaced'
+    duplicate = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    assert duplicate.returncode != 0 and json.loads(f.probe(app)[1])['pid'] == service['pid'], 'a live owner is never replaced'
     down = f.cli(app['path'], 'down')
     assert down.returncode == 0 and json.loads(down.stdout)['state'] == 'stopped', down.stderr
     assert not listening(app['port'])
@@ -369,17 +312,17 @@ def up_foreground_recovers_surviving_graph(f):
     f.start_proxy()
     owner = f.start(app)
     before = f.session(app)
-    service = json.loads(f.request(app)[1])
+    service = json.loads(f.probe(app)[1])
     owner.kill()
     owner.wait(timeout=5)
-    recovered = f.spawn(app['path'], 'up', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    recovered = f.spawn(app['path'], 'up', '--process-compose', f.compose, '--backend-port', str(app['port']))
     def reattached():
         live = json.loads(f.cli(app['path'], 'status').stdout)['live']
         return live and live['owner_pid'] == recovered.pid and live['state'] == 'ready'
     wait_for(reattached)
     after = f.session(app)
     assert (after['token'], after['generation']) == (before['token'], before['generation'])
-    assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'up must reattach, not replay the service'
+    assert json.loads(f.probe(app)[1])['pid'] == service['pid'], 'up must reattach, not replay the service'
     down = f.cli(app['path'], 'down')
     assert down.returncode == 0, down.stderr
     assert recovered.wait(timeout=20) == 0
@@ -393,12 +336,12 @@ def guardian_death(f):
     original = f.session(app)
     f.proxy.kill()
     f.proxy.wait(timeout=5)
-    wait_for(lambda: f.request(app)[0] == 503, timeout=10)
+    wait_for(lambda: f.probe(app)[0] == 503, timeout=10)
     assert owner.poll() is None and listening(app['port'])
     status = json.loads(f.cli(app['path'], 'status').stdout)
     assert status['state'] == 'unhealthy' and not status['live']['route_published']
     f.start_proxy()
-    wait_for(lambda: f.request(app)[0] == 200)
+    wait_for(lambda: f.probe(app)[0] == 200)
     assert f.session(app)['token'] == original['token']
     return {'lease_expired_without_guardian': True, 'existing_caddy_recovered': True, 'application_preserved': True}
 
@@ -436,7 +379,7 @@ def interrupted_stop(f):
     retry = f.cli(app['path'], 'down')
     assert retry.returncode == 0, retry.stderr
     assert f.session(app)['status'] == 'stopped'
-    assert f.request(app)[0] == 503
+    assert f.probe(app)[0] == 503
     return {'interrupted_down_retry_exit': 0, 'shutdown_completed': True, 'route_withdrawn': True}
 
 
@@ -459,7 +402,7 @@ def ongoing_stop_retry(f):
     assert not listening(app['port'])
     assert f.session(app)['status'] == 'stopped'
     assert f.session(app)['token'] == session['token']
-    assert f.request(app)[0] == 503
+    assert f.probe(app)[0] == 503
     return {'retry_during_native_shutdown_exit': 0, 'shutdown_completed': True, 'generation_preserved': True}
 
 
@@ -477,8 +420,8 @@ def concurrent_crash_stop(f):
     second = f.spawn(app['path'], 'down')
     first_code = first.wait(timeout=20)
     second_code = second.wait(timeout=20)
-    first_log = (f.root / f'child-{f.owners.index(first)}.log').read_text()
-    second_log = (f.root / f'child-{f.owners.index(second)}.log').read_text()
+    first_log = (f.root / f'child-{f.children.index(first)}.log').read_text()
+    second_log = (f.root / f'child-{f.children.index(second)}.log').read_text()
     assert first_code == 0, first_log
     assert second_code == 0, second_log
     assert f.session(app)['status'] == 'stopped'
@@ -503,10 +446,10 @@ def recover_before_readiness(f):
         live = json.loads(status.stdout).get('live')
         return live and live['owner_pid'] == recovered.pid and live['state'] == 'starting'
     wait_for(starting_owner)
-    assert f.request(app)[0] == 503, 'recovery must not advertise an unready service'
+    assert f.probe(app)[0] == 503, 'recovery must not advertise an unready service'
     (app['runtime'] / 'allow-ready').write_text('ready')
-    wait_for(lambda: f.request(app)[0] == 200)
-    assert json.loads(f.request(app)[1])['pid'] == pid, 'recovery must not replay the native service'
+    wait_for(lambda: f.probe(app)[0] == 200)
+    assert json.loads(f.probe(app)[1])['pid'] == pid, 'recovery must not replay the native service'
     assert f.session(app)['token'] == session['token']
     return {'pre_readiness_controller_recovered': True, 'unready_route': 503, 'service_pid_preserved': True}
 
@@ -524,7 +467,7 @@ def stop_before_readiness(f):
     assert f.session(app)['token'] == session['token']
     assert (app['runtime'] / 'shutdown-completed').exists()
     assert not listening(app['port'])
-    assert f.request(app)[0] == 503
+    assert f.probe(app)[0] == 503
     return {'pre_readiness_stop_exit': 0, 'shutdown_completed': True, 'generation_preserved': True}
 
 
@@ -542,7 +485,7 @@ if sys.argv[1:] == ['version'] and Path(''' + repr(str(app['runtime'] / 'context
     deadline = time.monotonic() + 2
     while (root / 'gate-enabled').exists() and time.monotonic() < deadline:
         time.sleep(.01)
-os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *sys.argv[1:]])
+os.execv(''' + repr(f.compose) + ''', [''' + repr(f.compose) + ''', *sys.argv[1:]])
 ''')
     wrapper.chmod(0o700)
     f.start_proxy()
@@ -561,7 +504,7 @@ os.execv(''' + repr(f.args.compose) + ''', [''' + repr(f.args.compose) + ''', *s
     assert f.session(app)['token'] == session['token'] and f.session(app)['status'] == 'starting'
     assert marker.read_text() == 'preserve allocation fixture'
     assert not socket_path(app, 'compose').exists() and not listening(app['port'])
-    assert f.request(app)[0] == 503
+    assert f.probe(app)[0] == 503
     return {'unknown_allocation_refused': True, 'lease_retained': True, 'source_data_preserved': True}
 
 
@@ -582,7 +525,7 @@ def recover_racing_stop(f):
     stopper = f.spawn(app['path'], 'down')
     try:
         stop_code = stopper.wait(timeout=10)
-        stop_log = (f.root / f'child-{f.owners.index(stopper)}.log').read_text()
+        stop_log = (f.root / f'child-{f.children.index(stopper)}.log').read_text()
         assert stop_code == 0, stop_log
         assert recovered.wait(timeout=5) == 0
         assert f.session(app)['status'] == 'stopped'
@@ -632,7 +575,7 @@ def replaced_native_socket(f):
             assert path.stat().st_ino == inode, 'foreign socket must be preserved'
             assert listening(app['port']), 'original graph must not be signaled'
             assert socket_path(app, 'control').exists(), 'refusal must preserve original control evidence'
-            wait_for(lambda: f.request(app)[0] == 503)
+            wait_for(lambda: f.probe(app)[0] == 503)
     finally:
         path.unlink()
         retained.rename(path)
@@ -654,7 +597,7 @@ def replaced_process_birth(f):
         down = f.cli(app['path'], 'down')
         assert down.returncode != 0, 'mismatched birth must not authorize native shutdown'
         assert listening(app['port']), 'mismatched process identity must not be signaled'
-        wait_for(lambda: f.request(app)[0] == 503)
+        wait_for(lambda: f.probe(app)[0] == 503)
     finally:
         path.write_bytes(original)
     return {'mismatched_birth_refused': True, 'graph_preserved': True}
@@ -682,7 +625,7 @@ def long_stream_lease(f):
                     assert line, f'stream closed before event {tick}'
                     line = response.readline()
                 assert line.strip() == f'data: {tick}'.encode()
-                assert f.request(app)[0] == 200, 'lease renewal must keep new requests routed'
+                assert f.probe(app)[0] == 200, 'lease renewal must keep new requests routed'
     assert owner.poll() is None
     assert f.caddy_config() == loaded, 'lease renewal must not change actual Caddy config'
     return {'stream_events': 12, 'lease_windows_crossed': True, 'config_unchanged': True}
@@ -697,12 +640,12 @@ def occupied_replacement_port(f):
         foreign.bind(('127.0.0.1', 0))
         foreign.listen()
         port = foreign.getsockname()[1]
-        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(port))
+        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(port))
         assert restart.returncode != 0
         assert owner.poll() is None, 'occupied replacement preflight must preserve original owner'
         assert f.session(app)['token'] == original['token']
         assert f.session(app)['generation'] == original['generation']
-        assert f.request(app)[0] == 200, 'occupied replacement must preserve original HTTPS'
+        assert f.probe(app)[0] == 200, 'occupied replacement must preserve original HTTPS'
         with socket.create_connection(('127.0.0.1', port), timeout=2):
             pass
     return {'restart_exit': restart.returncode, 'original_owner_alive': True, 'https_code': 200, 'foreign_listener_preserved': True}
@@ -713,11 +656,11 @@ def invalid_replacement_port(f):
     owner = f.start(app)
     original = f.session(app)
     for port in [0, 80, f.https]:
-        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(port))
+        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(port))
         assert restart.returncode != 0, f'invalid replacement port {port} must be refused'
         assert owner.poll() is None, f'invalid replacement port {port} stopped original owner'
         assert f.session(app)['token'] == original['token']
-        assert f.request(app)[0] == 200
+        assert f.probe(app)[0] == 200
     return {'invalid_endpoints_refused': 3, 'original_owner_alive': True, 'https_code': 200}
 
 def restart_owned_port(f):
@@ -725,14 +668,14 @@ def restart_owned_port(f):
     f.start_proxy()
     owner = f.start(app)
     original = f.session(app)
-    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
     assert restart.returncode == 0, restart.stderr
     assert owner.wait(timeout=5) == 0
     current = f.session(app)
     assert current['token'] != original['token']
     assert current['generation'] == original['generation'] + 1
     assert current['backend_port'] == app['port']
-    assert f.request(app)[0] == 200
+    assert f.probe(app)[0] == 200
     return {'restart_exit': 0, 'owned_endpoint_reused': True, 'new_generation': current['generation'], 'https_code': 200}
 
 def leased_replacement_port(f):
@@ -747,11 +690,11 @@ def leased_replacement_port(f):
     assert f.pc_down(other).returncode == 0
     wait_for(lambda: not listening(other['port']))
     assert f.session(other)['status'] != 'stopped'
-    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.args.compose, '--backend-port', str(other['port']))
+    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(other['port']))
     assert restart.returncode != 0
     assert owner.poll() is None, 'reserved replacement must preserve original owner'
     assert f.session(app)['token'] == original['token']
-    assert f.request(app)[0] == 200
+    assert f.probe(app)[0] == 200
     return {'reserved_unbound_endpoint_refused': True, 'original_owner_alive': True, 'https_code': 200}
 
 def detached_recover_running(f):
@@ -759,7 +702,7 @@ def detached_recover_running(f):
     f.start_proxy()
     owner = f.start(app)
     original = f.session(app)
-    before = json.loads(f.request(app)[1])
+    before = json.loads(f.probe(app)[1])
     owner.kill()
     owner.wait(timeout=5)
     recover = f.cli(app['path'], 'recover', '--detach', timeout=25)
@@ -768,7 +711,7 @@ def detached_recover_running(f):
     assert result['live']['state'] == 'ready' and result['detached'] is True
     current = f.session(app)
     assert current['token'] == original['token'] and current['generation'] == original['generation']
-    assert json.loads(f.request(app)[1])['pid'] == before['pid'], 'detached recovery must not replay services'
+    assert json.loads(f.probe(app)[1])['pid'] == before['pid'], 'detached recovery must not replay services'
     assert f.cli(app['path'], 'down').returncode == 0
     assert not listening(app['port'])
     return {'recover_exit': 0, 'state': 'ready', 'service_pid_preserved': True, 'same_generation': True}
@@ -804,7 +747,7 @@ os.execv({shutil.which('ps')!r}, ['ps', *sys.argv[1:]])
     assert current['status'] == 'starting', 'new recovered owner must not inherit former ready intent before initialization'
     assert current['token'] == original['token'] and current['generation'] == original['generation']
     assert recovery.wait(timeout=20) == 0
-    assert f.request(app)[0] == 200
+    assert f.probe(app)[0] == 200
     return {'initializing_state': 'starting', 'same_generation': True, 'https_code': 200}
 
 def detached_recover_stopping(f):
@@ -870,23 +813,23 @@ def crashed_tree_down(f):
     second = f.cli(app['path'], 'down')
     assert second.returncode == 0 and json.loads(second.stdout)['already_stopped'] is True, second.stderr
     assert not socket_path(app, 'compose').exists() and not socket_path(app, 'control').exists()
-    assert f.request(app)[0] == 503
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    assert f.probe(app)[0] == 503
+    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
     after = f.session(app)
     assert after['generation'] == before['generation'] + 1 and after['status'] == 'ready'
-    assert f.request(app)[0] == 200
+    assert f.probe(app)[0] == 200
     assert f.cli(app['path'], 'down').returncode == 0
     return {'first_down': 'stopped', 'second_down': 'already_stopped', 'next_generation': after['generation'], 'https_code': 200}
 
 def crashed_tree_up(f):
     app = f.app('crashup')
     before = crash_whole_tree(f, app)
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
     after = f.session(app)
     assert after['generation'] == before['generation'] + 1 and after['status'] == 'ready'
-    assert f.request(app)[0] == 200
+    assert f.probe(app)[0] == 200
     assert f.cli(app['path'], 'down').returncode == 0
     return {'up_after_crash_exit': 0, 'next_generation': after['generation'], 'https_code': 200}
 
@@ -899,36 +842,21 @@ CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_ou
          crashed_tree_down, crashed_tree_up]
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--binary', required=True)
-    parser.add_argument('--caddy', required=True)
-    parser.add_argument('--compose', required=True)
-    parser.add_argument('--output', required=True)
-    parser.add_argument('--case', action='append', choices=[case.__name__ for case in CASES])
-    args = parser.parse_args()
+def run(caddy, compose, cases=None):
     os.umask(0o077)
-    report = {'mode': 'recovery-acceptance', 'cases': []}
-    for case in CASES:
-        if args.case and case.__name__ not in args.case:
-            continue
-        fixture = Fixture(args, case.__name__)
-        record = {'case': case.__name__, **fixture.details()}
+    selected = [case for case in CASES if not cases or case.__name__ in cases]
+    assert selected, f'no recovery case matches {cases}'
+    records = []
+    for case in selected:
+        record = {'case': case.__name__}
         try:
-            record['evidence'] = case(fixture)
-            record['confirmed'] = True
+            with Fixture(caddy, compose) as fixture:
+                record['fixture'] = str(fixture.root)
+                record['evidence'] = case(fixture)
         except Exception:
-            record['confirmed'] = False
             record['error'] = traceback.format_exc()
-        finally:
-            try:
-                fixture.close()
-                record['test_services_closed'] = True
-            except Exception:
-                record['cleanup_error'] = traceback.format_exc()
-            report['cases'].append(record)
-            Path(args.output).write_text(json.dumps(report, indent=2))
-            print(json.dumps(record), flush=True)
-    raise SystemExit(0 if all(case.get('confirmed') and case.get('test_services_closed') for case in report['cases']) else 1)
-
-if __name__ == '__main__': main()
+        records.append(record)
+        print(f"  recovery {case.__name__}: {'FAIL' if 'error' in record else 'ok'}", flush=True)
+    failed = [record['case'] for record in records if 'error' in record]
+    assert not failed, {'failed': failed, 'cases': records}
+    return {'cases': records}

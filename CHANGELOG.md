@@ -18,6 +18,7 @@
 ### Removed
 
 - `scripts/setup_macos.py` and the Shirabe acceptance harness.
+- `scripts/check-recovery`, `check-ports`, `check-service-sets` and the docs drivers. `scripts/check-live [suite...]` runs every live suite, and `npm run check --prefix docs/website` checks the docs site.
 
 ## 0.1.0 - 2026-10-17
 

@@ -61,15 +61,15 @@ Control, Process Compose and Caddy admin sockets live in `/tmp/parcela-<uid>/<ha
 scripts/check
 ```
 
-This runs `cargo fmt --check`, Clippy with `-D warnings`, `cargo test`, the Python tests and a config check of `examples/generic`.
+This runs `cargo fmt --check`, Clippy with `-D warnings`, `cargo test` and the Python tests.
 
-The live suites start real Caddy and Process Compose with a disposable state directory, explicit high ports and a test CA. They never change system trust:
+The live suites run real Caddy and Process Compose from `PATH`. Each fixture gets its own `/tmp` state directory, test CA and ports in 30000-32767, below the OS ephemeral range and outside Parcela's 20000-29999 leases. They never change system trust:
 
 ```sh
-scripts/check-live --caddy "$(which caddy)" --process-compose "$(which process-compose)"
-scripts/check-recovery --caddy "$(which caddy)" --compose "$(which process-compose)" --output /tmp/recovery.json
-scripts/check-ports
-scripts/check-service-sets
+scripts/check-live                       # core, service-sets, ports, docs-example, recovery
+scripts/check-live recovery --case owner_crash
 ```
+
+The runner builds once, runs the suites in order, writes one JSON report per suite to a temporary directory (or `--output DIR`) and exits non-zero if any fails. `--caddy` and `--process-compose` override the binaries.
 
 Documentation checks are in [docs/documentation.md](documentation.md).
