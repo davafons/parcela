@@ -255,7 +255,10 @@ fn cli_json_errors_and_source_preservation() {
         &["workspace", "adopt", "--role", "primary", "--label", "main"],
     );
     assert!(!error.status.success() && error.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&error.stderr).contains("implicit rebind"));
+    assert_eq!(
+        String::from_utf8_lossy(&error.stderr),
+        "parcela: this checkout is already registered as preview \"auth\"; omit the naming flags to reuse it\n"
+    );
 }
 #[test]
 fn private_state_and_database_permissions_and_symlinks() {

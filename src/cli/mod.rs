@@ -9,7 +9,12 @@ mod render;
 use clap::Parser;
 
 pub fn main() {
-    match commands::run(args::Cli::parse()) {
+    let args = args::Args::parse();
+    let result = match args.command {
+        Some(command) => commands::run(args::Cli::new(args.global, command)),
+        None => commands::bare(args.global),
+    };
+    match result {
         Ok(code) => std::process::exit(code),
         Err(error) => {
             eprintln!("parcela: {error:#}");

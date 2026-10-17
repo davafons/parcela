@@ -96,7 +96,7 @@ Reading the skill grants no additional authority. Project instructions and the u
 ## Start with inspection
 
 ```sh
-parcela workspace list --all
+parcela ls
 parcela --path "$CHECKOUT" context
 parcela --path "$CHECKOUT" status
 ```

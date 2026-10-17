@@ -218,7 +218,12 @@ impl Registry {
                     "INSERT INTO projects (id, name) VALUES (?1, ?2)",
                     params![manifest.project.id, manifest.project.name],
                 )
-                .context("project name already belongs to another project")?;
+                .with_context(|| {
+                    format!(
+                        "project name {} already belongs to another project; set a different project name in parcela.yaml",
+                        manifest.project.name
+                    )
+                })?;
         }
         let existing = transaction
             .query_row(
@@ -233,7 +238,9 @@ impl Registry {
                     && workspace.role == role
                     && workspace.label == label
                     && workspace.hostname == hostname,
-                "checkout already adopted with different identity/role/label; implicit rebind is forbidden"
+                "this checkout is already registered as {} {:?}; omit the naming flags to reuse it",
+                workspace.role.as_str(),
+                workspace.label
             );
             workspace
         } else {
@@ -255,9 +262,10 @@ impl Registry {
                 generation: 1,
                 vcs: vcs.to_owned(),
             };
+            explain_conflict(&transaction, &workspace)?;
             transaction.execute("INSERT INTO workspaces (id, project_id, source, role, label, hostname, generation, vcs) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
                 params![workspace.id, workspace.project_id, source_text, role.as_str(), label, workspace.hostname, workspace.generation, vcs])
-                .context("workspace conflict: source, label, primary role or hostname is already owned; no ownership was changed")?;
+                .context("this checkout conflicts with another registered environment; choose another preview name with --name <name>")?;
             workspace
         };
         let hosts = manifest.service_hosts(&workspace.hostname)?;
@@ -284,12 +292,17 @@ impl Registry {
                 [&workspace.id],
             )?;
             for (service, host) in hosts {
+                if let Some(holder) = host_holder(&transaction, &host, &workspace.id)? {
+                    bail!(
+                        "{host} is already used by {holder}; choose another preview name with --name <name> or another subdomain for {service}"
+                    );
+                }
                 transaction
                     .execute(
                         "INSERT INTO workspace_hosts VALUES (?1,?2,?3)",
                         params![host, workspace.id, service],
                     )
-                    .context("service hostname already reserved; no ownership was changed")?;
+                    .context("service hostname is already reserved; nothing was changed")?;
             }
         }
         transaction.commit()?;
@@ -364,9 +377,7 @@ impl Registry {
             )
             .optional()?;
         let Some(workspace) = workspace else {
-            bail!(
-                "checkout not registered; start it with parcela up (or use explicit workspace adopt)"
-            );
+            bail!("this checkout is not running yet; start it with parcela up");
         };
         ensure!(
             workspace.project_id == manifest.project.id
@@ -593,6 +604,60 @@ impl Registry {
     pub fn runtime_path(&self, workspace: &Workspace) -> PathBuf {
         self.state.join("environments").join(&workspace.id)
     }
+}
+
+/// The checkout that already holds a hostname, other than `environment` itself.
+fn host_holder(
+    transaction: &rusqlite::Transaction<'_>,
+    host: &str,
+    environment: &str,
+) -> Result<Option<String>> {
+    Ok(transaction
+        .query_row(
+            "SELECT w.source FROM workspaces w LEFT JOIN workspace_hosts h ON h.environment_id = w.id
+             WHERE (w.hostname = ?1 OR h.hostname = ?1) AND w.id != ?2 LIMIT 1",
+            params![host, environment],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Name the registration that blocks `workspace` and how to avoid it, before SQLite refuses it.
+fn explain_conflict(transaction: &rusqlite::Transaction<'_>, workspace: &Workspace) -> Result<()> {
+    if workspace.role == Role::Primary
+        && let Some(source) = transaction
+            .query_row(
+                "SELECT source FROM workspaces WHERE project_id = ?1 AND role = 'primary'",
+                [&workspace.project_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+    {
+        bail!(
+            "{} already has a primary checkout at {source}; start this one as a preview with --name <name>",
+            workspace.project_id
+        );
+    }
+    if let Some(source) = transaction
+        .query_row(
+            "SELECT source FROM workspaces WHERE project_id = ?1 AND label = ?2",
+            params![workspace.project_id, workspace.label],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    {
+        bail!(
+            "preview name {} is already used by {source}; choose another with --name <name>",
+            workspace.label
+        );
+    }
+    if let Some(holder) = host_holder(transaction, &workspace.hostname, &workspace.id)? {
+        bail!(
+            "{} is already used by {holder}; choose another preview name with --name <name>",
+            workspace.hostname
+        );
+    }
+    Ok(())
 }
 
 fn read_workspace(row: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {

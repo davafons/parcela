@@ -13,16 +13,21 @@ This skill does not grant permission to start services, process queues, run migr
 
 Use the same binary and registry for discovery and subsequent operations. Check unfamiliar syntax with `parcela --help` or the relevant command's `--help`. `parcela --skill` and `parcela skill` print this bundled document without reading project or registry state.
 
+Output is JSON when stdout is not a terminal and aligned text on a terminal. Pass `--json` whenever you parse a result. `url` and `logs` always print plain text.
+
 Set `CHECKOUT` to the intended existing checkout's absolute path. Do not infer the target from a focused terminal, bookmark or branch name.
 
 ```sh
-parcela workspace list --all
+parcela --json ls
+parcela --json --path "$CHECKOUT" doctor
 parcela --path "$CHECKOUT" config check
 parcela --path "$CHECKOUT" context
 parcela --path "$CHECKOUT" status
 ```
 
-`workspace list --all` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `context` requires a registered configured checkout and returns its identity, planned URLs and caveats. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation.
+`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `context` requires a registered configured checkout and returns its identity, planned URLs and caveats. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Report failed checks and their `fix`; do not apply a fix that installs tools, changes trust or starts the proxy without authorization.
+
+If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a one-line short-form manifest with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
 
 For a registered target, read its UUID from the response. Prefer that exact ID when issuing later operations from a different directory:
 
@@ -100,7 +105,9 @@ parcela --workspace "$ENVIRONMENT_ID" down
 parcela --workspace "$ENVIRONMENT_ID" status
 ```
 
-Restart preflights the replacement and starts the whole graph in a new generation. It does not restart one named service or replay arbitrary `run` commands. Stop withdraws routes before native shutdown and preserves source/data. Do not stop other environments as test cleanup. Do not treat a refused or incomplete stop as successful cleanup.
+Restart preflights the replacement and starts the whole graph in a new generation. It does not restart one named service or replay arbitrary `run` commands. Stop withdraws routes before native shutdown and preserves source/data. Do not stop other environments as test cleanup. Do not treat a refused or incomplete stop as successful cleanup. `down --all` stops every running environment of the project and `--all-projects` every one; use them only when the user asks for that scope.
+
+`rm` forgets a stopped environment's registration and releases its hostnames; `rm --prune` does so for every stopped registration whose checkout is gone. Both keep source and runtime data, refuse running environments, and are only for explicit cleanup requests.
 
 Tasks are optional; ordinary project commands remain usable directly. Before `task NAME -- ARGS`, read that task's argv, timeout and effects in `parcela.yaml`. Run only the requested task with literal arguments. Startup does not imply permission for setup, migrations, resets, seeds, imports or code generation. Do not invent framework preparation commands.
 

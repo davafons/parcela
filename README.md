@@ -36,7 +36,7 @@ Keep your primary checkout and previews identifiable, with their own service gra
 - **Native service graphs.** Process Compose runs the web service and workers. Each environment gets a private control socket.
 - **Explicit lifecycle control.** Start, stop, restart, inspect, and recover qualified native graphs without guessing which PID to kill.
 - **Project-owned policy.** Your configuration defines commands, preparation, and data bindings. Core does not assume Rails, Node, or a database layout.
-- **Scriptable output.** JSON by default, readable tables with `--human`, and plain-text URLs and log tails.
+- **Readable or scriptable output.** Aligned text on a terminal, JSON when piped or with `--json`, and plain-text URLs and log tails.
 
 Parcela is experimental. The tested source build is not a finished installer. See [project status](#project-status) for the current limits.
 
@@ -73,30 +73,24 @@ High ports are available through an explicit test profile. They are not the norm
 
 ## Quickstart
 
-After building Parcela and completing host setup, add a `parcela.yaml` to your project. This minimal example runs Python's HTTP server and requires Python 3:
-
-```yaml
-version: 1
-project:
-  id: notes
-  name: notes
-
-default_service: web
-services:
-  web:
-    readiness_path: /
-
-process_compose:
-  version: "0.5"
-  processes:
-    web:
-      command: 'python3 -m http.server "${PORT}" --bind 127.0.0.1'
-```
-
-Validate the configuration, then start its configured services:
+After building Parcela and completing host setup, create a `parcela.yaml` in your project:
 
 ```sh
-parcela config check
+parcela init
+```
+
+`init` guesses the dev server command from `package.json`, a Rails app or Django, and otherwise serves the directory with Python. The result is one line you can edit:
+
+```yaml
+web: python3 -m http.server $PORT --bind 127.0.0.1
+```
+
+The project is named after the checkout directory. Each service must listen on `127.0.0.1:$PORT`. The [configuration reference](docs/configuration.md) covers several services, workers and the full schema.
+
+Check that the machine and the project are ready. Every ✗ line names its fix:
+
+```sh
+parcela doctor
 ```
 
 If the dedicated front door is already running, check it with `parcela proxy status`. Otherwise, run it in a separate terminal with the profile selected during host setup.
@@ -117,13 +111,13 @@ Then start the environment and inspect it:
 
 ```sh
 parcela up --detach
-parcela status --human
-parcela services --human
+parcela status
+parcela services
 parcela url
 parcela logs web --tail 100
 ```
 
-With the standard front door configured, this project's URL is `https://notes.localhost`. `up` stays in the foreground by default. `--detach` returns only after the live owner reports readiness.
+With the standard front door configured, a project in a `notes` directory gets `https://notes.localhost`. `up` stays in the foreground by default. `--detach` returns only after the live owner reports readiness.
 
 When you finish:
 
@@ -148,21 +142,25 @@ A project file defines what starts, not how to install its dependencies or prepa
 
 | Command | Purpose |
 | --- | --- |
-| `up [--detach]` | Start the current environment through Process Compose. |
-| `run -- COMMAND...` | Run a literal command that consumes its assigned endpoint. |
-| `down` or `stop` | Stop the selected owned environment and preserve its data. |
-| `restart [--detach]` | Preflight a replacement, then restart the whole graph in a new generation. |
-| `recover [--detach]` | Reattach to a proven surviving native graph without replaying services. |
-| `status [--all] [--human]` | Inspect live ownership and health, separately from recorded intent. |
-| `services [--human]` | Inspect the native service graph. |
+| `init [--name NAME] [--command CMD]` | Write a minimal `parcela.yaml`, guessing the dev server command. Never overwrites. |
+| `up [--detach] [--name NAME]` | Start the current environment through Process Compose. |
+| `down [--all \| --all-projects]` or `stop` | Stop the selected environment, or every running one, and keep its data. |
+| `restart [--detach]` | Check the replacement, then restart every service. |
+| `status [--all]` | Show live health, separately from what was last recorded. |
+| `ls` | List every registered environment across projects. |
+| `services` | Show each service and worker process. |
 | `logs [SERVICE] --tail N` | Print a bounded log tail. |
-| `url` | Print the reserved URL, not a guarantee that it is reachable. |
+| `url [--service NAME]` | Print the reserved URL, not a guarantee that it is reachable. |
+| `rm [--prune]` | Forget a stopped environment and release its hostnames. Source and data stay on disk. |
+| `doctor` | Check tools, configuration, state and the proxy, with a fix for each failure. |
+| `config check` | Validate `parcela.yaml` and that every service has a command. |
+| `run -- COMMAND...` | Run a literal command that consumes its assigned endpoint. |
+| `recover [--detach]` | Take back control of services that kept running after an interruption, without restarting them. |
 | `task NAME -- ARGS` | Run a finite command defined by the project. |
-| `workspace discover [--human]` | Discover sibling jj or Git checkouts without adopting or editing them. |
-| `doctor` | Report capabilities and optionally probe supplied backend versions. |
+| `workspace discover` | Discover sibling jj or Git checkouts without registering or editing them. |
 | `--skill` / `skill` | Print the bundled agent operating skill without project or registry access. |
 
-Use `--path DIR` for an existing checkout or `--workspace UUID` for an adopted environment. Inspection does not start services. `url` and `logs` print plain text, while diagnostics go to stderr.
+`parcela` alone shows the current checkout's status, or the next command to run. Output is aligned text on a terminal and JSON when stdout is a pipe; `--json` forces JSON. Use `--path DIR` for an existing checkout or `--workspace UUID` for a registered environment. Inspection does not start services. `url` and `logs` print plain text, while diagnostics go to stderr.
 
 ## Teach an agent
 

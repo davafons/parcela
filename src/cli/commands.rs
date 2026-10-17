@@ -1,5 +1,5 @@
 use super::{
-    args::{Cli, Command, ConfigCommand, ProxyCommand, WorkspaceCommand},
+    args::{Cli, Command, ConfigCommand, Global, ProxyCommand, WorkspaceCommand},
     output::{Output, status_diagnostics},
     render,
 };
@@ -13,6 +13,8 @@ use parcela::{
     startup,
 };
 use std::path::{Path, PathBuf};
+
+const NOT_STARTED: &str = "nothing is registered yet; start this checkout with parcela up";
 
 pub(super) fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
     let path = if let Some(path) = explicit {
@@ -48,7 +50,7 @@ pub(super) fn target_workspace(
             .list(None)?
             .into_iter()
             .find(|workspace| workspace.id == id.to_string())
-            .context("unknown adopted workspace ID")
+            .context("unknown environment ID; list environments with parcela ls")
     } else {
         let (source, manifest) = project(path)?;
         registry.current(&source, &manifest)
@@ -63,9 +65,9 @@ fn startup_registry(
     let existing = Registry::open(state, false)?;
     let identity = request.resolve(existing.as_ref(), manifest, source)?;
     drop(existing);
-    let mut registry = Registry::open(state, true)?.context("no registry")?;
-    let workspace = registry.adopt(manifest, source, identity.role, &identity.label)
-        .context("cannot register checkout; choose --name NAME for a separate preview; existing owners were preserved")?;
+    let mut registry = Registry::open(state, true)?
+        .context("no environments are registered yet; start one with parcela up")?;
+    let workspace = registry.adopt(manifest, source, identity.role, &identity.label)?;
     Ok((registry, workspace))
 }
 fn inventory(state: &Path, project: Option<&str>, out: Output) -> Result<()> {
@@ -99,9 +101,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             if all {
                 inventory(&state, None, out)
             } else {
-                let registry = Registry::open(&state, false)?.context(
-                    "no registered environment; start the selected checkout with parcela up",
-                )?;
+                let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
                 let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
                 let status = lifecycle::status(&registry, &workspace)?;
                 if out == Output::Human {
@@ -112,9 +112,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
         }
         Command::Services | Command::Logs { .. } | Command::Url { .. } => {
             let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?.context(
-                "no registered environment; start the selected checkout with parcela up",
-            )?;
+            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
             let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
             match cli.command {
                 Command::Services => {
@@ -159,9 +157,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             command: ProxyCommand::Status,
         } => {
             let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?.context(
-                "no registered environment; start the selected checkout with parcela up",
-            )?;
+            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
             let router = parcela::router::current(registry.state_path())?;
             let result = serde_json::json!({"router":router,"owned_admin_verified":true,"browser_trust_verified":false});
             out.emit(&result, |style| render::proxy(&result, style))
@@ -203,7 +199,8 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             // Fail invalid names before even creating registry state.
             manifest.hostname(role == Role::Primary, &label)?;
             let state = state_dir(cli.state_dir)?;
-            let mut registry = Registry::open(&state, true)?.context("registry not created")?;
+            let mut registry =
+                Registry::open(&state, true)?.context("cannot create the registry")?;
             let workspace = registry.adopt(&manifest, &source, role, &label)?;
             let result =
                 serde_json::to_value(ResolvedContext::new(&registry, &manifest, workspace)?)?;
@@ -216,7 +213,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             let (source, manifest) = project(&cli.path)?;
             let state = state_dir(cli.state_dir)?;
             let Some(registry) = Registry::open(&state, false)? else {
-                bail!("no registered environment; start the selected checkout with parcela up");
+                bail!(NOT_STARTED);
             };
             let workspace = registry.current(&source, &manifest)?;
             let result =
@@ -224,6 +221,50 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             out.emit(&result, |style| render::context(&result, style))
         }
         _ => bail!("runtime command reached inspection dispatcher"),
+    }
+}
+/// `parcela` alone: status inside a started checkout, otherwise the next command to run.
+pub fn bare(global: Global) -> Result<i32> {
+    let out = Output::detect(global.json, global.human);
+    let hint = match project(&global.path) {
+        Err(_) => "No parcela.yaml here. Create one with parcela init, then run parcela up.",
+        Ok((source, manifest)) => {
+            let registered = Registry::open(&state_dir(global.state_dir.clone())?, false)?
+                .is_some_and(|registry| registry.current(&source, &manifest).is_ok());
+            if registered {
+                return run(Cli::new(global, Command::Status { all: false }));
+            }
+            "Not started yet. Run parcela up."
+        }
+    };
+    out.emit(&serde_json::json!({"hint": hint}), |_| {
+        format!("{hint}\nSee parcela --help for every command.\n")
+    })?;
+    Ok(0)
+}
+/// Show what a failed detached start wrote to its log, not output from earlier runs.
+fn print_new_log_lines(log: &Path, start: u64, count: usize) {
+    use std::io::{Read, Seek};
+    let mut text = String::new();
+    let Ok(mut file) = std::fs::File::open(log) else {
+        return;
+    };
+    if file.seek(std::io::SeekFrom::Start(start)).is_err()
+        || file.read_to_string(&mut text).is_err()
+    {
+        return;
+    }
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return;
+    }
+    eprintln!("parcela: last lines of {}:", log.display());
+    for line in &lines[lines.len().saturating_sub(count)..] {
+        let line: String = line
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\t')
+            .collect();
+        eprintln!("  {line}");
     }
 }
 pub fn run(mut cli: Cli) -> Result<i32> {
@@ -258,13 +299,12 @@ pub fn run(mut cli: Cli) -> Result<i32> {
     }
     if let Some(id) = cli.workspace {
         let state = state_dir(cli.state_dir.clone())?;
-        let registry = Registry::open(&state, false)?
-            .context("no registered environment; start the selected checkout with parcela up")?;
+        let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
         cli.path = registry
             .list(None)?
             .into_iter()
             .find(|workspace| workspace.id == id.to_string())
-            .context("unknown adopted workspace ID")?
+            .context("unknown environment ID; list environments with parcela ls")?
             .source;
     }
     let request = match &cli.command {
@@ -289,7 +329,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 },
         } => {
             let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, true)?.context("registry not created")?;
+            let registry = Registry::open(&state, true)?.context("cannot create the registry")?;
             parcela::router::run(
                 &registry,
                 &caddy,
@@ -356,7 +396,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                     request.name.is_none() && !request.primary,
                     "pinned startup cannot change environment identity"
                 );
-                let registry = Registry::open(&state, true)?.context("no registry")?;
+                let registry = Registry::open(&state, true)?
+                    .context("no environments are registered yet; start one with parcela up")?;
                 let workspace = registry.current(&source, &manifest)?;
                 (registry, workspace)
             } else {
@@ -404,6 +445,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 lifecycle::down(&registry, &workspace)?;
             }
             if detach {
+                let log = registry.runtime_path(&workspace).join("log/owner.log");
+                let start = std::fs::metadata(&log).map_or(0, |metadata| metadata.len());
                 let result = lifecycle::detached(
                     &registry,
                     &workspace,
@@ -411,7 +454,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                     backend_port,
                     readiness_timeout,
                     &manifest,
-                )?;
+                )
+                .inspect_err(|_| print_new_log_lines(&log, start, 20))?;
                 out.emit(&result, |style| render::started(&result, style))?;
                 Ok(0)
             } else {
@@ -428,7 +472,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         }
         Command::Recover { detach } => {
             let state = state_dir(cli.state_dir)?;
-            let existing = Registry::open(&state, false)?.context("no registry")?;
+            let existing = Registry::open(&state, false)?
+                .context("no environments are registered yet; start one with parcela up")?;
             let workspace = target_workspace(&existing, &cli.path, cli.workspace)?;
             if detach {
                 let result = lifecycle::recover_detached(&existing, &workspace)?;
@@ -471,9 +516,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         }
         Command::Down { .. } => {
             let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?.context(
-                "no registered environment; start the selected checkout with parcela up",
-            )?;
+            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
             let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
             let result = lifecycle::down(&registry, &workspace)?;
             let name = render::name(&serde_json::to_value(&workspace)?);
@@ -483,7 +526,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         Command::Task { name, args } => {
             let (source, manifest) = project(&cli.path)?;
             let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, true)?.context("no registry")?;
+            let registry = Registry::open(&state, true)?
+                .context("no environments are registered yet; start one with parcela up")?;
             let workspace = registry.current(&source, &manifest)?;
             parcela::runtime::task(&registry, &manifest, &workspace, &name, &args)
         }

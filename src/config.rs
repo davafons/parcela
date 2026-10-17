@@ -534,5 +534,8 @@ pub fn locate(start: &Path) -> Result<PathBuf> {
             return Ok(directory.to_path_buf());
         }
     }
-    bail!("no parcela.yaml found; specify --path to a configured checkout")
+    bail!(
+        "no parcela.yaml in {} or above; create one with parcela init, or pass --path to a configured checkout",
+        start.display()
+    )
 }

@@ -190,7 +190,7 @@ pub fn detached(
         ensure!(signals.received() == 0, "detached startup interrupted");
         ensure!(
             owner.poll()?.is_none(),
-            "detached owner exited before readiness; inspect {}",
+            "services stopped before they were ready; full log: {}",
             log_path.display()
         );
         if let Some(session) = registry.session(&workspace.id)?
@@ -211,7 +211,7 @@ pub fn detached(
         }
         ensure!(
             Instant::now() < deadline,
-            "detached startup timed out; inspect {}",
+            "services were not ready in time; full log: {}",
             log_path.display()
         );
         std::thread::sleep(Duration::from_millis(100));

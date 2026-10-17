@@ -31,7 +31,7 @@ Conventions fill in the rest:
 
 ## Full form
 
-Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects an adopted source instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; startup registers the selected checkout with a stable role and name.
+Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects a registered environment instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; startup registers the selected checkout with a stable role and name.
 
 ```yaml
 version: 1
@@ -114,31 +114,38 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 
 | Command | Behavior |
 |---|---|
-| `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
-| `config check` | Strict organizer validation, no state creation |
-| `workspace adopt --role primary\|preview --label LABEL` | Optional advanced explicit source identity and hostname reservation |
-| `workspace list [--all] [--human]` | Registered inventory plus live owner probes, scoped to the current project or explicit machine-wide view |
-| `workspace discover [--human]` | Read-only sibling jj/Git checkout paths, revisions, refs and adoption IDs; no manifest or registry required |
+| `init [--name NAME] [--command CMD]` | Write a commented short-form `parcela.yaml` in `--path`, guessing the web command from `package.json`, Rails or Django files; refuses to overwrite; validates before writing |
+| `up [--name NAME\|--primary] [--detach] [--backend-port N]` | Start every service, foreground by default; detached startup returns only after live readiness and prints the URL and next commands |
+| `down` / `stop` | Stop through the live supervisor or authenticated recovery; preserve source/data; repeated stop is a no-op |
+| `down --all` / `down --all-projects` | Stop every running environment of this project, or of every project; prints the targets first and exits 1 if any stop fails |
+| `restart [--detach] [--backend-port N]` | Check the replacement before stopping the healthy run, then start a new run; does not replay arbitrary `run` argv |
+| `status [--all]` | Live supervisor, loopback HTTP and router probes, with recorded state reported separately |
+| `ls` | Every registered environment across projects: project, name, state, URL and path |
+| `services` | Process Compose state of each service and worker |
+| `logs [SERVICE] --tail N` | Plain-text log tail; default is the routed service; 1–10,000 lines |
+| `url [--service NAME]` | Plain-text default or selected service URL; does not certify reachability |
+| `rm` | Forget the selected stopped environment and release its hostnames and port leases; refuses a running one; keeps source and runtime data |
+| `rm --prune` | Forget every stopped environment whose checkout directory no longer exists; running ones are skipped |
+| `doctor` | Readiness checklist: Process Compose and Caddy on `PATH`, `lsof`, `ps`, the nearest `parcela.yaml`, the private state directory and the proxy; creates no state |
+| `config check` | Strict validation, including a Process Compose process for every HTTP service; creates no state |
+| `run [--name NAME\|--primary] [--backend-port N] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
+| `recover [--detach]` | Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
+| `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
 | `context` / `workspace inspect` | Planned context; no live-health guarantees |
+| `workspace adopt --role primary\|preview --label LABEL` | Optional explicit registration; `up` does this automatically |
+| `workspace list [--all]` | This project's registered environments, or every project's |
+| `workspace discover` | Read-only sibling jj/Git checkout paths, revisions, refs and registration IDs; no manifest or registry required |
 | `proxy run [--caddy PATH]` | Dedicated foreground Caddy; default 80/443; no sudo/trust/takeover |
 | `proxy run --test-profile --http-port N --https-port N` | Explicit disposable high-port profile |
 | `proxy run --forwarded-standard-ports --http-port 8080 --https-port 8443` | Explicit external 80/443 forwarding, canonical port-free URL |
-| `proxy status` | Verify owned Caddy admin marker; mapped profile also verifies port-80 front door |
-| `run [--name NAME\|--primary] [--backend-port N] [--readiness-timeout SEC] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
-| `up [--name NAME\|--primary] [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Native graph, foreground by default; detached startup returns only after live readiness |
-| `down` / `stop` | Stop through the live owner or authenticated native recovery; preserve source/data; reconcile completed shutdown and make repeated completed stop a no-op |
-| `recover [--detach]` | Reattach to a surviving authenticated native graph without replaying services; an interrupted stop remains a stop operation, including detached stopped completion |
-| `restart [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Preflight the replacement backend/native graph before stopping the healthy owner, then launch in a fresh generation; does not replay arbitrary `run` argv |
-| `services [--human]` | Native Process Compose service state through the selected live owner |
-| `logs [SERVICE] --tail N` | Plain-text log tail from Process Compose; default service is the owner's routed service; 1–10,000 lines, bounded response size |
-| `url [--service NAME]` | Plain-text default or selected service URL, recorded when available and otherwise planned standard HTTPS; does not certify reachability |
-| `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
-| `status [--all] [--human]` | Live owner/loopback HTTP/router probes, with durable intent reported separately; explicit machine-wide view works outside a project |
-| `doctor [--caddy PATH] [--process-compose PATH]` | Capability report plus requested bounded version probes |
+| `proxy status` | Verify the owned Caddy admin marker; the mapped profile also verifies the port-80 front door |
+| `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
+
+`parcela` with no command prints the current checkout's status when it is registered, and otherwise the next command to run. Rarely needed flags are accepted but hidden from help: `--human`, `doctor --caddy PATH --process-compose PATH`, `--process-compose PATH` on `up` and `restart`, and `--readiness-timeout SEC` on `up`, `restart` and `run`. They default to the binaries on `PATH` and 60 seconds (30 for `run`). `doctor` exits 1 until every check passes.
 
 `--skill` is a long-flag alias for the `skill` subcommand. It runs before workspace lookup and cannot be combined with a lifecycle command. Its output is the bundled `.agents/skills/parcela/SKILL.md`, not generated from the current project. An agent can load this output directly; no global profile installation runs.
 
-Inspection and detached startup print JSON by default. `--human` selects inventory/status/service tables. `url` and `logs` print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, bulk stop, arbitrary persisted-PID signaling, or replay of an uncertain command.
+Every command prints aligned human text when stdout is a terminal and JSON otherwise; `--json` forces JSON. Color appears only on a terminal without `NO_COLOR`. `url` and `logs` always print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, arbitrary persisted-PID signaling, or replay of an uncertain command; bulk stop happens only through explicit `down --all` or `--all-projects`. A failed detached start prints the lines it added to `log/owner.log` to stderr.
 
 ## Ownership and failure
 

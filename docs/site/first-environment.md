@@ -52,7 +52,7 @@ Inspect the processes and endpoints:
 ```sh
 parcela context
 parcela status
-parcela services --human
+parcela services
 parcela url
 parcela url --service backend
 ```
