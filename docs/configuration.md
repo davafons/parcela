@@ -121,7 +121,7 @@ Commands and working directories are native Process Compose configuration, not f
 
 Each run records a service endpoint set under one generation and nonce. All declared HTTP services must pass startup readiness before any group route opens. A changed listener identity withdraws the group until every required endpoint passes readiness again. `status.live.endpoints` reports each service's listener ownership and fresh HTTP readiness. Whole-graph `down`, `restart` and qualified `recover` operate on the set. Individual service restart is not a Parcela command.
 
-Registration reserves every service hostname atomically, including collisions with another worktree's base hostname. Port allocation reserves the whole set atomically. Stopped hostnames stay reserved and unavailable. To change reservations, stop the environment, change its manifest and run `up` again with its existing identity. No source or data is removed. Distinct names and runtime paths do not certify database or storage isolation.
+Registration reserves every service hostname atomically, including collisions with another worktree's base hostname. Port allocation reserves the whole set atomically. Service and named ports come from 20000–29999, chosen at random, below the OS ephemeral ranges (macOS 49152+, Linux 32768+) so other programs binding port 0 cannot take them before the service starts. A port in use on any loopback or wildcard address is skipped. Stopped hostnames stay reserved and unavailable. To change reservations, stop the environment, change its manifest and run `up` again with its existing identity. No source or data is removed. Distinct names and runtime paths do not certify database or storage isolation.
 
 ## Context and environment
 
