@@ -13,7 +13,6 @@ Parcela is experimental. These pages describe the current source interface. An o
 | Inspection | JSON context/inventory/status, native service states, bounded log tails and selected service URLs |
 | Lifecycle | Selected whole-graph stop/restart and qualified native recovery without command replay |
 | Agent guidance | Bundled standalone `--skill` Markdown; no automatic global profile installation |
-| Paused copies | Explicit policy/preflight, supported source/resource checkpoints and bounded SQLite streaming |
 
 ## Verification boundaries
 
@@ -31,7 +30,7 @@ The CLI separates durable intent from fresh health. `live_health_verified` means
 - Automatic backend installation or a complete release installer.
 - Alias, wildcard tenant, LAN or tailnet sharing workflows.
 - Automatic database/storage isolation, baseline preparation or secret-free capture certification.
-- Active agent continuation, cross-machine execution fencing or a complete return handoff.
+- Moving or copying environments between machines. Parcela maintains local parallel environments only.
 - General daemonized-descendant containment, reboot recovery and browser trust acceptance.
 
 Private state, locks, native authentication and process births provide operational ownership. They do not contain hostile same-user programs or make a bound-port probe an atomic listener handoff.

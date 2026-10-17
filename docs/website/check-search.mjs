@@ -13,7 +13,7 @@ const search = MiniSearch.loadJSON(serialized, {
 console.log(JSON.stringify({
   documentCount: search.documentCount,
   documents: Object.entries(data.documentIds).map(([key, id]) => ({ id, ...data.storedFields[key] })),
-  queries: Object.fromEntries(['Claude', 'checkpoint', 'frontend'].map(term => [
+  queries: Object.fromEntries(['Claude', 'worktree', 'frontend'].map(term => [
     term, search.search(term, { prefix: true }).map(result => result.id),
   ])),
 }));

@@ -642,19 +642,6 @@ def shirabe_native_inspection(f):
     assert f.request(app)[0] == 200
     return {'authenticated_inspection': 'ordinary', 'running': ['web', 'css', 'jobs']}
 
-def portable_native_inspection(f):
-    from check_portable_shirabe import processes
-
-    app = f.app('portable')
-    app['manifest']['process_compose']['processes']['css'] = {'entrypoint': ['sleep', '300'], 'availability': {'restart': 'no'}}
-    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
-    f.start_proxy()
-    f.start(app)
-    records = processes(f.args.compose, app['runtime'], f.root / 'portable-client.log', os.environ.copy())
-    assert records == {'web': 'Running', 'css': 'Running'}
-    assert f.request(app)[0] == 200
-    return {'authenticated_inspection': 'portable', 'running': ['web', 'css']}
-
 def occupied_replacement_port(f):
     app = f.app('occupied')
     f.start_proxy()
@@ -814,7 +801,7 @@ def detached_stopped_recovery(f, finish_first):
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
          replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
-         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop, shirabe_native_inspection, portable_native_inspection,
+         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop, shirabe_native_inspection,
          occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
          detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization]
 

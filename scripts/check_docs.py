@@ -137,7 +137,7 @@ def validate_search_records(site, base, expected, data):
         indexed.add(route)
     if indexed != set(expected):
         raise ValueError('search index differs from public pages')
-    for term, slug in [('Claude', 'agents'), ('checkpoint', 'transfer'), ('frontend', 'first-environment')]:
+    for term, slug in [('Claude', 'agents'), ('worktree', 'worktrees'), ('frontend', 'first-environment')]:
         if not any(identifier.partition('#')[0] == f'{base}{slug}/' for identifier in data['queries'].get(term, [])):
             raise ValueError(f'local search query has no expected result: {term}')
     return len(indexed)
@@ -182,7 +182,7 @@ def inspect_site(site, base='/'):
             if target is None:
                 raise ValueError(f'external CSS asset: {reference}')
             resources.add(target)
-    forbidden = {'PRD.md', 'PRD-0.1.md', 'research.md', 'implementation.md', 'portable-environments.md', 'plans'}
+    forbidden = {'PRD.md', 'PRD-0.1.md', 'research.md', 'implementation.md', 'plans'}
     for path in site.rglob('*'):
         if forbidden.intersection(path.relative_to(site).parts):
             raise ValueError(f'internal documentation included: {path}')

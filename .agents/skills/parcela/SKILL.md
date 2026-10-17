@@ -110,4 +110,4 @@ The default service uses the environment base hostname. Other HTTP services use 
 
 ## Limits
 
-This is an experimental local runtime manager, not a sandbox, terminal multiplexer or automatic active-agent handoff system. It does not automatically reconcile allocations missing launch evidence, adopt arbitrary orphan processes, restart individual services, create data replicas or certify reboot/browser trust. A skill, command help or configuration document is not runtime proof.
+This is an experimental local runtime manager, not a sandbox, terminal multiplexer or cross-machine environment transfer tool. It does not automatically reconcile allocations missing launch evidence, adopt arbitrary orphan processes, restart individual services, create data replicas or certify reboot/browser trust. A skill, command help or configuration document is not runtime proof.

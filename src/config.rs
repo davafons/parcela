@@ -25,8 +25,6 @@ pub struct Manifest {
     pub inherit_environment: bool,
     #[serde(default = "shutdown_timeout")]
     pub shutdown_timeout_seconds: u64,
-    #[serde(default)]
-    pub transfer: Option<crate::transfer::Policy>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -175,9 +173,6 @@ impl Manifest {
                 graph.is_object(),
                 "process_compose must be a native graph mapping"
             );
-        }
-        if let Some(policy) = &self.transfer {
-            policy.validate(self)?;
         }
         Ok(())
     }

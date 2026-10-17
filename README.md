@@ -38,7 +38,7 @@ Keep your primary checkout and previews identifiable, with their own service gra
 - **Project-owned policy.** Your configuration defines commands, preparation, and data bindings. Core does not assume Rails, Node, or a database layout.
 - **Scriptable output.** JSON by default, readable tables with `--human`, and plain-text URLs and log tails.
 
-Parcela is experimental. The tested source build is not a finished installer or a complete environment-handoff system. See [project status](#project-status) for the current limits.
+Parcela is experimental. The tested source build is not a finished installer. See [project status](#project-status) for the current limits.
 
 ## Build from source
 
@@ -149,7 +149,6 @@ Stopping preserves source and data. Preparation, migrations, and resets are neve
 | `url` | Print the reserved URL, not a guarantee that it is reachable. |
 | `task NAME -- ARGS` | Run a finite command defined by the project. |
 | `workspace discover [--human]` | Discover sibling jj or Git checkouts without adopting or editing them. |
-| `transfer` | Plan, capture, verify, or restore explicit paused checkpoints, not active execution handoff. |
 | `doctor` | Report capabilities and optionally probe supplied backend versions. |
 | `--skill` / `skill` | Print the bundled agent operating skill without project or registry access. |
 
@@ -200,7 +199,7 @@ Still incomplete or unverified:
 - Automatic reconciliation when launch evidence is missing.
 - Concurrent startup and restart, immutable launch snapshots, stale successor cleanup, and reboot recovery.
 - Interactive attach, following logs, per-service restart, sharing, aliases, and tenant routing.
-- Active agent continuation, complete Mac-to-Linux-to-Mac handoff, and general data-isolation certification.
+- General data-isolation certification.
 - Release packaging.
 
 Parcela is not published to crates.io. Passing disposable tests does not prove that an installed host's listeners, forwarding, and trust are configured correctly.
@@ -228,8 +227,6 @@ scripts/check-recovery \
 
 `scripts/check` runs formatting, Clippy, Rust tests, Python tests, and schema checks. Live and recovery checks use disposable source and state, explicit test ports, and a disposable CA without changing system trust.
 
-The opt-in [Shirabe replica check](docs/check-portable-shirabe.md) covers paused destination acceptance. That result is not proof of active environment handoff.
-
 ## Documentation
 
 - [Public documentation](https://parcela.davafons.com/docs/) covers the development build and its supported scope.
@@ -238,6 +235,4 @@ The opt-in [Shirabe replica check](docs/check-portable-shirabe.md) covers paused
 - [Configuration and CLI](docs/configuration.md) contains the executable manifest and command contract.
 - [Implementation status](docs/implementation.md) records verified behavior and remaining gaps.
 - [Architecture](docs/architecture.md) describes ownership and backend boundaries.
-- [Transfer commands](docs/transfer.md) cover paused capture, integrity checks, and restore.
-- [Portable environments](docs/portable-environments.md) defines the intended handoff contract.
 - [PRD](docs/PRD.md) lists release goals, not shipped-feature claims.

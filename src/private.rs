@@ -1,14 +1,10 @@
 use anyhow::{Context, Result, ensure};
 use std::{
-    ffi::CString,
     fs::{self, File, OpenOptions},
     io::Write,
     os::{
         fd::AsRawFd,
-        unix::{
-            ffi::OsStrExt,
-            fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
-        },
+        unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     },
     path::Path,
 };
@@ -142,35 +138,6 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Ok(serde_json::from_slice(&bytes)?)
-}
-
-/// Publish a complete artifact without replacing even an empty concurrent destination.
-pub fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
-    let source = CString::new(source.as_os_str().as_bytes())?;
-    let destination = CString::new(destination.as_os_str().as_bytes())?;
-    // Both C paths stay owned through the call; the kernel enforces no-replace atomically.
-    #[cfg(target_os = "macos")]
-    let result =
-        unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
-    #[cfg(target_os = "linux")]
-    let result = unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            source.as_ptr(),
-            libc::AT_FDCWD,
-            destination.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    anyhow::bail!("atomic no-replace directory publishing requires macOS or Linux");
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    ensure!(
-        result == 0,
-        "cannot publish checkpoint without replacement: {}",
-        std::io::Error::last_os_error()
-    );
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -113,7 +113,7 @@ class DocumentationSearch(unittest.TestCase):
         self.site = Path(self.temporary.name)
         self.expected = {}
         self.documents = []
-        for slug, title in [('agents', 'Work with an agent'), ('transfer', 'Paused checkpoints'),
+        for slug, title in [('agents', 'Work with an agent'), ('worktrees', 'Manage primary and preview worktrees'),
                             ('first-environment', 'First environment')]:
             directory = self.site / slug
             directory.mkdir()
@@ -123,7 +123,7 @@ class DocumentationSearch(unittest.TestCase):
             self.documents.append({'id': route + '#start', 'title': title, 'titles': []})
         self.data = {'documentCount': 3, 'documents': self.documents, 'queries': {
             'Claude': ['/docs/agents/#start'],
-            'checkpoint': ['/docs/transfer/#start'],
+            'worktree': ['/docs/worktrees/#start'],
             'frontend': ['/docs/first-environment/#start'],
         }}
 

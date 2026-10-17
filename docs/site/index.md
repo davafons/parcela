@@ -29,7 +29,6 @@ Caddy handles HTTPS. Process Compose handles processes, dependencies, logs and s
 | Declare processes, ports and readiness | [Configure service sets](services.md) |
 | Teach a coding agent to use Parcela | [Work with an agent](agents.md) |
 | Diagnose a failed start or lost controller | [Troubleshoot and recover](troubleshooting.md) |
-| Capture a paused copy, not active execution | [Paused checkpoints](transfer.md) |
 | Look up exact fields and commands | [Configuration and CLI](../configuration.md) |
 | Check what is not implemented or certified | [Supported scope](limits.md) |
 

@@ -15,7 +15,6 @@ export const groups = [
   ] },
   { label: 'Guides', pages: [
     ['services', 'Configure service sets', 'docs/site/services.md'],
-    ['transfer', 'Paused checkpoints', 'docs/site/transfer.md'],
     ['troubleshooting', 'Troubleshoot and recover', 'docs/site/troubleshooting.md'],
   ] },
   { label: 'Reference', pages: [
@@ -80,7 +79,6 @@ export function prepareContent(base) {
   const routes = Object.fromEntries(groups.flatMap(({ pages }) => pages)
     .map(([slug, , source]) => [source, `${base}${slug === 'index' ? '' : `${slug}/`}`]));
   const links = new Map(Object.entries(routes).map(([source, route]) => [join(repository, source), route]));
-  links.set(join(repository, 'docs/transfer.md'), `${base}transfer/`);
   for (const [name, source] of Object.entries(downloads)) {
     if (!source.endsWith('SKILL.md')) links.set(join(repository, source), `${base}assets/${name}`);
     writeFileSync(join(publicDir, 'assets', name), sourceBytes(source));

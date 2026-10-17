@@ -101,10 +101,6 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 
 Inspection and detached startup print JSON by default. `--human` selects inventory/status/service tables. `url` and `logs` print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, bulk stop, arbitrary persisted-PID signaling, or replay of an uncertain command.
 
-## Transfer policy and checkpoints
-
-The optional strict `transfer` policy and paused capture/restore commands are documented in [transfer commands](transfer.md). Preflight does not create registry state or certify execution handoff. Source-only checkpoints do not capture declared application data or profiles.
-
 ## Ownership and failure
 
 Registry schema 3 adds hostname and endpoint-set port reservations. Writable opening migrates schemas 1 and 2 transactionally, preserving workspace IDs, session nonces, generations and active default-port leases. Read-only opening supports those older schemas without migration. Legacy single-service owner records remain readable without rewriting them. A stopped generation cannot transition back to ready; a new run needs a new generation.

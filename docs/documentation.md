@@ -10,7 +10,7 @@ The public site uses VitePress 1.6.4 for navigation, responsive layouts, theme s
 - Update `.agents/skills/parcela/SKILL.md` for the canonical operating instructions. The CLI embeds this file.
 - Update `examples/docs-demo/` for the downloadable first-environment example.
 
-`content.mjs` generates VitePress content and download assets from those canonical sources. It maps repository-relative Markdown links to public routes, including the task guide for transfer commands. The authored Markdown remains readable on GitHub. Generated directory-index pages retain the existing trailing-slash URLs. GitHub-style heading slugs preserve linked section anchors. Do not create a second copy of a canonical reference for the website.
+`content.mjs` generates VitePress content and download assets from those canonical sources. It maps repository-relative Markdown links to public routes. The authored Markdown remains readable on GitHub. Generated directory-index pages retain the existing trailing-slash URLs. GitHub-style heading slugs preserve linked section anchors. Do not create a second copy of a canonical reference for the website.
 
 The build refuses undeclared files in the public directory, public-source symlinks outside that root and canonical sources outside the repository. Only the page table and download table enter the build. Public pages use plain Markdown. Raw HTML rendering is disabled, and source includes, snippet imports and script blocks are refused. VitePress supplies the rendering assets; the build does not copy the whole repository.
 
@@ -33,7 +33,7 @@ python3 scripts/check_docs.py --output target/docs-check.json
 
 The first command writes `target/docs` with `/parcela/` as its hosting base. The default canonical origin is `https://example.invalid`; set `DOCS_SITE` to the intended HTTPS origin for a publication build. Use `DOCS_BASE=/` for root hosting or a slash-delimited project path such as `/parcela/`. These variables configure output, not a deployment.
 
-The checker builds separate temporary sites at `/`, `/parcela/` and `/docs/`. It checks actual HTML links, anchors, assets, canonical downloads and actual MiniSearch records for every public page. It loads the bundled index with MiniSearch and checks representative agent, checkpoint and frontend queries. It also verifies public-source refusal and serves all three builds through ephemeral loopback listeners. Every recorded listener must close before the check passes. The checker uses Python's standard library and the installed docs package.
+The checker builds separate temporary sites at `/`, `/parcela/` and `/docs/`. It checks actual HTML links, anchors, assets, canonical downloads and actual MiniSearch records for every public page. It loads the bundled index with MiniSearch and checks representative agent, worktree and frontend queries. It also verifies public-source refusal and serves all three builds through ephemeral loopback listeners. Every recorded listener must close before the check passes. The checker uses Python's standard library and the installed docs package.
 
 For a private root-hosted preview, choose an available explicit test port:
 
