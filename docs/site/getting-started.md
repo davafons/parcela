@@ -102,7 +102,8 @@ parcela up
 ```text
 parcela: Started the Parcela proxy on :1443 (run `parcela trust` once so browsers trust https://hello.localhost:1443)
 [web	] 127.0.0.1 - - [17/Oct/2026 20:40:13] "GET / HTTP/1.1" 200 -
-parcela: ready https://hello.localhost:1443 (generation 2, routing-only; data isolation requires project bindings)
+✓ hello is running at https://hello.localhost:1443
+  Press Ctrl-C to stop
 ```
 
 The first time, `up` also starts Parcela's HTTPS proxy in the background. The proxy keeps running for every project until you run `parcela proxy stop`.
@@ -162,6 +163,8 @@ parcela status
 ```text
 hello primary  ready
   https://hello.localhost:1443
+  PROCESS  STATE    PID
+  web      running  70840
   path /Users/you/code/hello
 ```
 
@@ -296,6 +299,10 @@ hello primary  ready
   SERVICE  HTTP   URL
   api      ready  https://api-hello.localhost:1443
   web      ready  https://hello.localhost:1443
+  PROCESS  STATE    PID
+  api      running  53311
+  ticker   running  53308
+  web      running  53318
   db        21565  PARCELA_PORT_DB
   path /Users/you/code/hello
 ```

@@ -76,7 +76,7 @@ You upgraded Parcela while the old proxy was running. It keeps serving. Run `par
 
 ## The state is `interrupted` or `unknown`
 
-Parcela lost contact with the process that owns the environment, for example after a crash. Run `parcela up`. If the services are still running, `up` takes control of them again without restarting them. If they are gone, it starts them fresh.
+Parcela lost contact with the process that supervises the environment, for example after a crash. Run `parcela up`. If the services are still running, `up` takes control of them again without restarting them. If they are all gone, it starts them fresh. If `up` says the run was being stopped, finish the stop with `parcela down`, then run `parcela up`.
 
 Don't kill processes by PID or delete files in the state directory to fix this. Parcela refuses to act when it cannot prove which processes it started, and it keeps the record so nothing is lost.
 

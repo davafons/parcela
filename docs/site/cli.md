@@ -136,6 +136,10 @@ hello primary  ready
   SERVICE  HTTP   URL
   api      ready  https://api-hello.localhost:1443
   web      ready  https://hello.localhost:1443
+  PROCESS  STATE    PID
+  api      running  53311
+  ticker   running  53308
+  web      running  53318
   db        21565  PARCELA_PORT_DB
   path /Users/you/code/hello
 ```
@@ -152,9 +156,10 @@ Lists every environment on the machine, across projects. It also lists sibling j
 
 ```text
 $ parcela ls
-PROJECT  NAME     STATE  URL                                   PATH
-hello    signup   ready  https://signup-hello.localhost:1443  /Users/you/code/signup
-hello    primary  ready  https://hello.localhost:1443         /Users/you/code/hello
+PROJECT  NAME     STATE        URL                                   PATH
+hello    signup   ready        https://signup-hello.localhost:1443   /Users/you/code/signup
+hello    primary  ready        https://hello.localhost:1443          /Users/you/code/hello
+hello    billing  not started  https://billing-hello.localhost:1443  /Users/you/code/billing
 ```
 
 ### parcela logs
