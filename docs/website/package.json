@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vitepress build",
-    "dev": "vitepress dev --host 127.0.0.1",
+    "dev": "vitepress dev --host 127.0.0.1 --strictPort",
     "deploy": "node deploy.mjs"
   },
   "engines": {
@@ -20,6 +20,7 @@
     }
   },
   "devDependencies": {
-    "wrangler": "4.150.0"
+    "wrangler": "4.150.0",
+    "ws": "8.21.0"
   }
 }

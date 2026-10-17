@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress';
 import { slug } from 'github-slugger';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { groups, prepareContent } from '../content.mjs';
+import { contentWatchPlugin, groups, prepareContent } from '../content.mjs';
 
 const project = fileURLToPath(new URL('..', import.meta.url));
 const base = process.env.DOCS_BASE ?? '/parcela/';
@@ -15,8 +15,11 @@ if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || 
   throw new Error('DOCS_SITE must be an HTTPS origin without a path, query or credentials');
 }
 
+const content = prepareContent(base);
+
 export default defineConfig({
-  ...prepareContent(base),
+  ...content,
+  vite: { plugins: [contentWatchPlugin(base, content.srcDir)] },
   base,
   outDir: resolve(project, process.env.DOCS_OUTPUT ?? '../../target/docs'),
   cacheDir: resolve(project, '.generated/cache'),

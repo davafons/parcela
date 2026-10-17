@@ -1,0 +1,24 @@
+version: 1
+project: {id: parcela-docs, name: parcela-docs}
+default_service: docs
+services:
+  docs: {readiness_path: /}
+inherit_environment: false
+environment:
+  DOCS_BASE: /
+  DOCS_SITE: "${PARCELA_URL}"
+tasks:
+  docs-build:
+    argv: [npm, run, build, --prefix, docs/website]
+    timeout_seconds: 120
+  docs-check:
+    argv: [python3, scripts/check_docs.py]
+    timeout_seconds: 300
+process_compose:
+  version: "0.5"
+  processes:
+    docs:
+      working_dir: docs/website
+      command: npm run dev -- --port ${PORT}
+      availability:
+        restart: "no"

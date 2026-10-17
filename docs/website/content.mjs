@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -68,20 +68,19 @@ function sourceBytes(source) {
   return readFileSync(path);
 }
 
-export function prepareContent(base) {
+export function prepareContent(base, srcDir) {
   validatePublicSources(join(repository, 'docs/site'));
   const generatedRoot = join(project, '.generated');
   mkdirSync(generatedRoot, { recursive: true });
-  const generated = mkdtempSync(join(generatedRoot, 'build-'));
-  const src = join(generated, 'src');
+  const src = srcDir ?? join(mkdtempSync(join(generatedRoot, 'build-')), 'src');
   const publicDir = join(src, 'public');
-  mkdirSync(join(publicDir, 'assets'), { recursive: true });
+  const files = new Map();
   const routes = Object.fromEntries(groups.flatMap(({ pages }) => pages)
     .map(([slug, , source]) => [source, `${base}${slug === 'index' ? '' : `${slug}/`}`]));
   const links = new Map(Object.entries(routes).map(([source, route]) => [join(repository, source), route]));
   for (const [name, source] of Object.entries(downloads)) {
     if (!source.endsWith('SKILL.md')) links.set(join(repository, source), `${base}assets/${name}`);
-    writeFileSync(join(publicDir, 'assets', name), sourceBytes(source));
+    files.set(join(publicDir, 'assets', name), sourceBytes(source));
   }
   const titles = {};
   for (const [slug, , source] of groups.flatMap(({ pages }) => pages)) {
@@ -102,9 +101,50 @@ export function prepareContent(base) {
       return `](${route.slice(base.length - 1)}${suffix === '?raw=1' ? '' : suffix})`;
     });
     const output = join(src, slug === 'index' ? 'index.md' : `${slug}/index.md`);
-    mkdirSync(dirname(output), { recursive: true });
-    writeFileSync(output, `---\ntitle: ${JSON.stringify(title)}\n---\n\n${markdown}`);
+    files.set(output, Buffer.from(`---\ntitle: ${JSON.stringify(title)}\n---\n\n${markdown}`));
   }
-  writeFileSync(join(publicDir, 'documentation-pages.json'), JSON.stringify(titles, null, 2) + '\n');
+  files.set(join(publicDir, 'documentation-pages.json'), Buffer.from(JSON.stringify(titles, null, 2) + '\n'));
+  for (const [output, bytes] of files) {
+    if (existsSync(output) && readFileSync(output).equals(bytes)) continue;
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, bytes);
+  }
   return { srcDir: src };
+}
+
+export function contentWatchPlugin(base, srcDir) {
+  return {
+    name: 'parcela-canonical-docs',
+    apply: 'serve',
+    configureServer(server) {
+      const sources = new Set([
+        ...groups.flatMap(({ pages }) => pages.map(([, , source]) => join(repository, source))),
+        ...Object.values(downloads).map((source) => join(repository, source)),
+      ]);
+      const publicRoot = join(repository, 'docs/site');
+      let lastError;
+      function refresh() {
+        try {
+          prepareContent(base, srcDir);
+          if (lastError) server.ws.send({ type: 'full-reload' });
+          lastError = undefined;
+        } catch (error) {
+          lastError = error;
+          server.config.logger.error(error.message);
+          server.ws.send({ type: 'error', err: { message: error.message, stack: error.stack ?? '' } });
+        }
+      }
+      const directories = new Set([...sources].map(dirname));
+      const watchers = [...directories].map((directory) => watch(directory, { recursive: directory === publicRoot }, (_event, filename) => {
+        const path = filename && resolve(directory, filename.toString());
+        if (!path || sources.has(path) || path === publicRoot || path.startsWith(publicRoot + sep)) refresh();
+      }));
+      for (const watcher of watchers) watcher.on('error', (error) => {
+        lastError = error;
+        server.config.logger.error(error.message);
+        server.ws.send({ type: 'error', err: { message: error.message, stack: error.stack ?? '' } });
+      });
+      server.httpServer?.once('close', () => watchers.forEach((watcher) => watcher.close()));
+    },
+  };
 }

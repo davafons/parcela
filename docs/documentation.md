@@ -24,6 +24,53 @@ npm ci --prefix docs/website
 
 The package lock pins transitive dependencies. A scoped override uses Vite 6.4.3 instead of VitePress 1.6.4's Vite 5 dependency to avoid known development-server advisories. Keep that override under the real build and search checks when updating the toolchain. `node_modules`, generated content, VitePress caches and `target/docs` are ignored build output. The command does not install Node, replace system packages or install Parcela's backends.
 
+## Develop the docs with Parcela
+
+The root `parcela.yaml` starts one VitePress service named `docs`. It uses the checkout's allocated loopback port and canonical HTTPS origin. Port conflicts fail instead of selecting another port. Each checkout keeps its generated sources and cache under `docs/website/.generated/`. No database or application preparation is needed.
+
+Install the pinned docs package separately with the command above. Use a Parcela binary compatible with your registry, an already working front door and an available Process Compose binary. Do not open an installed registry with a newer binary while older controllers still use it. If proxy status fails, coordinate host setup instead of changing listeners, trust or forwarding here.
+
+After authorizing adoption and startup, run these commands from the intended checkout root. Choose a different preview label for each checkout:
+
+```sh
+CHECKOUT=$(pwd -P)
+parcela --path "$CHECKOUT" config check
+parcela proxy status
+parcela --path "$CHECKOUT" workspace adopt --role preview --label docs-review
+parcela --path "$CHECKOUT" up --detach
+parcela --path "$CHECKOUT" url
+```
+
+Open the returned URL. The recipe does not open a browser or change focus. Designating a primary checkout is a separate explicit choice.
+
+Edit the canonical Markdown, configuration reference or operating skill, not generated files. A separate Node file watcher validates all declared inputs before changing the generated snapshot. The source watcher passes only validated generated pages to VitePress rendering and search. Native VitePress handles Markdown and stylesheet hot updates. Changes to downloadable assets can reload the page. Invalid templates or undeclared public inputs leave the previous valid generated content in place and report an error. Correct the source to recover.
+
+**Development search has a known limitation in VitePress 1.6.4.** Its local-search index stays stale after edits. Restart the selected graph and reload the page to refresh search. Production builds create a fresh index. Restart after changing source directory layout as well.
+
+```sh
+parcela --path "$CHECKOUT" services
+parcela --path "$CHECKOUT" logs docs --tail 50
+parcela --path "$CHECKOUT" restart --detach
+```
+
+The manifest also declares finite build and check tasks. They require the already installed docs package and run only when requested:
+
+```sh
+parcela --path "$CHECKOUT" task docs-build
+parcela --path "$CHECKOUT" task docs-check
+parcela --path "$CHECKOUT" down
+```
+
+The build task writes this checkout's `target/docs`. The check task runs the standalone three-base checker below. Stopping the graph preserves source and generated files. It does not stop other checkouts.
+
+For direct development without Parcela, choose an unused explicit unprivileged port:
+
+```sh
+DOCS_BASE=/ npm run dev --prefix docs/website -- --port "$DOCS_TEST_PORT"
+```
+
+This also binds to loopback, refuses a port conflict and watches the canonical sources. It does not provide named HTTPS or establish browser trust.
+
 ## Build and check
 
 ```sh
@@ -42,9 +89,22 @@ DOCS_BASE=/ npm run build --prefix docs/website
 python3 -m http.server "$DOCS_TEST_PORT" --bind 127.0.0.1 --directory target/docs
 ```
 
-The dev command also binds to loopback. Restart it after editing canonical sources because generation happens when the configuration loads.
+This serves a compiled artifact. Rebuild it after source edits, or use the live development recipe above.
 
 Open that local URL yourself. This command does not start a browser, change focus or expose a LAN interface. Artifact and HTTP checks do not prove responsive layout, theme interaction or search interaction in a browser.
+
+## Verify live docs development
+
+With jj, the installed docs package and explicit known Caddy and Process Compose binaries:
+
+```sh
+cargo build --locked
+python3 scripts/check_docs_dev.py \
+	--caddy "$CADDY" --process-compose "$PROCESS_COMPOSE" \
+	--output "$PRIVATE_REPORT"
+```
+
+The driver copies declared inputs into disposable sibling jj workspaces. It proves read-only discovery, separate primary and preview graphs, strict port refusal, named HTTPS and native HMR messages over WSS using a private test CA. It checks canonical Markdown, skill downloads, CSS, source refusal and recovery, the explicit build task, search refresh after restart, independent stop and listener closure. Failed fixtures and diagnostics remain available. These protocol checks do not prove browser trust, standard ports or browser DOM updates. Browser execution is a separate check.
 
 ## Verify the tutorial example
 
