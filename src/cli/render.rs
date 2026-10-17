@@ -166,15 +166,64 @@ pub fn recovered(value: &Value, style: &Style) -> String {
     }
 }
 
-pub fn proxy(value: &Value, style: &Style) -> String {
-    let router = &value["router"];
-    format!(
-        "{} Proxy running ({} mode, HTTPS :{}), Parcela {}\n",
-        style.ok(),
-        cell(&router["front_door"]["mode"]),
-        cell(&router["front_door"]["https"]),
-        cell(&router["version"]),
-    )
+pub fn proxy_status(value: &Value, style: &Style) -> String {
+    let listening = cell(&value["listening"]);
+    let mut text = if value["running"] == true {
+        let already = if value["already_running"] == true {
+            " (already running)"
+        } else {
+            ""
+        };
+        format!(
+            "{} Proxy running{already}: {listening}\n  {:<9}{}\n  {:<9}{} (Caddy {})\n  {:<9}Parcela {}\n",
+            style.ok(),
+            "urls",
+            style.url(&cell(&value["url"])),
+            "pid",
+            cell(&value["pid"]),
+            cell(&value["caddy_pid"]),
+            "version",
+            cell(&value["version"]),
+        )
+    } else {
+        let mut text = format!(
+            "{} Proxy not running; it will serve {listening}\n  {:<9}{}\n",
+            style.bad(),
+            "urls",
+            style.url(&cell(&value["url"])),
+        );
+        if let Some(error) = value["error"].as_str() {
+            text.push_str(&format!("  {:<9}{error}\n", "problem"));
+        }
+        text.push_str(&format!(
+            "  Start it with {}; {} starts it automatically.\n",
+            style.bold("parcela proxy start"),
+            style.bold("parcela up")
+        ));
+        text
+    };
+    text.push_str(&format!("  {:<9}{}\n", "log", cell(&value["log"])));
+    if let Some(warning) = value["version_warning"].as_str() {
+        text.push_str(&format!("  {} {warning}\n", style.bad()));
+    }
+    if value["front_door"]["mode"] == "port" {
+        text.push_str(&format!(
+            "  {}\n",
+            style.dim("Run `parcela setup` once for URLs without a port.")
+        ));
+    }
+    text
+}
+
+pub fn proxy_stopped(value: &Value, style: &Style) -> String {
+    if value["stopped"] == true {
+        format!(
+            "{} Stopped the Parcela proxy. Services keep running without URLs until it starts again.\n",
+            style.ok()
+        )
+    } else {
+        format!("{} The Parcela proxy was not running\n", style.ok())
+    }
 }
 
 pub fn discover(value: &Value, _style: &Style) -> String {

@@ -1,5 +1,5 @@
 use super::{
-    args::{Cli, Command, ConfigCommand, Global, ProxyCommand, WorkspaceCommand},
+    args::{Cli, Command, ConfigCommand, Global, WorkspaceCommand},
     output::{Output, status_diagnostics},
     render,
 };
@@ -154,14 +154,6 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
                 _ => unreachable!(),
             }
         }
-        Command::Proxy {
-            command: ProxyCommand::Status,
-        } => {
-            let state = state_dir(cli.state_dir)?;
-            let router = parcela::router::current(&state)?;
-            let result = serde_json::json!({"router":router,"owned_admin_verified":true,"browser_trust_verified":false});
-            out.emit(&result, |style| render::proxy(&result, style))
-        }
         Command::Workspace {
             command: WorkspaceCommand::Discover,
         } => {
@@ -221,13 +213,6 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             out.emit(&result, |style| render::context(&result, style))
         }
         _ => bail!("runtime command reached inspection dispatcher"),
-    }
-}
-/// An explicit `--port` is a port profile; otherwise the saved profile or the default.
-fn requested_front_door(state: &Path, port: Option<u16>) -> Result<FrontDoor> {
-    match port {
-        Some(https) => Ok(FrontDoor::Port { https }),
-        None => FrontDoor::load(state),
     }
 }
 /// `parcela` alone: status inside a started checkout, otherwise the next command to run.
@@ -332,14 +317,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
     };
     let restarting = matches!(cli.command, Command::Restart { .. });
     match cli.command {
-        Command::Proxy {
-            command: ProxyCommand::Run { listen },
-        } => {
-            let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, true)?.context("cannot create the registry")?;
-            let front_door = requested_front_door(registry.state_path(), listen.port)?;
-            parcela::router::run(&registry, &listen.caddy, front_door)
-        }
+        Command::Proxy { command } => super::proxy::run(&state_dir(cli.state_dir)?, command, out),
         Command::Run {
             backend_port,
             readiness_timeout,

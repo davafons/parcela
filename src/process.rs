@@ -253,22 +253,22 @@ pub fn backend_address(port: u16) -> Result<SocketAddr> {
     Ok(SocketAddr::new(ip, port))
 }
 
-/// The first visible process listening on `port`, as (pid, command name).
-pub fn port_holder(port: u16) -> Option<(u32, String)> {
-    let output = Command::new(lsof())
+/// Who listens on `port`, for messages: "caddy (pid 123)", or "another process" when lsof
+/// cannot see it.
+pub fn port_holder(port: u16) -> String {
+    let Ok(output) = Command::new(lsof())
         .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"])
         .output()
-        .ok()?;
+    else {
+        return "another process".into();
+    };
     let text = String::from_utf8_lossy(&output.stdout);
-    let pid = text
-        .lines()
-        .find_map(|line| line.strip_prefix('p')?.parse().ok())?;
-    let command = text
-        .lines()
-        .find_map(|line| line.strip_prefix('c'))
-        .unwrap_or("unknown")
-        .to_owned();
-    Some((pid, command))
+    let pid = text.lines().find_map(|line| line.strip_prefix('p'));
+    let command = text.lines().find_map(|line| line.strip_prefix('c'));
+    match (pid, command) {
+        (Some(pid), Some(command)) => format!("{command} (pid {pid})"),
+        _ => "another process".into(),
+    }
 }
 fn lsof() -> &'static str {
     if std::path::Path::new("/usr/sbin/lsof").exists() {

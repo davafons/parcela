@@ -2,12 +2,22 @@ use serde_json::{Value, json};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path, process::Command};
 use tempfile::TempDir;
 
-fn doctor(path: &Path, state: &Path) -> (Option<i32>, Value) {
+/// A port nothing listens on, so the stopped proxy reads as startable.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn doctor(path: &Path, state: &Path, port: u16) -> (Option<i32>, Value) {
     let output = Command::new(env!("CARGO_BIN_EXE_parcela"))
         .arg("--path")
         .arg(path)
         .arg("--state-dir")
         .arg(state)
+        .env("PARCELA_HTTPS_PORT", port.to_string())
         .args([
             "doctor",
             "--caddy",
@@ -36,7 +46,8 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
     let t = TempDir::new().unwrap();
     let path = t.path().canonicalize().unwrap();
     let state = path.join("state");
-    let (code, report) = doctor(&path, &state);
+    let port = free_port();
+    let (code, report) = doctor(&path, &state, port);
     assert_eq!(code, Some(1));
     assert_eq!(report["ready"], false);
     let names: Vec<&str> = report["checks"]
@@ -74,13 +85,16 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
         check(&report, "state"),
         &json!({"name": "state", "ok": true, "detail": format!("{} will be created on first parcela up", state.display()), "fix": null})
     );
-    assert_eq!(check(&report, "proxy")["ok"], false);
+    assert_eq!(
+        check(&report, "proxy"),
+        &json!({"name": "proxy", "ok": true, "detail": format!("not running; parcela up starts it on HTTPS on :{port}"), "fix": null})
+    );
     assert!(!state.exists());
 
     fs::write(path.join("parcela.yaml"), "web: bin/dev\n").unwrap();
     fs::create_dir(&state).unwrap();
     fs::set_permissions(&state, fs::Permissions::from_mode(0o755)).unwrap();
-    let (_, report) = doctor(&path, &state);
+    let (_, report) = doctor(&path, &state, port);
     assert_eq!(check(&report, "config")["ok"], true);
     assert_eq!(
         check(&report, "state")["fix"],

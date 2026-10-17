@@ -374,6 +374,8 @@ pub fn run(registry: &Registry, binary: &str, front_door: FrontDoor) -> Result<i
         crate::process::Identity::read(child.as_ref().context("proxy child missing")?.id())?
             .context("proxy birth identity unavailable")?
     };
+    // Saved before router.json, which is what makes this proxy read as running.
+    front_door.save(state)?;
     private::write_json(
         &directory.join("owner.json"),
         &ProxyEvidence {
@@ -386,7 +388,6 @@ pub fn run(registry: &Registry, binary: &str, front_door: FrontDoor) -> Result<i
     )?;
     private::write_json(&directory.join("router.json"), &router)?;
     private::write_json(&directory.join("loaded.json"), &config)?;
-    front_door.save(state)?;
     drop(_update);
     eprintln!(
         "parcela: Caddy {backend} serving {} ({}); CA trust unchanged",
@@ -434,16 +435,13 @@ pub(crate) struct ProxyEvidence {
 }
 
 /// Refuse a busy port, naming who holds it. Parcela never takes a listener over or falls back.
-fn probe_listener(port: u16) -> Result<()> {
+pub fn probe_listener(port: u16) -> Result<()> {
     if TcpListener::bind(("127.0.0.1", port)).is_ok() {
         return Ok(());
     }
-    let holder = crate::process::port_holder(port).map_or_else(
-        || "another process".to_owned(),
-        |(pid, command)| format!("{command} (pid {pid})"),
-    );
     anyhow::bail!(
-        "port {port} is already in use by {holder}; choose another port with `parcela proxy start --port <n>`"
+        "port {port} is already in use by {}; choose another port with `parcela proxy start --port <n>`",
+        crate::process::port_holder(port)
     )
 }
 fn stop_proxy(
@@ -456,15 +454,23 @@ fn stop_proxy(
         return Ok(exit_code(child.stop(signal)?));
     }
     let peer = peer.context("proxy identity missing")?;
-    ensure!(peer.alive(), "owned Caddy identity unavailable");
-    let router = current(state)?;
-    verify(state, &router)?;
+    stop_caddy(state, &current(state)?, peer)?;
+    Ok(0)
+}
+/// Ask the owned Caddy to exit through its private admin socket, then wait until it is gone.
+pub(crate) fn stop_caddy(
+    state: &Path,
+    router: &Router,
+    caddy: &crate::process::Identity,
+) -> Result<()> {
+    ensure!(caddy.alive(), "owned Caddy identity unavailable");
+    verify(state, router)?;
     let (status, _) = http::admin(&socket(state)?, "POST", "/stop", &[])?;
     ensure!(status == 200, "owned Caddy rejected stop");
     let deadline = Instant::now() + Duration::from_secs(10);
-    while peer.alive() {
+    while caddy.alive() {
         ensure!(Instant::now() < deadline, "owned Caddy stop incomplete");
         thread::sleep(Duration::from_millis(50));
     }
-    Ok(0)
+    Ok(())
 }

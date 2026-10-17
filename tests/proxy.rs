@@ -1,0 +1,261 @@
+//! The background proxy, driven through the CLI against real Caddy on explicit high ports.
+use serde_json::{Value, json};
+use std::{
+    fs,
+    net::TcpListener,
+    path::{Path, PathBuf},
+    process::{Command, Output},
+};
+use tempfile::TempDir;
+
+fn caddy() -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join("caddy"))
+        .find(|candidate| candidate.is_file())
+}
+
+fn free_port() -> u16 {
+    TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn cli(state: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(state)
+        .env_remove("PARCELA_HTTPS_PORT")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+fn json_of(output: &Output) -> Value {
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "{error}: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn alive(pid: u64) -> bool {
+    // SAFETY: signal 0 only checks that the PID exists.
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+/// Stops whatever proxy the test started, even when an assertion fails.
+struct Proxy {
+    _t: TempDir,
+    state: PathBuf,
+}
+impl Proxy {
+    fn new() -> Self {
+        let t = TempDir::new().unwrap();
+        let state = t.path().join("state");
+        Self { _t: t, state }
+    }
+}
+impl Drop for Proxy {
+    fn drop(&mut self) {
+        cli(&self.state, &["proxy", "stop"]);
+    }
+}
+
+#[test]
+fn the_saved_profile_beats_the_default_and_parcela_https_port_only_replaces_the_default() {
+    let t = TempDir::new().unwrap();
+    let state = t.path().join("state");
+    let status = cli(&state, &["--json", "proxy", "status"]);
+    assert_eq!(status.status.code(), Some(1));
+    assert_eq!(
+        json_of(&status)["front_door"],
+        json!({"mode": "port", "https": 1355})
+    );
+    let overridden = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(&state)
+        .env("PARCELA_HTTPS_PORT", "4433")
+        .args(["--json", "proxy", "status"])
+        .output()
+        .unwrap();
+    assert_eq!(json_of(&overridden)["url"], "https://<name>.localhost:4433");
+    assert!(!state.exists(), "status creates no state");
+
+    parcela::frontdoor::FrontDoor::Port { https: 2000 }
+        .save(&state)
+        .unwrap();
+    let saved = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(&state)
+        .env("PARCELA_HTTPS_PORT", "4433")
+        .args(["--json", "proxy", "status"])
+        .output()
+        .unwrap();
+    assert_eq!(json_of(&saved)["url"], "https://<name>.localhost:2000");
+}
+
+#[test]
+fn proxy_start_runs_in_the_background_until_proxy_stop() {
+    let Some(caddy) = caddy() else {
+        eprintln!("skipped: caddy is not on PATH");
+        return;
+    };
+    let proxy = Proxy::new();
+    let port = free_port();
+    let caddy = caddy.to_str().unwrap();
+    let started = cli(
+        &proxy.state,
+        &[
+            "--json",
+            "proxy",
+            "start",
+            "--port",
+            &port.to_string(),
+            "--caddy",
+            caddy,
+        ],
+    );
+    assert!(started.status.success(), "{}", stderr(&started));
+    let started = json_of(&started);
+    assert_eq!(started["running"], true);
+    assert_eq!(started["already_running"], false);
+    assert_eq!(
+        started["front_door"],
+        json!({"mode": "port", "https": port})
+    );
+    assert_eq!(started["url"], format!("https://<name>.localhost:{port}"));
+    assert_eq!(started["version"], env!("CARGO_PKG_VERSION"));
+    let pid = started["pid"].as_u64().unwrap();
+    let caddy_pid = started["caddy_pid"].as_u64().unwrap();
+    assert!(alive(pid) && alive(caddy_pid));
+    assert_eq!(
+        fs::read_to_string(proxy.state.join("proxy/frontdoor.json"))
+            .map(|text| serde_json::from_str::<Value>(&text).unwrap())
+            .unwrap(),
+        json!({"mode": "port", "https": port})
+    );
+    assert!(
+        TcpListener::bind(("127.0.0.1", port)).is_err(),
+        "Caddy listens on the chosen port"
+    );
+
+    let status = cli(&proxy.state, &["--json", "proxy", "status"]);
+    assert!(status.status.success());
+    assert_eq!(json_of(&status)["pid"], pid);
+
+    let again = json_of(&cli(&proxy.state, &["--json", "proxy", "start"]));
+    assert_eq!(again["already_running"], true);
+    assert_eq!(again["pid"], pid);
+
+    let other = free_port();
+    let conflict = cli(
+        &proxy.state,
+        &["proxy", "start", "--port", &other.to_string()],
+    );
+    assert!(!conflict.status.success());
+    assert_eq!(
+        stderr(&conflict),
+        format!(
+            "parcela: the proxy is already running with HTTPS on :{port}; switch with `parcela proxy restart --port {other}`\n"
+        )
+    );
+
+    let stopped = json_of(&cli(&proxy.state, &["--json", "proxy", "stop"]));
+    assert_eq!(stopped["stopped"], true);
+    assert!(!alive(pid) && !alive(caddy_pid));
+    assert_eq!(
+        cli(&proxy.state, &["proxy", "status"]).status.code(),
+        Some(1)
+    );
+    assert_eq!(
+        json_of(&cli(&proxy.state, &["--json", "proxy", "stop"]))["stopped"],
+        false
+    );
+}
+
+#[test]
+fn a_busy_port_fails_naming_its_holder_and_keeps_the_saved_profile() {
+    let Some(caddy) = caddy() else {
+        eprintln!("skipped: caddy is not on PATH");
+        return;
+    };
+    let proxy = Proxy::new();
+    let foreign = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = foreign.local_addr().unwrap().port();
+    let failed = cli(
+        &proxy.state,
+        &[
+            "proxy",
+            "start",
+            "--port",
+            &port.to_string(),
+            "--caddy",
+            caddy.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(failed.status.code(), Some(1));
+    let message = stderr(&failed);
+    assert!(
+        message.starts_with(&format!(
+            "parcela: the proxy did not start: port {port} is already in use by "
+        )) && message.ends_with("; choose another port with `parcela proxy start --port <n>`\n"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&format!("(pid {})", std::process::id())),
+        "{message}"
+    );
+    assert!(!proxy.state.join("proxy/frontdoor.json").exists());
+    assert_eq!(foreign.local_addr().unwrap().port(), port);
+}
+
+#[test]
+fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
+    let Some(caddy) = caddy() else {
+        eprintln!("skipped: caddy is not on PATH");
+        return;
+    };
+    let proxy = Proxy::new();
+    let port = free_port().to_string();
+    let caddy = caddy.to_str().unwrap();
+    assert!(
+        cli(
+            &proxy.state,
+            &["proxy", "start", "--port", &port, "--caddy", caddy]
+        )
+        .status
+        .success()
+    );
+    let record = proxy.state.join("proxy/router.json");
+    let mut router: Value = serde_json::from_str(&fs::read_to_string(&record).unwrap()).unwrap();
+    router["version"] = json!("0.0.1");
+    parcela::private::write_json(&record, &router).unwrap();
+
+    let warning = format!(
+        "the running proxy is from Parcela 0.0.1, this is {}; run `parcela proxy restart` to update it",
+        env!("CARGO_PKG_VERSION")
+    );
+    let status = json_of(&cli(&proxy.state, &["--json", "proxy", "status"]));
+    assert_eq!(status["version_warning"], warning);
+    let start = cli(&proxy.state, &["--json", "proxy", "start"]);
+    assert!(start.status.success());
+    assert_eq!(stderr(&start), format!("parcela: {warning}\n"));
+
+    let restarted = cli(
+        &proxy.state,
+        &["--json", "proxy", "restart", "--caddy", caddy],
+    );
+    assert!(restarted.status.success(), "{}", stderr(&restarted));
+    let restarted = json_of(&restarted);
+    assert_eq!(restarted["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(restarted["version_warning"], Value::Null);
+    assert_ne!(restarted["pid"], status["pid"]);
+}

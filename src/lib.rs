@@ -9,6 +9,7 @@ pub mod lifecycle;
 pub mod owner;
 pub mod private;
 pub mod process;
+pub mod proxy;
 pub mod registry;
 pub mod router;
 pub mod runtime;

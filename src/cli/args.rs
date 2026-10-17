@@ -161,7 +161,7 @@ pub enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Run the HTTPS proxy, or check it.
+    /// Start, stop or check the HTTPS proxy that serves every environment's URL.
     Proxy {
         #[command(subcommand)]
         command: ProxyCommand,
@@ -212,14 +212,26 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum ProxyCommand {
+    /// Start the HTTPS proxy in the background. parcela up does this when it isn't running.
+    Start {
+        #[command(flatten)]
+        listen: Listen,
+    },
+    /// Stop the proxy. Running services keep running but lose their URLs until it starts again.
+    Stop,
+    /// Stop the proxy and start it again, for example after upgrading Parcela or to change --port.
+    Restart {
+        #[command(flatten)]
+        listen: Listen,
+    },
+    /// Show whether the proxy is running, where it listens and which Parcela started it.
+    Status,
     /// Run the proxy in the foreground, for debugging or a boot service. Never uses sudo or trusts a CA.
     #[command(hide = true)]
     Run {
         #[command(flatten)]
         listen: Listen,
     },
-    /// Show whether the proxy is running, where it listens and which Parcela started it.
-    Status,
 }
 
 #[derive(clap::Args)]

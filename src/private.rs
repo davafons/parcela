@@ -82,7 +82,10 @@ impl Lock {
         Err(error.into())
     }
     pub fn wait(path: &Path) -> Result<Self> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        Self::wait_for(path, std::time::Duration::from_secs(5))
+    }
+    pub fn wait_for(path: &Path, timeout: std::time::Duration) -> Result<Self> {
+        let deadline = std::time::Instant::now() + timeout;
         loop {
             match Self::acquire(path) {
                 Ok(lock) => return Ok(lock),

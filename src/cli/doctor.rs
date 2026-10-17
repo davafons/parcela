@@ -1,6 +1,10 @@
 use super::output::Output;
 use anyhow::Result;
-use parcela::config::{Manifest, locate};
+use parcela::{
+    config::{Manifest, locate},
+    frontdoor::FrontDoor,
+    proxy::Status,
+};
 use serde::Serialize;
 use std::{
     os::unix::fs::MetadataExt,
@@ -161,16 +165,54 @@ fn writable(path: &Path) -> bool {
 }
 
 fn proxy(state: &Path) -> Check {
-    let fix = "start the HTTPS proxy in another terminal: parcela proxy run";
-    let Ok(state) = state.canonicalize() else {
-        return Check::fail("proxy", "not running", fix);
+    let front_door = match FrontDoor::load(state) {
+        Ok(front_door) => front_door,
+        Err(error) => {
+            return Check::fail(
+                "proxy",
+                format!("{error:#}"),
+                format!(
+                    "fix or remove {}, then run parcela proxy start",
+                    state.join("proxy/frontdoor.json").display()
+                ),
+            );
+        }
     };
-    match parcela::router::current(&state) {
-        Ok(router) => Check::pass(
+    match parcela::proxy::status(state) {
+        Ok(Status::Running(router)) => match parcela::proxy::version_warning(&router) {
+            Some(warning) => Check::fail("proxy", warning, "parcela proxy restart"),
+            None => Check::pass(
+                "proxy",
+                format!("running, {}", router.front_door.describe()),
+            ),
+        },
+        Ok(Status::Stopped) => match front_door
+            .listeners()
+            .into_iter()
+            .find(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_err())
+        {
+            None => Check::pass(
+                "proxy",
+                format!(
+                    "not running; parcela up starts it on {}",
+                    front_door.describe()
+                ),
+            ),
+            Some(port) => Check::fail(
+                "proxy",
+                format!(
+                    "not running, and port {port} is in use by {}",
+                    parcela::process::port_holder(port)
+                ),
+                "parcela proxy start --port <n>",
+            ),
+        },
+        Ok(Status::Unhealthy(error)) => Check::fail(
             "proxy",
-            format!("running, {}", router.front_door.describe()),
+            format!("running but not answering: {error:#}"),
+            "parcela proxy restart",
         ),
-        Err(error) => Check::fail("proxy", format!("not running: {:#}", error), fix),
+        Err(error) => Check::fail("proxy", format!("{error:#}"), "parcela proxy start"),
     }
 }
 
