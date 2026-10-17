@@ -1,6 +1,7 @@
 mod args;
 mod commands;
 mod output;
+mod render;
 
 use clap::Parser;
 

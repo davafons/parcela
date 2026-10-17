@@ -1,6 +1,7 @@
 use super::{
     args::{Cli, Command, ConfigCommand, ProxyCommand, WorkspaceCommand},
-    output::{cell, json, print_status_rows},
+    output::{Output, status_diagnostics},
+    render,
 };
 use anyhow::{Context, Result, bail, ensure};
 use parcela::{
@@ -67,32 +68,30 @@ fn startup_registry(
         .context("cannot register checkout; choose --name NAME for a separate preview; existing owners were preserved")?;
     Ok((registry, workspace))
 }
-fn inventory(state: &Path, project: Option<&str>, human: bool) -> Result<()> {
+fn inventory(state: &Path, project: Option<&str>, out: Output) -> Result<()> {
     let mut rows = Vec::new();
     if let Some(registry) = Registry::open(state, false)? {
         for workspace in registry.list(project)? {
             rows.push(lifecycle::status(&registry, &workspace)?);
         }
     }
-    if human {
-        print_status_rows(&rows);
-        Ok(())
-    } else {
-        json(
-            &serde_json::json!({"runtime_verified": !rows.is_empty() && rows.iter().all(|row| row["live_health_verified"] == true), "workspaces": rows}),
-        )
+    if out == Output::Human {
+        status_diagnostics(&rows);
     }
+    out.emit(
+        &serde_json::json!({"runtime_verified": !rows.is_empty() && rows.iter().all(|row| row["live_health_verified"] == true), "workspaces": rows}),
+        |style| render::inventory(&rows, style),
+    )
 }
-fn inspect(cli: Cli) -> Result<()> {
+fn inspect(cli: Cli, out: Output) -> Result<()> {
     match cli.command {
         Command::Config {
             command: ConfigCommand::Check,
         } => {
             let (source, manifest) = project(&cli.path)?;
-            json(
-                &serde_json::json!({"valid": true, "project_id": manifest.project.id, "manifest": source.join("parcela.yaml"),
-                "backend_graph_validated": false, "schema_version": 1}),
-            )
+            let result = serde_json::json!({"valid": true, "project_id": manifest.project.id, "manifest": source.join("parcela.yaml"),
+                "backend_graph_validated": false, "schema_version": 1});
+            out.emit(&result, |style| render::config(&result, style))
         }
         Command::Doctor {
             caddy,
@@ -111,30 +110,29 @@ fn inspect(cli: Cli) -> Result<()> {
                     },
                 }
             };
-            json(&serde_json::json!({
+            let result = serde_json::json!({
                 "implementation":"rust", "planned_architecture":{"http_tls":"managed Caddy","supervision":"managed Process Compose"},
                 "backend_probes":{"caddy":probe(caddy,"version"),"process_compose":probe(process_compose,"version")},
                 "supported":["skill (--skill)","config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, worktree service sets)","task"],
                 "unsupported":["automatic crash reconciliation","control of older ownerless runs","automatic backend installation","privilege/trust setup","sharing","boot service"],
                 "data_isolation_verified":false,"host_configuration_modified":false
-            }))
+            });
+            out.emit(&result, |style| render::fields(&result, style))
         }
         Command::Status { all } => {
             let state = state_dir(cli.state_dir)?;
             if all {
-                inventory(&state, None, cli.human)
+                inventory(&state, None, out)
             } else {
                 let registry = Registry::open(&state, false)?.context(
                     "no registered environment; start the selected checkout with parcela up",
                 )?;
                 let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
                 let status = lifecycle::status(&registry, &workspace)?;
-                if cli.human {
-                    print_status_rows(&[status]);
-                    Ok(())
-                } else {
-                    json(&status)
+                if out == Output::Human {
+                    status_diagnostics(std::slice::from_ref(&status));
                 }
+                out.emit(&status, |style| render::status(&status, style))
             }
         }
         Command::Services | Command::Logs { .. } | Command::Url { .. } => {
@@ -147,23 +145,10 @@ fn inspect(cli: Cli) -> Result<()> {
                 Command::Services => {
                     let result =
                         lifecycle::service_request(&registry, &workspace, Action::Services)?;
-                    if cli.human {
-                        println!("SERVICE\tSTATE\tPID");
-                        for service in result["services"]
-                            .as_array()
-                            .context("invalid backend service list")?
-                        {
-                            println!(
-                                "{}\t{}\t{}",
-                                cell(&service["name"]),
-                                cell(&service["status"]),
-                                cell(&service["pid"])
-                            );
-                        }
-                        Ok(())
-                    } else {
-                        json(&result)
-                    }
+                    result["services"]
+                        .as_array()
+                        .context("invalid backend service list")?;
+                    out.emit(&result, |style| render::services(&result, style))
                 }
                 Command::Logs { service, tail } => {
                     let result = lifecycle::service_request(
@@ -203,9 +188,8 @@ fn inspect(cli: Cli) -> Result<()> {
                 "no registered environment; start the selected checkout with parcela up",
             )?;
             let router = parcela::router::current(registry.state_path())?;
-            json(
-                &serde_json::json!({"router":router,"owned_admin_verified":true,"browser_trust_verified":false}),
-            )
+            let result = serde_json::json!({"router":router,"owned_admin_verified":true,"browser_trust_verified":false});
+            out.emit(&result, |style| render::proxy(&result, style))
         }
         Command::Workspace {
             command: WorkspaceCommand::Discover,
@@ -217,22 +201,8 @@ fn inspect(cli: Cli) -> Result<()> {
             let state = state_dir(cli.state_dir)?;
             let registry = Registry::open(&state, false)?;
             let rows = parcela::discovery::discover(&source, registry.as_ref())?;
-            if cli.human {
-                println!("VCS\tNAME\tREFS\tADOPTED ID\tSOURCE");
-                for row in &rows {
-                    println!(
-                        "{}\t{}\t{}\t{}\t{}",
-                        row.vcs,
-                        cell(&serde_json::json!(row.name)),
-                        cell(&serde_json::json!(row.refs.join(","))),
-                        row.adopted_environment_id.as_deref().unwrap_or("-"),
-                        cell(&serde_json::json!(row.source))
-                    );
-                }
-                Ok(())
-            } else {
-                json(&serde_json::json!({"checkouts": rows, "automatic_adoption": false}))
-            }
+            let result = serde_json::json!({"checkouts": rows, "automatic_adoption": false});
+            out.emit(&result, |style| render::discover(&result, style))
         }
         Command::Workspace {
             command: WorkspaceCommand::List { all },
@@ -248,7 +218,7 @@ fn inspect(cli: Cli) -> Result<()> {
                 manifest
                     .as_ref()
                     .map(|manifest| manifest.project.id.as_str()),
-                cli.human,
+                out,
             )
         }
         Command::Workspace {
@@ -260,7 +230,9 @@ fn inspect(cli: Cli) -> Result<()> {
             let state = state_dir(cli.state_dir)?;
             let mut registry = Registry::open(&state, true)?.context("registry not created")?;
             let workspace = registry.adopt(&manifest, &source, role, &label)?;
-            json(&ResolvedContext::new(&registry, &manifest, workspace)?)
+            let result =
+                serde_json::to_value(ResolvedContext::new(&registry, &manifest, workspace)?)?;
+            out.emit(&result, |style| render::context(&result, style))
         }
         Command::Context
         | Command::Workspace {
@@ -272,12 +244,15 @@ fn inspect(cli: Cli) -> Result<()> {
                 bail!("no registered environment; start the selected checkout with parcela up");
             };
             let workspace = registry.current(&source, &manifest)?;
-            json(&ResolvedContext::new(&registry, &manifest, workspace)?)
+            let result =
+                serde_json::to_value(ResolvedContext::new(&registry, &manifest, workspace)?)?;
+            out.emit(&result, |style| render::context(&result, style))
         }
         _ => bail!("runtime command reached inspection dispatcher"),
     }
 }
 pub fn run(mut cli: Cli) -> Result<i32> {
+    let out = Output::detect(cli.json, cli.human);
     if matches!(cli.command, Command::Skill) {
         use std::io::Write;
         std::io::stdout()
@@ -433,14 +408,15 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 lifecycle::down(&registry, &workspace)?;
             }
             if detach {
-                json(&lifecycle::detached(
+                let result = lifecycle::detached(
                     &registry,
                     &workspace,
                     &process_compose,
                     backend_port,
                     readiness_timeout,
                     &manifest,
-                )?)?;
+                )?;
+                out.emit(&result, |style| render::started(&result, style))?;
                 Ok(0)
             } else {
                 drop(operation);
@@ -459,19 +435,16 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             let existing = Registry::open(&state, false)?.context("no registry")?;
             let workspace = target_workspace(&existing, &cli.path, cli.workspace)?;
             if detach {
-                json(&lifecycle::recover_detached(&existing, &workspace)?)?;
+                let result = lifecycle::recover_detached(&existing, &workspace)?;
+                out.emit(&result, |style| render::recovered(&result, style))?;
             } else {
                 let session = existing
                     .session(&workspace.id)?
                     .context("no native session to recover")?;
                 drop(existing);
                 let mut registry = Registry::open(&state, true)?.context("registry missing")?;
-                json(&parcela::runtime::recover(
-                    &mut registry,
-                    &workspace,
-                    &session,
-                    false,
-                )?)?;
+                let result = parcela::runtime::recover(&mut registry, &workspace, &session, false)?;
+                out.emit(&result, |style| render::recovered(&result, style))?;
             }
             Ok(0)
         }
@@ -481,7 +454,9 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 "no registered environment; start the selected checkout with parcela up",
             )?;
             let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
-            json(&lifecycle::down(&registry, &workspace)?)?;
+            let result = lifecycle::down(&registry, &workspace)?;
+            let name = render::name(&serde_json::to_value(&workspace)?);
+            out.emit(&result, |style| render::down(&result, &name, style))?;
             Ok(0)
         }
         Command::Task { name, args } => {
@@ -492,7 +467,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             parcela::runtime::task(&registry, &manifest, &workspace, &name, &args)
         }
         command => {
-            inspect(Cli { command, ..cli })?;
+            inspect(Cli { command, ..cli }, out)?;
             Ok(0)
         }
     }

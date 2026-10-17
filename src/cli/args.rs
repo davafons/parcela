@@ -17,8 +17,11 @@ pub struct Cli {
     /// Select an adopted environment by UUID instead of a checkout path.
     #[arg(long, global = true, conflicts_with = "path")]
     pub workspace: Option<uuid::Uuid>,
-    /// Print readable status/inventory tables instead of JSON.
+    /// Print JSON results. Default when stdout is not a terminal.
     #[arg(long, global = true)]
+    pub json: bool,
+    /// Accepted for compatibility; human output is the default on a terminal.
+    #[arg(long, global = true, hide = true)]
     pub human: bool,
     #[command(subcommand)]
     pub command: Command,
