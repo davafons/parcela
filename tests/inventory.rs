@@ -10,16 +10,25 @@ use std::{
 };
 use tempfile::TempDir;
 
-fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_parcela"))
+mod common;
+
+fn command(path: &Path, state: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_parcela"));
+    command
         .arg("--path")
         .arg(path)
         .arg("--state-dir")
         .arg(state)
         .env_remove("PARCELA_HTTPS_PORT")
-        .args(args)
-        .output()
-        .unwrap()
+        .args(args);
+    command
+}
+fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
+    command(path, state, args).output().unwrap()
+}
+/// Human output, as printed on a terminal.
+fn human(path: &Path, state: &Path, args: &[&str]) -> String {
+    common::on_terminal(command(path, state, args)).1
 }
 fn json_of(output: &Output) -> Value {
     assert!(
@@ -28,9 +37,6 @@ fn json_of(output: &Output) -> Value {
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).unwrap()
-}
-fn human(output: &Output) -> String {
-    String::from_utf8(output.stdout.clone()).unwrap()
 }
 
 struct Fixture {
@@ -106,7 +112,7 @@ fn ls_lists_every_project_in_one_table() {
     let (review, _) = f.checkout("notes", "notes-review", Role::Preview, "review");
     let (shop, _) = f.checkout("shop", "shop", Role::Primary, "primary");
     assert_eq!(
-        human(&cli(&f.root, &f.state, &["--human", "ls"])),
+        human(&f.root, &f.state, &["ls"]),
         format!(
             "PROJECT  NAME     STATE    URL                                  PATH\n\
              notes    review   stopped  https://review-notes.localhost:1443  {}\n\
@@ -168,9 +174,8 @@ fn rm_prune_forgets_only_stopped_registrations_whose_checkout_is_gone() {
     f.running(&live_id, 47002);
     fs::remove_dir_all(&gone).unwrap();
     fs::remove_dir_all(&live_gone).unwrap();
-    let output = cli(&kept, &f.state, &["--human", "rm", "--prune"]);
+    let text = human(&kept, &f.state, &["rm", "--prune"]);
     let runtime = f.state.canonicalize().unwrap().join("environments");
-    let text = human(&output);
     assert!(
         text.starts_with("✓ Forgot gone (notes); released api-gone-notes.localhost, gone-notes.localhost\n  data kept in "),
         "{text}"
@@ -196,7 +201,7 @@ fn down_all_selects_running_environments_by_project_and_reports_each() {
         json!({"environments": []})
     );
     assert_eq!(
-        human(&cli(&notes, &f.state, &["--human", "down", "--all"])),
+        human(&notes, &f.state, &["down", "--all"]),
         "Nothing is running.\n"
     );
     let rejected = cli(

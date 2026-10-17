@@ -5,6 +5,8 @@ use std::{
 };
 use tempfile::TempDir;
 
+mod common;
+
 fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_parcela"))
         .arg("--path")
@@ -85,9 +87,10 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
             root.display()
         )
     );
-    let bare = cli(&root, &state, &["--human"]);
+    let mut bare = Command::new(env!("CARGO_BIN_EXE_parcela"));
+    bare.arg("--path").arg(&root).arg("--state-dir").arg(&state);
     assert_eq!(
-        String::from_utf8_lossy(&bare.stdout),
+        common::on_terminal(bare).1,
         "No parcela.yaml here. Create one with parcela init, then run parcela up.\nSee parcela --help for every command.\n"
     );
     let app = checkout(&root, "app", "web: bin/web\n");

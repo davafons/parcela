@@ -28,9 +28,6 @@ pub struct Global {
     /// Print JSON. The default when stdout is not a terminal.
     #[arg(long, global = true)]
     pub json: bool,
-    /// Accepted for compatibility; human output is the default on a terminal.
-    #[arg(long, global = true, hide = true)]
-    pub human: bool,
 }
 
 /// A parsed invocation with its command resolved.
@@ -39,7 +36,6 @@ pub struct Cli {
     pub state_dir: Option<PathBuf>,
     pub workspace: Option<uuid::Uuid>,
     pub json: bool,
-    pub human: bool,
     pub command: Command,
 }
 
@@ -50,7 +46,6 @@ impl Cli {
             state_dir: global.state_dir,
             workspace: global.workspace,
             json: global.json,
-            human: global.human,
             command,
         }
     }
@@ -203,6 +198,7 @@ pub enum Command {
         detach: bool,
     },
     /// Print this checkout's environment: URLs, paths and ID.
+    #[command(hide = true)]
     Context,
     /// Register, list and discover checkouts. Never edits source or VCS history.
     Workspace {

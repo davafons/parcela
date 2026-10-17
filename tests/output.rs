@@ -1,3 +1,7 @@
+use parcela::{
+    config::Manifest,
+    registry::{Registry, Role},
+};
 use std::{
     fs,
     path::Path,
@@ -5,27 +9,28 @@ use std::{
 };
 use tempfile::TempDir;
 
+mod common;
+
 const MANIFEST: &str = "version: 1\nproject: {id: output-test, name: demo}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {version: '0.5', processes: {web: {command: echo unused}}}\n";
 
-fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_parcela"))
+fn command(path: &Path, state: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_parcela"));
+    command
         .arg("--path")
         .arg(path)
         .arg("--state-dir")
         .arg(state)
         .args(args)
-        .env_remove("NO_COLOR")
-        .env_remove("PARCELA_HTTPS_PORT")
-        .output()
-        .unwrap()
+        .env_remove("PARCELA_HTTPS_PORT");
+    command
 }
-fn stdout(output: &Output) -> String {
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout.clone()).unwrap()
+fn piped(path: &Path, state: &Path, args: &[&str]) -> Output {
+    command(path, state, args).output().unwrap()
+}
+fn terminal(path: &Path, state: &Path, args: &[&str]) -> String {
+    let (code, text) = common::on_terminal(command(path, state, args));
+    assert_eq!(code, Some(0), "{args:?}: {text}");
+    text
 }
 fn project() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     let t = TempDir::new().unwrap();
@@ -37,53 +42,55 @@ fn project() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
-fn piped_stdout_defaults_to_json_and_json_flag_forces_it() {
+fn piped_stdout_is_json_and_json_flag_forces_it_on_a_terminal() {
     let (_t, path, state) = project();
+    let empty = serde_json::json!({"runtime_verified": false, "workspaces": []});
     for args in [&["status", "--all"][..], &["--json", "status", "--all"]] {
-        let value: serde_json::Value =
-            serde_json::from_str(&stdout(&cli(&path, &state, args))).unwrap();
-        assert_eq!(value["workspaces"], serde_json::json!([]));
+        let output = piped(&path, &state, args);
+        assert!(output.status.success());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+            empty
+        );
     }
-    let forced: serde_json::Value = serde_json::from_str(&stdout(&cli(
-        &path,
-        &state,
-        &["--human", "--json", "status", "--all"],
-    )))
-    .unwrap();
+    let forced = terminal(&path, &state, &["--json", "status", "--all"]);
     assert_eq!(
-        forced,
-        serde_json::json!({"runtime_verified": false, "workspaces": []})
+        serde_json::from_str::<serde_json::Value>(&forced).unwrap(),
+        empty
     );
 }
 
 #[test]
-fn human_output_is_aligned_text_without_color_when_piped() {
+fn the_human_flag_is_gone() {
     let (_t, path, state) = project();
     assert_eq!(
-        stdout(&cli(&path, &state, &["--human", "status", "--all"])),
+        piped(&path, &state, &["--human", "status"]).status.code(),
+        Some(2)
+    );
+}
+
+#[test]
+fn a_terminal_gets_aligned_text() {
+    let (_t, path, state) = project();
+    assert_eq!(
+        terminal(&path, &state, &["status", "--all"]),
         "No environments registered. Start one with parcela up.\n"
     );
-    stdout(&cli(
-        &path,
-        &state,
-        &[
-            "workspace",
-            "adopt",
-            "--role",
-            "primary",
-            "--label",
-            "primary",
-        ],
-    ));
+    let manifest = Manifest::load(&path.join("parcela.yaml")).unwrap();
+    Registry::open(&state, true)
+        .unwrap()
+        .unwrap()
+        .adopt(&manifest, &path, Role::Primary, "primary")
+        .unwrap();
     assert_eq!(
-        stdout(&cli(&path, &state, &["--human", "status", "--all"])),
+        terminal(&path, &state, &["status", "--all"]),
         format!(
             "PROJECT      NAME     STATE    URL                          PATH\noutput-test  primary  stopped  https://demo.localhost:1443  {}\n",
             path.display()
         )
     );
     assert_eq!(
-        stdout(&cli(&path, &state, &["--human", "down"])),
+        terminal(&path, &state, &["down"]),
         "✓ output-test was already stopped\n"
     );
 }

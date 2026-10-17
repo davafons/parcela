@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import pty
 from pathlib import Path
 import signal
 import socket
@@ -18,6 +19,25 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+def on_terminal(argv, timeout=15):
+    """Run argv with stdout on a pseudo-terminal, where Parcela prints human output."""
+    primary, secondary = pty.openpty()
+    try:
+        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=secondary, stderr=subprocess.DEVNULL,
+                                   env={**os.environ, 'NO_COLOR': '1'})
+    finally:
+        os.close(secondary)
+    output = b''
+    try:
+        while chunk := os.read(primary, 65536):
+            output += chunk
+    except OSError:
+        pass
+    finally:
+        os.close(primary)
+    assert process.wait(timeout=timeout) == 0, (argv, output)
+    return output.decode().replace('\r\n', '\n')
 
 def control_socket(runtime):
     return Path(json.loads((runtime / 'context.json').read_text())['sockets']['control'])
@@ -50,6 +70,8 @@ def main():
         def cli(path, *argv, check=True):
             return subprocess.run([str(BINARY), '--path', str(path), '--state-dir', str(state), *argv],
                                   capture_output=True, text=True, check=check, timeout=15)
+        def human(path, *argv):
+            return on_terminal([str(BINARY), '--path', str(path), '--state-dir', str(state), *argv])
         def spawn(path, *argv):
             log = open(root / f'process-{len(children)}.log', 'w+')
             handles.append(log)
@@ -136,7 +158,7 @@ process_compose:
             services = json.loads(cli(copies[2][0], 'services').stdout)['services']
             assert {item['name']: item['status'] for item in services} == {'web': 'Running', 'worker': 'Running'}
             wait_for(lambda: 'cli-worker-ready' in cli(copies[2][0], 'logs', 'worker', '--tail', '10').stdout, [compose])
-            assert 'SERVICE' in cli(copies[2][0], 'services', '--human').stdout
+            assert 'SERVICE' in human(copies[2][0], 'services')
             assert cli(copies[2][0], 'logs', 'unknown', check=False).returncode != 0
             assert cli(copies[1][0], 'restart', '--detach', '--process-compose', args.process_compose, check=False).returncode != 0
             assert preview.poll() is None
@@ -175,7 +197,7 @@ process_compose:
             assert request('compose-live.localhost')['id'] == copies[2][1]
             inventory = json.loads(cli(root, 'status', '--all').stdout)['workspaces']
             assert {row['workspace']['label']: row['state'] for row in inventory} == {'primary': 'stopped', 'auth': 'ready', 'compose': 'ready'}
-            assert 'compose' in cli(root, 'status', '--all', '--human').stdout
+            assert 'compose' in human(root, 'status', '--all')
             selected = subprocess.run([str(BINARY), '--state-dir', str(state), '--workspace', copies[2][1], 'status'],
                                       capture_output=True, text=True, check=True, timeout=15)
             assert json.loads(selected.stdout)['workspace']['id'] == copies[2][1]

@@ -7,7 +7,7 @@ import socket
 import subprocess
 import tempfile
 
-from check_live import BINARY, FIXTURE, free_port, wait_for
+from check_live import BINARY, FIXTURE, free_port, on_terminal, wait_for
 
 LISTENER = FIXTURE.parent / 'port_listener.py'
 
@@ -47,9 +47,9 @@ def main():
         assert {key: environment[key] for key in expected} == expected, environment
         assert environment['DATABASE_URL'] == f"postgres://127.0.0.1:{ports['db']}/app", environment
         assert json.loads(cli(source, 'context').stdout)['ports'] == ports
-        human = cli(source, '--human', 'status').stdout
+        human = on_terminal([str(BINARY), '--path', str(source), '--state-dir', str(state), 'status'])
         assert f"{ports['db']}" in human and 'PARCELA_PORT_VITE_HMR' in human, human
-        assert 'PARCELA_PORT_DB' in cli(source, '--human', 'context').stdout
+        assert 'PARCELA_PORT_DB' in on_terminal([str(BINARY), '--path', str(source), '--state-dir', str(state), 'context'])
         with socket.socket() as probe:
             assert probe.connect_ex(('127.0.0.1', ports['db'])) == 0, 'the stand-in database listens on its leased port'
         endpoints = {endpoint['backend_port'] for endpoint in session['endpoints']} or {session['backend_port']}

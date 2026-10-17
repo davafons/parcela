@@ -10,10 +10,8 @@ pub enum Output {
 }
 
 impl Output {
-    pub fn detect(json: bool, human: bool) -> Self {
-        if json {
-            Self::Json
-        } else if human || std::io::stdout().is_terminal() {
+    pub fn detect(json: bool) -> Self {
+        if !json && std::io::stdout().is_terminal() {
             Self::Human
         } else {
             Self::Json

@@ -208,7 +208,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
 }
 /// `parcela` alone: status inside a started checkout, otherwise the next command to run.
 pub fn bare(global: Global) -> Result<i32> {
-    let out = Output::detect(global.json, global.human);
+    let out = Output::detect(global.json);
     let hint = match project(&global.path) {
         Err(_) => "No parcela.yaml here. Create one with parcela init, then run parcela up.",
         Ok((source, manifest)) => {
@@ -251,7 +251,7 @@ fn print_new_log_lines(log: &Path, start: u64, count: usize) {
     }
 }
 pub fn run(mut cli: Cli) -> Result<i32> {
-    let out = Output::detect(cli.json, cli.human);
+    let out = Output::detect(cli.json);
     if matches!(cli.command, Command::Skill) {
         use std::io::Write;
         std::io::stdout()

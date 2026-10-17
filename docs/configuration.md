@@ -151,7 +151,7 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `run [--name NAME\|--primary] [--backend-port N] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
 | `recover [--detach]` | Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
-| `context` / `workspace inspect` | Planned context; no live-health guarantees |
+| `context` / `workspace inspect` | Hidden from help. Planned context; no live-health guarantees |
 | `workspace adopt --role primary\|preview --label LABEL` | Optional explicit registration; `up` does this automatically |
 | `workspace list [--all]` | This project's registered environments, or every project's |
 | `workspace discover` | Read-only sibling jj/Git checkout paths, revisions, refs and registration IDs; no manifest or registry required |
@@ -173,7 +173,7 @@ The proxy serves the front-door profile saved in `<state>/proxy/frontdoor.json`.
 
 With no saved profile the default is port mode on 1443, or on `PARCELA_HTTPS_PORT` when that is set. `proxy start --port N` and `proxy restart --port N` save a port profile once the proxy answers; a failed start leaves the saved profile unchanged. Listeners must be 1024 or higher; Parcela never binds privileged ports itself. Standard mode needs the profile saved before the proxy starts and checks that port 80 reaches the owned proxy. The proxy runs as a detached `parcela proxy run` (hidden from help, usable in the foreground for debugging or a boot service) with output in `<state>/proxy/proxy.log`. A proxy started by another Parcela version keeps serving, with a warning to run `parcela proxy restart`.
 
-`parcela` with no command prints the current checkout's status when it is registered, and otherwise the next command to run. Rarely needed flags are accepted but hidden from help: `--human`, `doctor --caddy PATH --process-compose PATH`, `--process-compose PATH` on `up` and `restart`, and `--readiness-timeout SEC` on `up`, `restart` and `run`. They default to the binaries on `PATH` and 60 seconds (30 for `run`). `doctor` exits 1 until every check passes.
+`parcela` with no command prints the current checkout's status when it is registered, and otherwise the next command to run. Rarely needed flags are accepted but hidden from help: `doctor --caddy PATH --process-compose PATH`, `--process-compose PATH` on `up` and `restart`, and `--readiness-timeout SEC` on `up`, `restart` and `run`. They default to the binaries on `PATH` and 60 seconds (30 for `run`). `doctor` exits 1 until every check passes.
 
 `--skill` is a long-flag alias for the `skill` subcommand. It runs before workspace lookup and cannot be combined with a lifecycle command. Its output is the bundled `.agents/skills/parcela/SKILL.md`, not generated from the current project. An agent can load this output directly; no global profile installation runs.
 
