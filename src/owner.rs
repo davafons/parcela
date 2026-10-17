@@ -2,7 +2,7 @@ use crate::{
     config::Manifest,
     private,
     process::{self, OwnedChild},
-    registry::{Session, Workspace},
+    registry::{Session, SessionStatus, Workspace},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,18 @@ pub enum Phase {
     Stopping,
     Stopped,
     Interrupted,
+}
+impl Phase {
+    /// The registry status a run in this phase reports.
+    pub fn status(self) -> SessionStatus {
+        match self {
+            Self::Starting => SessionStatus::Starting,
+            Self::Running => SessionStatus::Ready,
+            Self::Stopping => SessionStatus::Stopping,
+            Self::Stopped => SessionStatus::Stopped,
+            Self::Interrupted => SessionStatus::Interrupted,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +129,10 @@ impl Record {
                     process::listener_identity(endpoint.backend_port, self.supervisor.pid)
                         .is_ok_and(|pids| !pids.is_empty())
                 })
+    }
+    /// The recorded owner is gone and `lock` is the very ownership lock it held.
+    pub fn abandoned(&self, lock: &private::Lock) -> Result<bool> {
+        Ok(!self.owner.alive() && lock.identity()? == self.lock)
     }
     pub fn quiescent(&self) -> bool {
         !self.supervisor.alive() && self.processes.iter().all(|process| !process.alive())

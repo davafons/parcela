@@ -3,6 +3,7 @@ use crate::{
     control::{self, Action, EndpointHealth, LiveState, LiveStatus},
     http,
     lifecycle::current_session,
+    owner::{Phase, Record, Supervisor},
     private::{self, Lock},
     process::{Listeners, OwnedChild, Signals, exit_code, version},
     registry::{Endpoint, Registry, Session, SessionStatus, Workspace},
@@ -194,15 +195,7 @@ pub fn run(
             }
             Launch::Compose(binary) => {
                 // Re-checked at launch: scripts/check_recovery.py gates this call to crash before the graph starts.
-                let backend = version(binary, "version")?;
-                ensure!(
-                    backend.contains("v1."),
-                    "unsupported Process Compose version: {backend}"
-                );
-                let graph = manifest
-                    .process_compose
-                    .as_ref()
-                    .context("up requires process_compose native graph")?;
+                let graph = compose_graph(manifest, binary)?;
                 let graph_path = path.join("process-compose.json");
                 private::write_json(&graph_path, graph)?;
                 crate::sockets::prepare(&sockets.compose)?;
@@ -265,8 +258,7 @@ pub fn run(
             return Err(error);
         }
     };
-    let supervisor =
-        crate::owner::Supervisor::retained(child, matches!(launch, Launch::Compose(_)))?;
+    let supervisor = Supervisor::retained(child, matches!(launch, Launch::Compose(_)))?;
     let native = match launch {
         Launch::Compose(binary) => Some(crate::owner::Native {
             binary: resolve_binary(binary, &workspace.source)?
@@ -277,9 +269,9 @@ pub fn run(
         }),
         Launch::Command(_) => None,
     };
-    let record = crate::owner::Record {
+    let record = Record {
         session: session.clone(),
-        phase: crate::owner::Phase::Starting,
+        phase: Phase::Starting,
         owner: crate::process::Identity::read(std::process::id())?
             .context("owner birth unavailable")?,
         lock: owner_lock.identity()?,
@@ -291,9 +283,29 @@ pub fn run(
         diagnostic: None,
     };
     record.save(&path)?;
-    monitor(
-        registry, &workspace, &path, record, supervisor, control, signals, timeout,
-    )
+    Owner {
+        registry,
+        workspace: &workspace,
+        path: &path,
+        record,
+        supervisor,
+        control,
+        signals,
+    }
+    .monitor(timeout)
+}
+
+/// The native graph, once `binary` reports a supported Process Compose version.
+fn compose_graph<'m>(manifest: &'m Manifest, binary: &str) -> Result<&'m serde_json::Value> {
+    let backend = version(binary, "version")?;
+    ensure!(
+        backend.contains("v1."),
+        "unsupported Process Compose version: {backend}"
+    );
+    manifest
+        .process_compose
+        .as_ref()
+        .context("up requires process_compose native graph")
 }
 
 pub fn resolve_binary(binary: &str, source: &std::path::Path) -> Result<PathBuf> {
@@ -371,7 +383,7 @@ pub fn preflight(
                 session.backend_port == port && session.status != SessionStatus::Stopped,
                 "backend endpoint unavailable; foreign listeners are never stopped"
             );
-            let record = crate::owner::Record::read(&path, &session)?;
+            let record = Record::read(&path, &session)?;
             ensure!(
                 record.routable(&path),
                 "backend endpoint is not owned by the current routable generation"
@@ -409,18 +421,7 @@ pub fn preflight(
     )?;
     if let Launch::Compose(binary) = launch {
         let binary = resolve_binary(binary, &workspace.source)?;
-        let backend = version(
-            binary.to_str().context("non-UTF-8 backend path")?,
-            "version",
-        )?;
-        ensure!(
-            backend.contains("v1."),
-            "unsupported Process Compose version: {backend}"
-        );
-        let graph = manifest
-            .process_compose
-            .as_ref()
-            .context("up requires process_compose native graph")?;
+        let graph = compose_graph(manifest, binary.to_str().context("non-UTF-8 backend path")?)?;
         manifest.check_startable()?;
         ensure!(
             graph
@@ -549,76 +550,64 @@ fn revoke(registry: &Registry) {
     thread::sleep(Duration::from_millis(router::LEASE_MS + 250));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn monitor(
-    registry: &mut Registry,
-    workspace: &Workspace,
-    path: &std::path::Path,
-    mut record: crate::owner::Record,
-    mut supervisor: crate::owner::Supervisor,
+/// The owner of one running generation: its evidence record, supervised child and control socket.
+struct Owner<'a> {
+    registry: &'a mut Registry,
+    workspace: &'a Workspace,
+    path: &'a std::path::Path,
+    record: Record,
+    supervisor: Supervisor,
     control: control::Server,
     signals: Signals,
-    timeout: u64,
-) -> Result<i32> {
-    use crate::owner::Phase;
-    let session = record.session.clone();
-    let endpoints = session.endpoints(&record.manifest.default_service);
-    let mut deadline = Instant::now() + Duration::from_secs(timeout);
-    let mut ready = false;
-    let mut listener = BTreeMap::new();
-    let mut published = None;
-    let mut requested_stop = record.phase == Phase::Stopping;
-    let result = (|| -> Result<i32> {
+}
+impl Owner<'_> {
+    /// Supervise until a stop request, a signal, the supervisor's exit or a failure, then stop
+    /// the graph and record the outcome.
+    fn monitor(mut self, timeout: u64) -> Result<i32> {
+        let mut requested_stop = self.record.phase == Phase::Stopping;
+        let result = self.watch(timeout, &mut requested_stop);
+        self.wind_down(requested_stop)?;
+        result
+    }
+
+    fn enter(&mut self, phase: Phase) -> Result<()> {
+        self.record.phase = phase;
+        self.record.save(self.path)?;
+        self.registry
+            .session_status(&self.record.session, phase.status())
+    }
+
+    fn watch(&mut self, timeout: u64, requested_stop: &mut bool) -> Result<i32> {
+        let endpoints = self
+            .record
+            .session
+            .endpoints(&self.record.manifest.default_service);
+        let mut deadline = Instant::now() + Duration::from_secs(timeout);
+        let mut ready = false;
+        let mut listener = BTreeMap::new();
+        let mut published = None;
         loop {
-            if requested_stop {
+            if *requested_stop {
                 return Ok(0);
             }
-            if let Some(code) = supervisor.poll()? {
+            if let Some(code) = self.supervisor.poll()? {
                 ensure!(
-                    record.native.is_none() || code == 0,
+                    self.record.native.is_none() || code == 0,
                     "native supervisor exited unexpectedly ({code}); graph quiescence is unknown"
                 );
                 return Ok(code);
             }
-            if signals.received() != 0 {
-                requested_stop = true;
-                return Ok(128 + signals.received() as i32);
+            if self.signals.received() != 0 {
+                *requested_stop = true;
+                return Ok(128 + self.signals.received() as i32);
             }
-            record.refresh(path)?;
-            if let Some(pending) = control.receive(&session)? {
-                let response = (|| -> Result<serde_json::Value> {
-                    current_session(registry, &session)?;
-                    match &pending.action {
-                        Action::Status => live_status(
-                            registry,
-                            &session,
-                            supervisor.identity().pid,
-                            &record.manifest,
-                        ),
-                        Action::Stop => {
-                            record.phase = Phase::Stopping;
-                            record.save(path)?;
-                            registry.session_status(&session, SessionStatus::Stopping)?;
-                            requested_stop = true;
-                            Ok(
-                                json!({"stop_accepted":true,"operation_id":session.token,"generation":session.generation}),
-                            )
-                        }
-                        action => {
-                            let native = record
-                                .native
-                                .as_ref()
-                                .context("service inspection requires Process Compose")?;
-                            let env =
-                                session_environment(&record.manifest, workspace, path, &session)?;
-                            compose_read(&native.binary, path, action, &record.manifest, &env)
-                        }
-                    }
-                })();
-                if let Err(error) = pending.reply(&session, response) {
+            self.record.refresh(self.path)?;
+            if let Some(pending) = self.control.receive(&self.record.session)? {
+                let response = self.answer(&pending.action, requested_stop);
+                if let Err(error) = pending.reply(&self.record.session, response) {
                     eprintln!("parcela: owner reply failed: {error:#}");
                 }
-                if requested_stop {
+                if *requested_stop {
                     return Ok(0);
                 }
             }
@@ -628,16 +617,14 @@ fn monitor(
                 .map(|endpoint| {
                     Ok((
                         endpoint.service.clone(),
-                        listeners.owned(endpoint.backend_port, supervisor.identity().pid)?,
+                        listeners.owned(endpoint.backend_port, self.supervisor.identity().pid)?,
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?;
             if ready && observed != listener {
-                record.phase = Phase::Starting;
-                record.save(path)?;
-                registry.session_status(&session, SessionStatus::Starting)?;
-                if let Ok(router) = router::current(registry.state_path()) {
-                    let _ = router::sync(registry, &router);
+                self.enter(Phase::Starting)?;
+                if let Ok(router) = router::current(self.registry.state_path()) {
+                    let _ = router::sync(self.registry, &router);
                 }
                 ready = false;
                 deadline = Instant::now() + Duration::from_secs(timeout);
@@ -651,7 +638,8 @@ fn monitor(
                                 http::readiness(
                                     address,
                                     &endpoint.hostname,
-                                    &record.manifest.services[&endpoint.service].readiness_path,
+                                    &self.record.manifest.services[&endpoint.service]
+                                        .readiness_path,
                                 )
                             })
                             .unwrap_or(false))
@@ -659,38 +647,38 @@ fn monitor(
             listener = observed;
             if healthy != ready {
                 ready = healthy;
-                record.phase = if ready {
+                self.enter(if ready {
                     Phase::Running
                 } else {
                     Phase::Starting
-                };
-                record.save(path)?;
-                registry.session_status(
-                    &session,
-                    if ready {
-                        SessionStatus::Ready
-                    } else {
-                        SessionStatus::Starting
-                    },
-                )?;
+                })?;
                 published = None;
                 if ready {
                     eprint!(
                         "{}",
-                        ready_notice(workspace, &session, &endpoints, &record.manifest)
+                        ready_notice(
+                            self.workspace,
+                            &self.record.session,
+                            &endpoints,
+                            &self.record.manifest
+                        )
                     );
-                    private::write_json(&path.join("last-successful.json"), &record.manifest)?;
+                    private::write_json(
+                        &self.path.join("last-successful.json"),
+                        &self.record.manifest,
+                    )?;
                 }
             }
-            if let Ok(router) = router::current(registry.state_path())
+            if let Ok(router) = router::current(self.registry.state_path())
                 && published.as_ref() != Some(&router.token)
             {
                 if endpoints
                     .iter()
                     .all(|endpoint| router.url(&endpoint.hostname) == endpoint.public_url)
                 {
-                    registry.rebind_router(&session, &router.token)?;
-                    if router::sync(registry, &router).is_ok() {
+                    self.registry
+                        .rebind_router(&self.record.session, &router.token)?;
+                    if router::sync(self.registry, &router).is_ok() {
                         published = Some(router.token);
                     }
                 } else {
@@ -705,84 +693,123 @@ fn monitor(
             );
             thread::sleep(Duration::from_millis(200));
         }
-    })();
-    record.refresh(path)?;
-    if record.native.is_some()
-        && !requested_stop
-        && supervisor.poll()?.is_some_and(|code| code != 0)
-    {
-        record.phase = Phase::Interrupted;
-        record.diagnostic = Some(
-            "native supervisor exited unexpectedly; surviving service ownership is uncertain"
-                .into(),
-        );
-        record.save(path)?;
-        registry.session_status(&session, SessionStatus::Interrupted)?;
-        revoke(registry);
-        anyhow::bail!(
-            "native supervisor exited unexpectedly; lease retained and graph quiescence not claimed"
-        );
     }
-    record.phase = Phase::Stopping;
-    record.save(path)?;
-    registry.session_status(&session, SessionStatus::Stopping)?;
-    revoke(registry);
-    let shutdown = supervisor.shutdown(
-        &record,
-        path,
-        workspace,
-        if signals.received() == 0 {
-            libc::SIGTERM
-        } else {
-            signals.received() as i32
-        },
-    );
-    let deadline = Instant::now() + Duration::from_secs(record.manifest.shutdown_timeout_seconds);
-    while !record.quiescent() && Instant::now() < deadline {
-        let _ = supervisor.poll()?;
-        record.refresh(path)?;
-        if let Some(pending) = control.receive(&session)? {
-            let response = match pending.action {
-                Action::Stop => Ok(
-                    json!({"stop_accepted":true,"operation_id":session.token,"generation":session.generation}),
-                ),
-                Action::Status => live_status(
-                    registry,
-                    &session,
-                    supervisor.identity().pid,
-                    &record.manifest,
-                ),
-                _ => Err(anyhow::anyhow!(
-                    "service inspection unavailable during shutdown"
-                )),
-            };
-            let _ = pending.reply(&session, response);
+
+    /// One control request while the generation runs.
+    fn answer(&mut self, action: &Action, requested_stop: &mut bool) -> Result<serde_json::Value> {
+        current_session(self.registry, &self.record.session)?;
+        match action {
+            Action::Status => live_status(
+                self.registry,
+                &self.record.session,
+                self.supervisor.identity().pid,
+                &self.record.manifest,
+            ),
+            Action::Stop => {
+                self.enter(Phase::Stopping)?;
+                *requested_stop = true;
+                Ok(stop_accepted(&self.record.session))
+            }
+            action => {
+                let native = self
+                    .record
+                    .native
+                    .as_ref()
+                    .context("service inspection requires Process Compose")?;
+                let env = session_environment(
+                    &self.record.manifest,
+                    self.workspace,
+                    self.path,
+                    &self.record.session,
+                )?;
+                compose_read(
+                    &native.binary,
+                    self.path,
+                    action,
+                    &self.record.manifest,
+                    &env,
+                )
+            }
         }
-        thread::sleep(Duration::from_millis(50));
     }
-    let native_exit_verified = record.native.is_none()
-        || match &mut supervisor {
-            crate::owner::Supervisor::Retained { .. } => supervisor.poll()? == Some(0),
-            crate::owner::Supervisor::Peer(_) => shutdown.is_ok(),
+
+    /// Withdraw the routes, stop the graph and record whether it provably stopped.
+    fn wind_down(&mut self, requested_stop: bool) -> Result<()> {
+        self.record.refresh(self.path)?;
+        if self.record.native.is_some()
+            && !requested_stop
+            && self.supervisor.poll()?.is_some_and(|code| code != 0)
+        {
+            self.record.diagnostic = Some(
+                "native supervisor exited unexpectedly; surviving service ownership is uncertain"
+                    .into(),
+            );
+            self.enter(Phase::Interrupted)?;
+            revoke(self.registry);
+            anyhow::bail!(
+                "native supervisor exited unexpectedly; lease retained and graph quiescence not claimed"
+            );
+        }
+        self.enter(Phase::Stopping)?;
+        revoke(self.registry);
+        let signal = match self.signals.received() {
+            0 => libc::SIGTERM,
+            received => received as i32,
         };
-    let complete = record.quiescent() && shutdown.is_ok() && native_exit_verified;
-    if !complete {
-        record.phase = Phase::Interrupted;
-        record.diagnostic =
-            Some("shutdown incomplete; lease retained, native recovery required".into());
-        record.save(path)?;
-        registry.session_status(&session, SessionStatus::Interrupted)?;
-        anyhow::bail!("shutdown incomplete; endpoint lease retained, no saved PID was signaled");
+        let shutdown = self
+            .supervisor
+            .shutdown(&self.record, self.path, self.workspace, signal);
+        let deadline =
+            Instant::now() + Duration::from_secs(self.record.manifest.shutdown_timeout_seconds);
+        while !self.record.quiescent() && Instant::now() < deadline {
+            let _ = self.supervisor.poll()?;
+            self.record.refresh(self.path)?;
+            if let Some(pending) = self.control.receive(&self.record.session)? {
+                let response = match pending.action {
+                    Action::Stop => Ok(stop_accepted(&self.record.session)),
+                    Action::Status => live_status(
+                        self.registry,
+                        &self.record.session,
+                        self.supervisor.identity().pid,
+                        &self.record.manifest,
+                    ),
+                    _ => Err(anyhow::anyhow!(
+                        "service inspection unavailable during shutdown"
+                    )),
+                };
+                let _ = pending.reply(&self.record.session, response);
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let native_exit_verified = self.record.native.is_none()
+            || match self.supervisor {
+                Supervisor::Retained { .. } => self.supervisor.poll()? == Some(0),
+                Supervisor::Peer(_) => shutdown.is_ok(),
+            };
+        let complete = self.record.quiescent() && shutdown.is_ok() && native_exit_verified;
+        if !complete {
+            self.record.diagnostic =
+                Some("shutdown incomplete; lease retained, native recovery required".into());
+            self.enter(Phase::Interrupted)?;
+            anyhow::bail!(
+                "shutdown incomplete; endpoint lease retained, no saved PID was signaled"
+            );
+        }
+        self.record.phase = Phase::Stopped;
+        self.record.save(self.path)?;
+        // Removed before the run reads as stopped, since a new run refuses an existing socket.
+        if let Some(native) = &self.record.native
+            && let Some(identity) = &native.socket
+        {
+            identity.remove_socket(&crate::sockets::environment(self.path)?.compose)?;
+        }
+        self.registry
+            .session_status(&self.record.session, SessionStatus::Stopped)
     }
-    record.phase = Phase::Stopped;
-    record.save(path)?;
-    if let Some(native) = &record.native
-        && let Some(identity) = &native.socket
-    {
-        identity.remove_socket(&crate::sockets::environment(path)?.compose)?;
-    }
-    registry.session_status(&session, SessionStatus::Stopped)?;
-    result
+}
+
+fn stop_accepted(session: &Session) -> serde_json::Value {
+    json!({"stop_accepted":true,"operation_id":session.token,"generation":session.generation})
 }
 
 pub fn recover(
@@ -803,7 +830,7 @@ pub fn recover(
     let path = registry.runtime_path(workspace);
     private::existing_directory(&path)?;
     let sockets = crate::sockets::environment(&path)?;
-    let budget = crate::owner::Record::read(&path, &session)?
+    let budget = Record::read(&path, &session)?
         .manifest
         .shutdown_timeout_seconds;
     let deadline = Instant::now() + Duration::from_secs(budget + 10);
@@ -820,11 +847,9 @@ pub fn recover(
             Instant::now() < deadline,
             "same-generation stop recovery did not complete; ownership retained, inspect owner logs"
         );
-        let record = crate::owner::Record::read(&path, expected)?;
-        if matches!(
-            record.phase,
-            crate::owner::Phase::Starting | crate::owner::Phase::Running
-        ) && record.owner.alive()
+        let record = Record::read(&path, expected)?;
+        if matches!(record.phase, Phase::Starting | Phase::Running)
+            && record.owner.alive()
             && record.control.matches(&sockets.control)
             && record.lock.locked(&path.join("owner.lock"))?
         {
@@ -838,9 +863,9 @@ pub fn recover(
             json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","already_stopped":true}),
         );
     }
-    let mut record = crate::owner::Record::read(&path, &session)?;
+    let mut record = Record::read(&path, &session)?;
     ensure!(
-        !record.owner.alive() && lock.identity()? == record.lock,
+        record.abandoned(&lock)?,
         "original owner or ownership lock is not safely recoverable"
     );
     if converge_crashed(registry, &path, &session, &lock)? {
@@ -856,37 +881,28 @@ pub fn recover(
     record.control = private::Identity::read(&sockets.control)?;
     record.phase = if stop
         || session.status == SessionStatus::Stopping
-        || matches!(
-            record.phase,
-            crate::owner::Phase::Stopping | crate::owner::Phase::Interrupted
-        ) {
-        crate::owner::Phase::Stopping
+        || matches!(record.phase, Phase::Stopping | Phase::Interrupted)
+    {
+        Phase::Stopping
     } else {
-        crate::owner::Phase::Starting
+        Phase::Starting
     };
     record.refresh(&path)?;
     record.save(&path)?;
-    registry.session_status(
-        &session,
-        if record.phase == crate::owner::Phase::Stopping {
-            SessionStatus::Stopping
-        } else {
-            SessionStatus::Starting
-        },
-    )?;
-    let supervisor = crate::owner::Supervisor::Peer(record.supervisor.clone());
+    registry.session_status(&session, record.phase.status())?;
+    let supervisor = Supervisor::Peer(record.supervisor.clone());
     let mut resolved = workspace.clone();
     resolved.generation = session.generation;
-    monitor(
+    Owner {
         registry,
-        &resolved,
-        &path,
+        workspace: &resolved,
+        path: &path,
         record,
         supervisor,
         control,
-        Signals::new()?,
-        60,
-    )?;
+        signals: Signals::new()?,
+    }
+    .monitor(60)?;
     Ok(
         json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","recovered":true}),
     )
@@ -900,13 +916,13 @@ fn converge_crashed(
     session: &Session,
     lock: &Lock,
 ) -> Result<bool> {
-    let Ok(mut record) = crate::owner::Record::read(path, session) else {
+    let Ok(mut record) = Record::read(path, session) else {
         return Ok(false);
     };
-    if record.owner.alive() || lock.identity()? != record.lock || !record.quiescent() {
+    if !record.abandoned(lock)? || !record.quiescent() {
         return Ok(false);
     }
-    record.phase = crate::owner::Phase::Stopped;
+    record.phase = Phase::Stopped;
     record.save(path)?;
     let sockets = crate::sockets::environment(path)?;
     record.control.remove_socket(&sockets.control)?;
