@@ -10,6 +10,7 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::json;
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     collections::{BTreeMap, BTreeSet},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
@@ -240,7 +241,22 @@ pub fn run(
         let control = control::Server::bind(&path)?;
         // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
         drop(probes);
-        let child = OwnedChild::spawn(&mut command)?;
+        let child = match launch {
+            Launch::Compose(_) => {
+                let stderr = path.join("log/process-compose.stderr");
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(&stderr)?;
+                let child = OwnedChild::spawn_with_stderr(&mut command, file)?;
+                forward_stderr(stderr);
+                child
+            }
+            Launch::Command(_) => OwnedChild::spawn(&mut command)?,
+        };
         Ok((workspace, signals, control, child))
     })();
     let (workspace, signals, control, child) = match launched {
@@ -602,6 +618,83 @@ pub fn preflight(
     Ok(())
 }
 
+/// What a person sees on stderr once every service answers: the same words as `up --detach`,
+/// colored only on a terminal without NO_COLOR, and the stop key only on a terminal.
+fn ready_notice(
+    workspace: &Workspace,
+    session: &Session,
+    endpoints: &[Endpoint],
+    manifest: &Manifest,
+) -> String {
+    use std::io::IsTerminal;
+    let terminal = std::io::stderr().is_terminal();
+    let color = terminal && std::env::var_os("NO_COLOR").is_none();
+    let paint = |code: &str, text: &str| {
+        if color {
+            format!("\x1b[{code}m{text}\x1b[0m")
+        } else {
+            text.to_owned()
+        }
+    };
+    let name = match workspace.role {
+        crate::registry::Role::Primary => workspace.project_id.clone(),
+        crate::registry::Role::Preview => {
+            format!("{} ({})", workspace.label, workspace.project_id)
+        }
+    };
+    let mut text = format!(
+        "{} {name} is running at {}\n",
+        paint("32", "✓"),
+        paint("1;36", &session.public_url)
+    );
+    for endpoint in endpoints
+        .iter()
+        .filter(|endpoint| endpoint.service != manifest.default_service)
+    {
+        text.push_str(&format!(
+            "  {:<10}{}\n",
+            endpoint.service,
+            paint("1;36", &endpoint.public_url)
+        ));
+    }
+    if terminal {
+        text.push_str(&format!("  {}\n", paint("2", "Press Ctrl-C to stop")));
+    }
+    text
+}
+
+/// Forward Process Compose's own stderr, which it writes to `file`, minus its debug-level JSON
+/// lines. A file rather than a pipe, so Process Compose never writes to a closed pipe when this
+/// process exits before it.
+fn forward_stderr(file: PathBuf) {
+    thread::spawn(move || {
+        use std::io::{BufRead, Write};
+        let Ok(file) = std::fs::File::open(&file) else {
+            return;
+        };
+        let mut reader = std::io::BufReader::new(file);
+        let mut line = String::new();
+        loop {
+            match reader.read_line(&mut line) {
+                Ok(0) => thread::sleep(Duration::from_millis(100)),
+                Ok(_) if !line.ends_with('\n') => {}
+                Ok(_) => {
+                    if !debug_line(&line) {
+                        let _ = std::io::stderr().write_all(line.as_bytes());
+                    }
+                    line.clear();
+                }
+                Err(_) => return,
+            }
+        }
+    });
+}
+
+/// Process Compose's own debug-level JSON log line, such as its missing config home notice.
+fn debug_line(line: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(line).is_ok_and(|value| value["level"] == "debug")
+}
+
 fn revoke(registry: &Registry) {
     if let Ok(router) = router::current(registry.state_path())
         && router::sync(registry, &router).is_ok()
@@ -732,19 +825,10 @@ fn monitor(
                 )?;
                 published = None;
                 if ready {
-                    eprintln!(
-                        "parcela: ready {} (generation {}, routing-only; data isolation requires project bindings)",
-                        session.public_url, session.generation
+                    eprint!(
+                        "{}",
+                        ready_notice(workspace, &session, &endpoints, &record.manifest)
                     );
-                    for endpoint in endpoints
-                        .iter()
-                        .filter(|endpoint| endpoint.service != record.manifest.default_service)
-                    {
-                        eprintln!(
-                            "parcela: service {} ready {}",
-                            endpoint.service, endpoint.public_url
-                        );
-                    }
                     private::write_json(&path.join("last-successful.json"), &record.manifest)?;
                 }
             }
@@ -1228,6 +1312,20 @@ mod tests {
         let port = probe.local_addr().unwrap().port();
         assert!(BACKEND_PORTS.contains(&port) && port % 2 == 1, "{port}");
         assert!(probe.local_addr().unwrap().ip().is_loopback());
+    }
+
+    #[test]
+    fn only_process_compose_debug_json_is_dropped() {
+        assert!(debug_line(
+            "{\"level\":\"debug\",\"message\":\"Path not found for process compose config home\"}\n"
+        ));
+        for kept in [
+            "{\"level\":\"error\",\"message\":\"process web failed\"}\n",
+            "debug: plain text is never dropped\n",
+            "{\"level\":\"debug\"\n",
+        ] {
+            assert!(!debug_line(kept), "{kept}");
+        }
     }
 
     #[test]

@@ -52,11 +52,14 @@ pub struct OwnedChild {
 }
 impl OwnedChild {
     pub fn spawn(command: &mut Command) -> Result<Self> {
+        Self::spawn_with_stderr(command, Stdio::inherit())
+    }
+    pub fn spawn_with_stderr(command: &mut Command, stderr: impl Into<Stdio>) -> Result<Self> {
         command
             .process_group(0)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
+            .stderr(stderr);
         Ok(Self {
             child: command.spawn().context("launch foreground child")?,
             ended: false,
