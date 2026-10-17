@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `parcela status` lists each service and worker process; `parcela services` is removed.
+- `parcela ls` also shows this project's jj workspaces and Git worktrees that were never started, with the URL they would get; the `workspace` commands are removed.
+- `parcela doctor` reports the same configuration error as `up`; `parcela config check` is removed.
+- `parcela up` takes back control of services left running after Parcela's supervising process died. `recover` and `context` are hidden.
+- Foreground `up` prints `✓ <name> is running at <url>` and no longer shows Process Compose debug lines.
+- `--human` is removed; text is the default on a terminal.
+
+### Fixed
+
+- Two simultaneous first `parcela up` runs no longer fail with "unsupported registry schema 0".
+
+### Removed
+
+- `scripts/setup_macos.py` and the Shirabe acceptance harness.
+
 ## 0.1.0 - 2026-10-17
 
 First release. Run every checkout of a project as its own local environment, at its own HTTPS URL, in parallel.
