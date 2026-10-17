@@ -3,7 +3,7 @@ use super::{
     output::{Output, status_diagnostics},
     render,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use parcela::{
     config::{Manifest, locate},
     context::ResolvedContext,
@@ -41,21 +41,30 @@ pub(super) fn project(path: &Path) -> Result<(PathBuf, Manifest)> {
     let manifest = Manifest::load(&source.join("parcela.yaml"))?;
     Ok((source, manifest))
 }
+/// The environment `--workspace ID` names, else the one registered for the checkout at `path`.
 pub(super) fn target_workspace(
     registry: &Registry,
     path: &Path,
     id: Option<uuid::Uuid>,
-) -> Result<parcela::registry::Workspace> {
-    if let Some(id) = id {
-        registry
-            .list(None)?
-            .into_iter()
-            .find(|workspace| workspace.id == id.to_string())
-            .context("unknown environment ID; list environments with parcela ls")
-    } else {
-        let (source, manifest) = project(path)?;
-        registry.current(&source, &manifest)
+) -> Result<Workspace> {
+    match id {
+        Some(id) => by_id(registry, id),
+        None => {
+            let (source, manifest) = project(path)?;
+            registry.current(&source, &manifest)
+        }
     }
+}
+fn by_id(registry: &Registry, id: uuid::Uuid) -> Result<Workspace> {
+    registry
+        .list(None)?
+        .into_iter()
+        .find(|workspace| workspace.id == id.to_string())
+        .context("unknown environment ID; list environments with parcela ls")
+}
+/// Open the registry for writing, which creates it on first use.
+fn writable(state: &Path) -> Result<Registry> {
+    Registry::open(state, true)?.context(NOT_STARTED)
 }
 fn startup_registry(
     state: &Path,
@@ -66,75 +75,9 @@ fn startup_registry(
     let existing = Registry::open(state, false)?;
     let identity = request.resolve(existing.as_ref(), manifest, source)?;
     drop(existing);
-    let mut registry = Registry::open(state, true)?
-        .context("no environments are registered yet; start one with parcela up")?;
+    let mut registry = writable(state)?;
     let workspace = registry.adopt(manifest, source, identity.role, &identity.label)?;
     Ok((registry, workspace))
-}
-fn inspect(cli: Cli, out: Output) -> Result<()> {
-    match cli.command {
-        Command::Status { all } => {
-            let state = state_dir(cli.state_dir)?;
-            if all {
-                super::inventory::list(&state, &cli.path, out)
-            } else {
-                let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-                let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
-                let status = lifecycle::status_with_processes(&registry, &workspace)?;
-                if out == Output::Human {
-                    status_diagnostics(std::slice::from_ref(&status));
-                }
-                out.emit(&status, |style| render::status(&status, style))
-            }
-        }
-        Command::Logs { .. } | Command::Url { .. } => {
-            let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-            let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
-            match cli.command {
-                Command::Logs { service, tail } => {
-                    let result = lifecycle::service_request(
-                        &registry,
-                        &workspace,
-                        Action::Logs {
-                            service,
-                            tail: tail as usize,
-                        },
-                    )?;
-                    use std::io::Write;
-                    std::io::stdout().lock().write_all(
-                        result["logs"]
-                            .as_str()
-                            .context("invalid backend log response")?
-                            .as_bytes(),
-                    )?;
-                    Ok(())
-                }
-                Command::Url { service } => {
-                    let url = if let Some(service) = service {
-                        lifecycle::service_url(&registry, &workspace, &service)?
-                    } else {
-                        lifecycle::url(&registry, &workspace)?
-                    };
-                    println!("{url}");
-                    Ok(())
-                }
-                _ => unreachable!(),
-            }
-        }
-        Command::Context => {
-            let (source, manifest) = project(&cli.path)?;
-            let state = state_dir(cli.state_dir)?;
-            let Some(registry) = Registry::open(&state, false)? else {
-                bail!(NOT_STARTED);
-            };
-            let workspace = registry.current(&source, &manifest)?;
-            let result =
-                serde_json::to_value(ResolvedContext::new(&registry, &manifest, workspace)?)?;
-            out.emit(&result, |style| render::context(&result, style))
-        }
-        _ => bail!("runtime command reached inspection dispatcher"),
-    }
 }
 /// `parcela` alone: status inside a started checkout, otherwise the next command to run.
 pub fn bare(global: Global) -> Result<i32> {
@@ -189,67 +132,57 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             .write_all(include_bytes!("../../.agents/skills/parcela/SKILL.md"))?;
         return Ok(0);
     }
-    if let Command::Init { name, command } = &cli.command {
-        let front_door = FrontDoor::load(&state_dir(cli.state_dir.clone())?)?;
-        super::init::run(
-            &cli.path,
-            name.as_deref(),
-            command.as_deref(),
-            front_door,
-            out,
-        )?;
-        return Ok(0);
-    }
-    if let Command::Doctor {
-        caddy,
-        process_compose,
-    } = &cli.command
+    let state = state_dir(cli.state_dir)?;
+    if let Some(id) = cli.workspace
+        && !matches!(cli.command, Command::Init { .. } | Command::Doctor { .. })
     {
-        let state = state_dir(cli.state_dir.clone())?;
-        let ready = super::doctor::run(
-            super::doctor::Probes {
-                path: &cli.path,
-                state: &state,
-                caddy: caddy.as_deref(),
-                process_compose: process_compose.as_deref(),
-            },
-            out,
-        )?;
-        return Ok(if ready { 0 } else { 1 });
-    }
-    if let Some(id) = cli.workspace {
-        let state = state_dir(cli.state_dir.clone())?;
         let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-        cli.path = registry
-            .list(None)?
-            .into_iter()
-            .find(|workspace| workspace.id == id.to_string())
-            .context("unknown environment ID; list environments with parcela ls")?
-            .source;
+        cli.path = by_id(&registry, id)?.source;
     }
-    let request = match &cli.command {
-        Command::Up { name, primary, .. } | Command::Run { name, primary, .. } => {
-            startup::Request {
-                name: name.clone(),
-                primary: *primary,
-            }
-        }
-        _ => startup::Request::default(),
+    let reader = || -> Result<(Registry, Workspace)> {
+        let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
+        let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
+        Ok((registry, workspace))
     };
-    let restarting = matches!(cli.command, Command::Restart { .. });
     match cli.command {
-        Command::Proxy { command } => super::proxy::run(&state_dir(cli.state_dir)?, command, out),
-        Command::Trust { print, caddy } => {
-            super::proxy::trust(&state_dir(cli.state_dir)?, print, &caddy)
+        Command::Skill => unreachable!("printed above"),
+        Command::Init { name, command } => {
+            let front_door = FrontDoor::load(&state)?;
+            super::init::run(
+                &cli.path,
+                name.as_deref(),
+                command.as_deref(),
+                front_door,
+                out,
+            )?;
+            Ok(0)
         }
+        Command::Doctor {
+            caddy,
+            process_compose,
+        } => {
+            let ready = super::doctor::run(
+                super::doctor::Probes {
+                    path: &cli.path,
+                    state: &state,
+                    caddy: caddy.as_deref(),
+                    process_compose: process_compose.as_deref(),
+                },
+                out,
+            )?;
+            Ok(if ready { 0 } else { 1 })
+        }
+        Command::Proxy { command } => super::proxy::run(&state, command, out),
+        Command::Trust { print, caddy } => super::proxy::trust(&state, print, &caddy),
         Command::Run {
+            name,
+            primary,
             backend_port,
             readiness_timeout,
             argv,
-            ..
         } => {
             let (source, manifest) = project(&cli.path)?;
-            let state = state_dir(cli.state_dir)?;
+            let request = startup::Request { name, primary };
             let (mut registry, workspace) = startup_registry(&state, &source, &manifest, &request)?;
             parcela::runtime::run(
                 &mut registry,
@@ -261,161 +194,59 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             )
         }
         Command::Up {
+            name,
+            primary,
             process_compose,
             backend_port,
             readiness_timeout,
             detach,
             launch_file,
-            ..
-        }
-        | Command::Restart {
+        } => start(
+            &state,
+            &cli.path,
+            Start {
+                request: startup::Request { name, primary },
+                restart: false,
+                process_compose,
+                backend_port,
+                readiness_timeout,
+                detach,
+                launch_file,
+            },
+            out,
+        ),
+        Command::Restart {
             process_compose,
             backend_port,
             readiness_timeout,
             detach,
             launch_file,
-        } => {
-            let restart = restarting;
-            let snapshot: Option<lifecycle::LaunchSnapshot> = launch_file
-                .as_ref()
-                .map(|path| parcela::private::read_json(path))
-                .transpose()?;
-            let (source, manifest) = if let Some(snapshot) = &snapshot {
-                ensure!(
-                    cli.path.canonicalize()? == snapshot.source,
-                    "launch source changed"
-                );
-                (snapshot.source.clone(), snapshot.manifest.clone())
-            } else {
-                project(&cli.path)?
-            };
-            manifest.check_startable()?;
-            let state = state_dir(cli.state_dir)?;
-            let (mut registry, workspace) = if restart || snapshot.is_some() {
-                ensure!(
-                    request.name.is_none() && !request.primary,
-                    "pinned startup cannot change environment identity"
-                );
-                let registry = Registry::open(&state, true)?
-                    .context("no environments are registered yet; start one with parcela up")?;
-                let workspace = registry.current(&source, &manifest)?;
-                (registry, workspace)
-            } else {
-                startup_registry(&state, &source, &manifest, &request)?
-            };
-            if let Some(snapshot) = &snapshot {
-                ensure!(
-                    launch_file.as_ref()
-                        == Some(&registry.runtime_path(&workspace).join("launch.json")),
-                    "unexpected launch snapshot path"
-                );
-                let current = registry.session(&workspace.id)?;
-                ensure!(
-                    current.as_ref().map(|s| (&s.token, s.generation))
-                        == snapshot
-                            .predecessor
-                            .as_ref()
-                            .map(|s| (&s.token, s.generation)),
-                    "launch predecessor changed; successor preserved"
-                );
-            }
-            if !restart
-                && snapshot.is_none()
-                && let Some(session) = lifecycle::orphaned(&registry, &workspace)?
-            {
-                eprintln!(
-                    "parcela: the Parcela process that started {} exited; taking back control of its running services",
-                    render::name(&serde_json::to_value(&workspace)?)
-                );
-                parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
-                let result = if detach {
-                    lifecycle::recover_detached(&registry, &workspace)?
-                } else {
-                    parcela::runtime::recover(&mut registry, &workspace, &session, false)?
-                };
-                out.emit(&result, |style| render::recovered(&result, style))?;
-                return Ok(0);
-            }
-            let operation = if restart {
-                parcela::private::directory(&registry.runtime_path(&workspace))?;
-                Some(parcela::private::Lock::wait(
-                    &registry.runtime_path(&workspace).join("restart.lock"),
-                )?)
-            } else {
-                None
-            };
-            if restart {
-                parcela::runtime::preflight(
-                    &registry,
-                    &manifest,
-                    &workspace,
-                    parcela::runtime::Launch::Compose(&process_compose),
-                    backend_port,
-                    readiness_timeout,
-                )?;
-                ensure!(
-                    registry
-                        .session(&workspace.id)?
-                        .is_none_or(|session| session.kind == "compose"),
-                    "restart does not replay arbitrary run commands; use down then an explicit run"
-                );
-                lifecycle::down(&registry, &workspace)?;
-            }
-            if detach {
-                if !restart {
-                    parcela::runtime::preflight(
-                        &registry,
-                        &manifest,
-                        &workspace,
-                        parcela::runtime::Launch::Compose(&process_compose),
-                        backend_port,
-                        readiness_timeout,
-                    )?;
-                }
-                // Started here so its notice reaches this terminal, not the detached owner's log.
-                parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
-                let log = registry.runtime_path(&workspace).join("log/owner.log");
-                let start = std::fs::metadata(&log).map_or(0, |metadata| metadata.len());
-                let result = lifecycle::detached(
-                    &registry,
-                    &workspace,
-                    &process_compose,
-                    backend_port,
-                    readiness_timeout,
-                    &manifest,
-                )
-                .inspect_err(|_| print_new_log_lines(&log, start, 20))?;
-                out.emit(&result, |style| render::started(&result, style))?;
-                Ok(0)
-            } else {
-                drop(operation);
-                parcela::runtime::run(
-                    &mut registry,
-                    &manifest,
-                    &workspace,
-                    parcela::runtime::Launch::Compose(&process_compose),
-                    backend_port,
-                    readiness_timeout,
-                )
-            }
-        }
+        } => start(
+            &state,
+            &cli.path,
+            Start {
+                request: startup::Request::default(),
+                restart: true,
+                process_compose,
+                backend_port,
+                readiness_timeout,
+                detach,
+                launch_file,
+            },
+            out,
+        ),
         Command::Recover { detach } => {
-            let state = state_dir(cli.state_dir)?;
-            let existing = Registry::open(&state, false)?
-                .context("no environments are registered yet; start one with parcela up")?;
-            let workspace = target_workspace(&existing, &cli.path, cli.workspace)?;
-            if detach {
-                let result = lifecycle::recover_detached(&existing, &workspace)?;
-                out.emit(&result, |style| render::recovered(&result, style))?;
+            let (existing, workspace) = reader()?;
+            let result = if detach {
+                lifecycle::recover_detached(&existing, &workspace)?
             } else {
                 let session = existing
                     .session(&workspace.id)?
                     .context("no native session to recover")?;
                 drop(existing);
-                let mut registry = Registry::open(&state, true)?.context("registry missing")?;
-                let result = parcela::runtime::recover(&mut registry, &workspace, &session, false)?;
-                out.emit(&result, |style| render::recovered(&result, style))?;
-            }
+                parcela::runtime::recover(&mut writable(&state)?, &workspace, &session, false)?
+            };
+            out.emit(&result, |style| render::recovered(&result, style))?;
             Ok(0)
         }
         Command::Down {
@@ -426,7 +257,6 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             all_projects: all_projects @ true,
             ..
         } => {
-            let state = state_dir(cli.state_dir)?;
             let project = if all_projects {
                 None
             } else {
@@ -434,35 +264,198 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             };
             super::inventory::down_all(&state, project.as_deref(), out)
         }
-        Command::Ls => {
-            super::inventory::list(&state_dir(cli.state_dir)?, &cli.path, out)?;
-            Ok(0)
-        }
-        Command::Rm { prune } => {
-            let state = state_dir(cli.state_dir)?;
-            super::inventory::remove(&state, &cli.path, cli.workspace, prune, out)?;
-            Ok(0)
-        }
         Command::Down { .. } => {
-            let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-            let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
+            let (registry, workspace) = reader()?;
             let result = lifecycle::down(&registry, &workspace)?;
             let name = render::name(&serde_json::to_value(&workspace)?);
             out.emit(&result, |style| render::down(&result, &name, style))?;
             Ok(0)
         }
+        Command::Status { all: true } | Command::Ls => {
+            super::inventory::list(&state, &cli.path, out)?;
+            Ok(0)
+        }
+        Command::Status { all: false } => {
+            let (registry, workspace) = reader()?;
+            let status = lifecycle::status_with_processes(&registry, &workspace)?;
+            if out == Output::Human {
+                status_diagnostics(std::slice::from_ref(&status));
+            }
+            out.emit(&status, |style| render::status(&status, style))?;
+            Ok(0)
+        }
+        Command::Logs { service, tail } => {
+            let (registry, workspace) = reader()?;
+            let result = lifecycle::service_request(
+                &registry,
+                &workspace,
+                Action::Logs {
+                    service,
+                    tail: tail as usize,
+                },
+            )?;
+            use std::io::Write;
+            std::io::stdout().lock().write_all(
+                result["logs"]
+                    .as_str()
+                    .context("invalid backend log response")?
+                    .as_bytes(),
+            )?;
+            Ok(0)
+        }
+        Command::Url { service } => {
+            let (registry, workspace) = reader()?;
+            let url = match service {
+                Some(service) => lifecycle::service_url(&registry, &workspace, &service)?,
+                None => lifecycle::url(&registry, &workspace)?,
+            };
+            println!("{url}");
+            Ok(0)
+        }
+        Command::Rm { prune } => {
+            super::inventory::remove(&state, &cli.path, cli.workspace, prune, out)?;
+            Ok(0)
+        }
         Command::Task { name, args } => {
             let (source, manifest) = project(&cli.path)?;
-            let state = state_dir(cli.state_dir)?;
-            let registry = Registry::open(&state, true)?
-                .context("no environments are registered yet; start one with parcela up")?;
+            let registry = writable(&state)?;
             let workspace = registry.current(&source, &manifest)?;
             parcela::runtime::task(&registry, &manifest, &workspace, &name, &args)
         }
-        command => {
-            inspect(Cli { command, ..cli }, out)?;
+        Command::Context => {
+            let (source, manifest) = project(&cli.path)?;
+            let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
+            let workspace = registry.current(&source, &manifest)?;
+            let result =
+                serde_json::to_value(ResolvedContext::new(&registry, &manifest, workspace)?)?;
+            out.emit(&result, |style| render::context(&result, style))?;
             Ok(0)
         }
     }
+}
+
+/// What `up` and `restart` were asked to do.
+struct Start {
+    request: startup::Request,
+    restart: bool,
+    process_compose: String,
+    backend_port: Option<u16>,
+    readiness_timeout: u64,
+    detach: bool,
+    /// Set only for the detached owner `up --detach` launches, pinning its source and manifest.
+    launch_file: Option<PathBuf>,
+}
+
+fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
+    let launch = parcela::runtime::Launch::Compose(&start.process_compose);
+    let snapshot: Option<lifecycle::LaunchSnapshot> = start
+        .launch_file
+        .as_ref()
+        .map(|path| parcela::private::read_json(path))
+        .transpose()?;
+    let (source, manifest) = if let Some(snapshot) = &snapshot {
+        ensure!(
+            path.canonicalize()? == snapshot.source,
+            "launch source changed"
+        );
+        (snapshot.source.clone(), snapshot.manifest.clone())
+    } else {
+        project(path)?
+    };
+    manifest.check_startable()?;
+    let (mut registry, workspace) = if start.restart || snapshot.is_some() {
+        ensure!(
+            start.request.name.is_none() && !start.request.primary,
+            "pinned startup cannot change environment identity"
+        );
+        let registry = writable(state)?;
+        let workspace = registry.current(&source, &manifest)?;
+        (registry, workspace)
+    } else {
+        startup_registry(state, &source, &manifest, &start.request)?
+    };
+    if let Some(snapshot) = &snapshot {
+        ensure!(
+            start.launch_file.as_ref()
+                == Some(&registry.runtime_path(&workspace).join("launch.json")),
+            "unexpected launch snapshot path"
+        );
+        let current = registry.session(&workspace.id)?;
+        ensure!(
+            current.as_ref().map(|s| (&s.token, s.generation))
+                == snapshot
+                    .predecessor
+                    .as_ref()
+                    .map(|s| (&s.token, s.generation)),
+            "launch predecessor changed; successor preserved"
+        );
+    } else if !start.restart
+        && let Some(session) = lifecycle::orphaned(&registry, &workspace)?
+    {
+        eprintln!(
+            "parcela: the Parcela process that started {} exited; taking back control of its running services",
+            render::name(&serde_json::to_value(&workspace)?)
+        );
+        parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
+        let result = if start.detach {
+            lifecycle::recover_detached(&registry, &workspace)?
+        } else {
+            parcela::runtime::recover(&mut registry, &workspace, &session, false)?
+        };
+        out.emit(&result, |style| render::recovered(&result, style))?;
+        return Ok(0);
+    }
+    let restart_lock = if start.restart {
+        parcela::private::directory(&registry.runtime_path(&workspace))?;
+        Some(parcela::private::Lock::wait(
+            &registry.runtime_path(&workspace).join("restart.lock"),
+        )?)
+    } else {
+        None
+    };
+    if start.restart || start.detach {
+        parcela::runtime::preflight(
+            &registry,
+            &manifest,
+            &workspace,
+            launch,
+            start.backend_port,
+            start.readiness_timeout,
+        )?;
+    }
+    if start.restart {
+        ensure!(
+            registry
+                .session(&workspace.id)?
+                .is_none_or(|session| session.kind == "compose"),
+            "restart does not replay arbitrary run commands; use down then an explicit run"
+        );
+        lifecycle::down(&registry, &workspace)?;
+    }
+    if !start.detach {
+        drop(restart_lock);
+        return parcela::runtime::run(
+            &mut registry,
+            &manifest,
+            &workspace,
+            launch,
+            start.backend_port,
+            start.readiness_timeout,
+        );
+    }
+    // Started here so its notice reaches this terminal, not the detached owner's log.
+    parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
+    let log = registry.runtime_path(&workspace).join("log/owner.log");
+    let offset = std::fs::metadata(&log).map_or(0, |metadata| metadata.len());
+    let result = lifecycle::detached(
+        &registry,
+        &workspace,
+        &start.process_compose,
+        start.backend_port,
+        start.readiness_timeout,
+        &manifest,
+    )
+    .inspect_err(|_| print_new_log_lines(&log, offset, 20))?;
+    out.emit(&result, |style| render::started(&result, style))?;
+    Ok(0)
 }

@@ -88,6 +88,13 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         );
     }
     let path = registry.runtime_path(workspace);
+    let finish_stop = || -> Result<Value> {
+        let mut writer =
+            Registry::open(registry.state_path(), true)?.context("registry missing")?;
+        crate::runtime::recover(&mut writer, workspace, &session, true)
+    };
+    let owner_died =
+        || crate::owner::Record::read(&path, &session).is_ok_and(|record| !record.owner.alive());
     if session.status != "stopping"
         && let Err(error) = control::request(&path, &session, Action::Stop)
     {
@@ -100,17 +107,11 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
                 !evidence.owner.alive(),
                 "owner still exists; retry the same generation after the pending command"
             );
-            let mut writer =
-                Registry::open(registry.state_path(), true)?.context("registry missing")?;
-            return crate::runtime::recover(&mut writer, workspace, &session, true);
+            return finish_stop();
         }
     }
-    if session.status == "stopping"
-        && crate::owner::Record::read(&path, &session).is_ok_and(|record| !record.owner.alive())
-    {
-        let mut writer =
-            Registry::open(registry.state_path(), true)?.context("registry missing")?;
-        return crate::runtime::recover(&mut writer, workspace, &session, true);
+    if session.status == "stopping" && owner_died() {
+        return finish_stop();
     }
     let budget = crate::owner::Record::read(&path, &session)
         .map_or(300, |record| record.manifest.shutdown_timeout_seconds);
@@ -123,24 +124,19 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
             current.token == session.token && current.generation == session.generation,
             "owner changed during stop; successor was not stopped"
         );
-        if current.status == "stopping"
-            && crate::owner::Record::read(&path, &session).is_ok_and(|record| !record.owner.alive())
-        {
-            let mut writer =
-                Registry::open(registry.state_path(), true)?.context("registry missing")?;
-            return crate::runtime::recover(&mut writer, workspace, &session, true);
+        if current.status == "stopping" && owner_died() {
+            return finish_stop();
         }
         ensure!(
             current.status != "interrupted",
             "shutdown incomplete; authenticated recovery is required, no PID was signaled"
         );
-        if current.status == "stopped" {
-            let path = registry.runtime_path(workspace);
-            if let Ok(_released) = private::Lock::acquire(&path.join("owner.lock")) {
-                return Ok(
-                    json!({"environment_id": workspace.id, "generation": session.generation, "state": "stopped", "already_stopped": false}),
-                );
-            }
+        if current.status == "stopped"
+            && let Ok(_released) = private::Lock::acquire(&path.join("owner.lock"))
+        {
+            return Ok(
+                json!({"environment_id": workspace.id, "generation": session.generation, "state": "stopped", "already_stopped": false}),
+            );
         }
         ensure!(
             Instant::now() < deadline,
@@ -148,6 +144,27 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// The append-only log a detached owner writes, refused unless it is a private regular file.
+fn owner_log(runtime: &std::path::Path) -> Result<(std::path::PathBuf, std::fs::File)> {
+    private::directory(&runtime.join("log"))?;
+    let path = runtime.join("log/owner.log");
+    let log = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&path)?;
+    let metadata = log.metadata()?;
+    // SAFETY: getuid has no pointers or failure case.
+    ensure!(
+        metadata.is_file()
+            && metadata.uid() == unsafe { libc::getuid() }
+            && metadata.mode() & 0o077 == 0,
+        "owner log must be a private user-owned regular file"
+    );
+    Ok((path, log))
 }
 
 pub fn detached(
@@ -158,7 +175,6 @@ pub fn detached(
     timeout: u64,
     manifest: &crate::config::Manifest,
 ) -> Result<Value> {
-    ensure!(timeout > 0, "readiness timeout must be positive");
     let path = registry.runtime_path(workspace);
     private::directory(&path)?;
     let _launch = private::Lock::acquire(&path.join("launch.lock"))?;
@@ -174,22 +190,7 @@ pub fn detached(
             .is_none_or(|session| session.status == "stopped"),
         "environment already has an active or interrupted run; use status/down, never force takeover"
     );
-    private::directory(&path.join("log"))?;
-    let log_path = path.join("log/owner.log");
-    let log = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(&log_path)?;
-    let metadata = log.metadata()?;
-    // SAFETY: getuid has no pointers or failure case.
-    ensure!(
-        metadata.is_file()
-            && metadata.uid() == unsafe { libc::getuid() }
-            && metadata.mode() & 0o077 == 0,
-        "owner log must be a private user-owned regular file"
-    );
+    let (log_path, log) = owner_log(&path)?;
     let mut command = Command::new(std::env::current_exe()?);
     command
         .arg("--path")
@@ -353,18 +354,7 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
         evidence.authenticate(&path, workspace)?;
     }
     let _launch = private::Lock::acquire(&path.join("launch.lock"))?;
-    let log_path = path.join("log/owner.log");
-    let log = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(&log_path)?;
-    let metadata = log.metadata()?;
-    ensure!(
-        metadata.is_file() && metadata.mode() & 0o077 == 0,
-        "invalid private owner log"
-    );
+    let (log_path, log) = owner_log(&path)?;
     let mut command = Command::new(std::env::current_exe()?);
     command
         .arg("--state-dir")

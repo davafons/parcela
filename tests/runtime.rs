@@ -176,6 +176,8 @@ fn context_placeholders_reserved_names_and_readiness_validation() {
         &registry.runtime_path(&workspace),
         "https://auth-app.localhost",
         Some(32001),
+        &[],
+        &Default::default(),
     )
     .unwrap();
     assert!(env["DATA_DIR"].ends_with("/data"));
@@ -194,7 +196,9 @@ fn context_placeholders_reserved_names_and_readiness_validation() {
             &workspace,
             &registry.runtime_path(&workspace),
             "https://auth-app.localhost",
-            None
+            None,
+            &[],
+            &Default::default(),
         )
         .is_err()
     );

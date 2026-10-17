@@ -21,30 +21,13 @@ use std::{
 };
 use uuid::Uuid;
 
-pub fn environment(
-    manifest: &Manifest,
-    workspace: &Workspace,
-    runtime: &std::path::Path,
-    url: &str,
-    port: Option<u16>,
-) -> Result<BTreeMap<String, String>> {
-    environment_context(
-        manifest,
-        workspace,
-        runtime,
-        url,
-        port,
-        &[],
-        &BTreeMap::new(),
-    )
-}
 pub fn session_environment(
     manifest: &Manifest,
     workspace: &Workspace,
     runtime: &std::path::Path,
     session: &Session,
 ) -> Result<BTreeMap<String, String>> {
-    environment_context(
+    environment(
         manifest,
         workspace,
         runtime,
@@ -54,7 +37,8 @@ pub fn session_environment(
         &session.ports,
     )
 }
-fn environment_context(
+/// The variables every service and task sees. Without a run, pass no endpoints or ports.
+pub fn environment(
     manifest: &Manifest,
     workspace: &Workspace,
     runtime: &std::path::Path,
@@ -167,23 +151,17 @@ pub fn run(
     backend_port: Option<u16>,
     timeout: u64,
 ) -> Result<i32> {
-    ensure!(
-        matches!(launch, Launch::Compose(_)) || manifest.services.len() == 1,
-        "literal run supports one HTTP service; use up for a service set"
-    );
-    ensure!(timeout > 0, "readiness timeout must be positive");
     preflight(registry, manifest, workspace, launch, backend_port, timeout)?;
     let router = crate::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
     let path = runtime(registry, workspace)?;
-    let _owner = Lock::acquire(&path.join("owner.lock"))?;
-    converge_crashed_session(registry, workspace, &_owner)?;
+    let owner_lock = Lock::acquire(&path.join("owner.lock"))?;
+    converge_crashed_session(registry, workspace, &owner_lock)?;
     let (endpoints, ports, probes) =
         allocate(registry, manifest, workspace, &router, backend_port)?;
     let default = endpoints
         .iter()
         .find(|endpoint| endpoint.service == manifest.default_service)
         .context("default endpoint missing")?;
-    let port = default.backend_port;
     let kind = match launch {
         Launch::Command(_) => "run",
         Launch::Compose(_) => "compose",
@@ -191,62 +169,22 @@ pub fn run(
     let session = registry.begin_endpoints(
         workspace,
         &router.token,
-        port,
+        default.backend_port,
         kind,
         &router.url(&workspace.hostname),
         &endpoints,
         &ports,
     )?;
-    let prepared = (|| -> Result<_> {
-        let mut resolved_workspace = registry.current(&workspace.source, manifest)?;
-        resolved_workspace.generation = session.generation;
-        let env = session_environment(manifest, &resolved_workspace, &path, &session)?;
+    // Until the child exists no route can be published, so a failure only marks the run stopped.
+    let launched = (|| -> Result<_> {
+        let mut workspace = registry.current(&workspace.source, manifest)?;
+        workspace.generation = session.generation;
+        let env = session_environment(manifest, &workspace, &path, &session)?;
         let sockets = crate::sockets::environment(&path)?;
         private::write_json(
             &path.join("context.json"),
             &json!({"session":session,"environment":env,"source":workspace.source,"sockets":{"control":sockets.control,"compose":sockets.compose},"isolation":"routing-only; project must consume declared private paths"}),
         )?;
-        Ok((resolved_workspace, env))
-    })();
-    let (resolved_workspace, env) = match prepared {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            // No child has been launched and no route can have been published.
-            registry.session_status(&session, "stopped")?;
-            return Err(error);
-        }
-    };
-    let result = launch_and_monitor(
-        registry,
-        manifest,
-        &resolved_workspace,
-        &path,
-        &session,
-        &router,
-        launch,
-        probes,
-        &env,
-        timeout,
-        &_owner,
-    );
-    // Revoke routing before terminating child; launch_and_monitor owns that ordering.
-    result
-}
-#[allow(clippy::too_many_arguments)]
-fn launch_and_monitor(
-    registry: &mut Registry,
-    manifest: &Manifest,
-    workspace: &Workspace,
-    path: &std::path::Path,
-    session: &Session,
-    _router: &Router,
-    launch: Launch<'_>,
-    probes: Vec<TcpListener>,
-    env: &BTreeMap<String, String>,
-    timeout: u64,
-    owner_lock: &Lock,
-) -> Result<i32> {
-    let make_command = (|| -> Result<Command> {
         let mut command = match launch {
             Launch::Command(argv) => {
                 ensure!(!argv.is_empty(), "literal command argv required after --");
@@ -255,6 +193,7 @@ fn launch_and_monitor(
                 command
             }
             Launch::Compose(binary) => {
+                // Re-checked at launch: scripts/check_recovery.py gates this call to crash before the graph starts.
                 let backend = version(binary, "version")?;
                 ensure!(
                     backend.contains("v1."),
@@ -266,10 +205,9 @@ fn launch_and_monitor(
                     .context("up requires process_compose native graph")?;
                 let graph_path = path.join("process-compose.json");
                 private::write_json(&graph_path, graph)?;
-                let socket = crate::sockets::environment(path)?.compose;
-                crate::sockets::prepare(&socket)?;
+                crate::sockets::prepare(&sockets.compose)?;
                 ensure!(
-                    !socket.exists(),
+                    !sockets.compose.exists(),
                     "existing Process Compose socket requires explicit reconciliation"
                 );
                 private::write_bytes(
@@ -283,7 +221,7 @@ fn launch_and_monitor(
                     .arg("--config")
                     .arg(graph_path)
                     .args(["--use-uds", "--unix-socket"])
-                    .arg(socket)
+                    .arg(&sockets.compose)
                     .arg("--log-file")
                     .arg(path.join("log/process-compose.log"))
                     .args([
@@ -297,30 +235,18 @@ fn launch_and_monitor(
             }
         };
         command.current_dir(&workspace.source);
-        command_env(&mut command, manifest, env);
-        Ok(command)
+        command_env(&mut command, manifest, &env);
+        let signals = Signals::new()?;
+        let control = control::Server::bind(&path)?;
+        // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
+        drop(probes);
+        let child = OwnedChild::spawn(&mut command)?;
+        Ok((workspace, signals, control, child))
     })();
-    let mut command = match make_command {
-        Ok(command) => command,
+    let (workspace, signals, control, child) = match launched {
+        Ok(launched) => launched,
         Err(error) => {
-            registry.session_status(session, "stopped")?;
-            return Err(error);
-        }
-    };
-    let signals = Signals::new()?;
-    let control = match control::Server::bind(path) {
-        Ok(control) => control,
-        Err(error) => {
-            registry.session_status(session, "stopped")?;
-            return Err(error);
-        }
-    };
-    // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
-    drop(probes);
-    let child = match OwnedChild::spawn(&mut command) {
-        Ok(child) => child,
-        Err(error) => {
-            registry.session_status(session, "stopped")?;
+            registry.session_status(&session, "stopped")?;
             return Err(error);
         }
     };
@@ -334,7 +260,7 @@ fn launch_and_monitor(
             token: private::Identity::read(&path.join("pc.token"))?,
             socket: None,
         }),
-        _ => None,
+        Launch::Command(_) => None,
     };
     let record = crate::owner::Record {
         session: session.clone(),
@@ -342,16 +268,16 @@ fn launch_and_monitor(
         owner: crate::process::Identity::read(std::process::id())?
             .context("owner birth unavailable")?,
         lock: owner_lock.identity()?,
-        control: private::Identity::read(&crate::sockets::environment(path)?.control)?,
+        control: private::Identity::read(&crate::sockets::environment(&path)?.control)?,
         supervisor: supervisor.identity().clone(),
         processes: vec![supervisor.identity().clone()],
         native,
         manifest: manifest.clone(),
         diagnostic: None,
     };
-    record.save(path)?;
+    record.save(&path)?;
     monitor(
-        registry, workspace, path, record, supervisor, control, signals, timeout,
+        registry, &workspace, &path, record, supervisor, control, signals, timeout,
     )
 }
 
@@ -611,7 +537,7 @@ pub fn preflight(
         .iter()
         .find(|endpoint| endpoint.service == manifest.default_service)
         .context("default endpoint missing")?;
-    let env = environment_context(
+    let env = environment(
         manifest,
         &resolved,
         &path,
@@ -1087,7 +1013,15 @@ pub fn task(
     let env = if let Some(session) = &session {
         session_environment(manifest, workspace, &path, session)?
     } else {
-        environment(manifest, workspace, &path, &url, None)?
+        environment(
+            manifest,
+            workspace,
+            &path,
+            &url,
+            None,
+            &[],
+            &BTreeMap::new(),
+        )?
     };
     let mut command = Command::new(&task.argv[0]);
     command
