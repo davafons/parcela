@@ -173,7 +173,7 @@ pub fn run(
     );
     ensure!(timeout > 0, "readiness timeout must be positive");
     preflight(registry, manifest, workspace, launch, backend_port, timeout)?;
-    let router = router::current(registry.state_path())?;
+    let router = crate::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
     let path = runtime(registry, workspace)?;
     let _owner = Lock::acquire(&path.join("owner.lock"))?;
     converge_crashed_session(registry, workspace, &_owner)?;
@@ -547,7 +547,12 @@ pub fn preflight(
     let path = registry.runtime_path(workspace);
     let mut resolved = workspace.clone();
     resolved.generation += 1;
-    let active_router = router::current(registry.state_path())?;
+    // Checked against the saved front door, so a failing launch never starts the proxy.
+    let active_router = Router {
+        token: String::new(),
+        front_door: crate::frontdoor::FrontDoor::load(registry.state_path())?,
+        version: router::VERSION.into(),
+    };
     let reserved = registry.hosts(&workspace.id)?;
     for (service, host) in manifest.service_hosts(&workspace.hostname)? {
         ensure!(

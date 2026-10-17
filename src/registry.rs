@@ -179,6 +179,12 @@ impl Registry {
             transaction.commit()?;
         } else {
             let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
+            let objects: i64 =
+                connection.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))?;
+            // A concurrent first `up` has created the file but not yet committed its schema.
+            if version == 0 && objects == 0 {
+                return Ok(None);
+            }
             ensure!(
                 (1..=VERSION).contains(&version),
                 "unsupported registry schema {version}"

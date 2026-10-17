@@ -259,3 +259,139 @@ fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
     assert_eq!(restarted["version_warning"], Value::Null);
     assert_ne!(restarted["pid"], status["pid"]);
 }
+
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| directory.join(program).is_file())
+    })
+}
+
+/// Stops the environments before the proxy guard runs.
+struct Environments<'a> {
+    state: &'a Path,
+    paths: Vec<PathBuf>,
+}
+impl Drop for Environments<'_> {
+    fn drop(&mut self) {
+        for path in &self.paths {
+            Command::new(env!("CARGO_BIN_EXE_parcela"))
+                .arg("--path")
+                .arg(path)
+                .arg("--state-dir")
+                .arg(self.state)
+                .arg("down")
+                .output()
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn parallel_ups_in_two_checkouts_start_one_proxy_and_both_urls_answer() {
+    if !["caddy", "process-compose", "curl", "python3"]
+        .iter()
+        .all(|program| on_path(program))
+    {
+        eprintln!("skipped: needs caddy, process-compose, curl and python3 on PATH");
+        return;
+    }
+    let proxy = Proxy::new();
+    let root = proxy._t.path().canonicalize().unwrap();
+    let port = free_port();
+    let manifest = "project: notes\nweb: python3 -m http.server $PORT --bind 127.0.0.1\n";
+    let primary = root.join("notes");
+    let preview = root.join("notes-preview");
+    for path in [&primary, &preview] {
+        fs::create_dir(path).unwrap();
+        fs::write(path.join("parcela.yaml"), manifest).unwrap();
+    }
+    let environments = Environments {
+        state: &proxy.state,
+        paths: vec![primary.clone(), preview.clone()],
+    };
+    let up = |path: &Path, extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_parcela"))
+            .arg("--path")
+            .arg(path)
+            .arg("--state-dir")
+            .arg(&proxy.state)
+            .env("PARCELA_HTTPS_PORT", port.to_string())
+            .args(["--json", "up", "--detach"])
+            .args(extra)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let first = up(&primary, &[]);
+    let second = up(&preview, &["--name", "preview"]);
+    let outputs = [
+        first.wait_with_output().unwrap(),
+        second.wait_with_output().unwrap(),
+    ];
+    for output in &outputs {
+        assert!(output.status.success(), "{}", stderr(output));
+    }
+    let hint =
+        format!("Started the Parcela proxy on :{port} (run `parcela setup` once for https://");
+    assert_eq!(
+        outputs
+            .iter()
+            .filter(|output| stderr(output).contains(&hint))
+            .count(),
+        1,
+        "exactly one up starts the proxy"
+    );
+    let urls: Vec<String> = outputs
+        .iter()
+        .map(|output| {
+            json_of(output)["session"]["public_url"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        urls,
+        [
+            format!("https://notes.localhost:{port}"),
+            format!("https://preview-notes.localhost:{port}")
+        ]
+    );
+    let daemons = Command::new("pgrep")
+        .args([
+            "-f",
+            &format!(
+                "{} proxy run",
+                proxy.state.canonicalize().unwrap().display()
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&daemons.stdout).lines().count(), 1);
+    for url in &urls {
+        let host = url
+            .trim_start_matches("https://")
+            .split(':')
+            .next()
+            .unwrap();
+        let curl = Command::new("curl")
+            .args([
+                "--silent",
+                "--insecure",
+                "--max-time",
+                "5",
+                "--resolve",
+                &format!("{host}:{port}:127.0.0.1"),
+                "--output",
+                "/dev/null",
+                "--write-out",
+                "%{http_code}",
+                url,
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&curl.stdout), "200", "{url}");
+    }
+    drop(environments);
+}

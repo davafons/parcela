@@ -159,17 +159,28 @@ fn run_uses_the_same_named_registration_path() {
     let path = t.path().join("project");
     source(&path);
     let state = t.path().join("state");
-    let result = cli(
-        &path,
-        &state,
-        &[
+    let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    // A literal command is only found at launch, after `run` has started the shared proxy.
+    let result = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--path")
+        .arg(&path)
+        .arg("--state-dir")
+        .arg(&state)
+        .env("PARCELA_HTTPS_PORT", port.to_string())
+        .args([
             "run",
             "--name",
             "command-review",
             "--",
             "/nonexistent/parcela-test-command",
-        ],
-    );
+        ])
+        .output()
+        .unwrap();
+    cli(&path, &state, &["proxy", "stop"]);
     assert!(!result.status.success());
     let rows = registered(&state);
     assert_eq!(rows.len(), 1);

@@ -67,10 +67,12 @@ pub fn owner(state: &Path) -> Option<(Identity, Identity)> {
 /// The running proxy, starting it on the saved front door when none runs. Used by `up`, `restart`
 /// and `run`, so concurrent callers share one proxy.
 pub fn ensure_running(state: &Path, host: &str) -> Result<Router> {
+    // A proxy that is still starting reads as unhealthy; start() waits for it under the start lock.
     let started = match status(state)? {
         Status::Running(router) => Started::Already(router),
-        Status::Unhealthy(error) => return Err(error),
-        Status::Stopped => start(state, "caddy", FrontDoor::load(state)?, false)?,
+        Status::Stopped | Status::Unhealthy(_) => {
+            start(state, "caddy", FrontDoor::load(state)?, false)?
+        }
     };
     match &started {
         Started::Already(router) => warn_version(router),

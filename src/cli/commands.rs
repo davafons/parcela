@@ -424,6 +424,18 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 lifecycle::down(&registry, &workspace)?;
             }
             if detach {
+                if !restart {
+                    parcela::runtime::preflight(
+                        &registry,
+                        &manifest,
+                        &workspace,
+                        parcela::runtime::Launch::Compose(&process_compose),
+                        backend_port,
+                        readiness_timeout,
+                    )?;
+                }
+                // Started here so its notice reaches this terminal, not the detached owner's log.
+                parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
                 let log = registry.runtime_path(&workspace).join("log/owner.log");
                 let start = std::fs::metadata(&log).map_or(0, |metadata| metadata.len());
                 let result = lifecycle::detached(
