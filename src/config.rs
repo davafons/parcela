@@ -225,11 +225,14 @@ fn main_checkout(source: &Path) -> Option<PathBuf> {
 impl Manifest {
     pub fn load(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let document: Value =
-            serde_saphyr::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
         let source = path.parent().context("manifest has no directory")?;
-        let manifest = Self::from_document(document, source)
-            .with_context(|| format!("invalid {}", path.display()))?;
+        Self::parse(&text, source).with_context(|| format!("invalid {}", path.display()))
+    }
+
+    /// Parse and validate manifest text as if it were `source/parcela.yaml`.
+    pub fn parse(text: &str, source: &Path) -> Result<Self> {
+        let document: Value = serde_saphyr::from_str(text)?;
+        let manifest = Self::from_document(document, source)?;
         manifest.validate()?;
         Ok(manifest)
     }

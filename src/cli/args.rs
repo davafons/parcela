@@ -31,6 +31,15 @@ pub enum Command {
     /// Print the bundled agent operating skill without reading project or registry state.
     #[command(long_flag = "skill")]
     Skill,
+    /// Write a minimal parcela.yaml for this directory, guessing the dev server command.
+    Init {
+        /// Project name; defaults to the main checkout directory name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Command that starts the web service on 127.0.0.1:$PORT.
+        #[arg(long)]
+        command: Option<String>,
+    },
     /// Validate organizer schema (not backend compatibility). Does not create state.
     Config {
         #[command(subcommand)]

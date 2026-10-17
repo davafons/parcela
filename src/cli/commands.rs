@@ -260,6 +260,10 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             .write_all(include_bytes!("../../.agents/skills/parcela/SKILL.md"))?;
         return Ok(0);
     }
+    if let Command::Init { name, command } = &cli.command {
+        super::init::run(&cli.path, name.as_deref(), command.as_deref(), out)?;
+        return Ok(0);
+    }
     if let Some(id) = cli.workspace {
         let state = state_dir(cli.state_dir.clone())?;
         let registry = Registry::open(&state, false)?
