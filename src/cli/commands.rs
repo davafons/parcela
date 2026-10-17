@@ -95,26 +95,18 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             } else {
                 let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
                 let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
-                let status = lifecycle::status(&registry, &workspace)?;
+                let status = lifecycle::status_with_processes(&registry, &workspace)?;
                 if out == Output::Human {
                     status_diagnostics(std::slice::from_ref(&status));
                 }
                 out.emit(&status, |style| render::status(&status, style))
             }
         }
-        Command::Services | Command::Logs { .. } | Command::Url { .. } => {
+        Command::Logs { .. } | Command::Url { .. } => {
             let state = state_dir(cli.state_dir)?;
             let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
             let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
             match cli.command {
-                Command::Services => {
-                    let result =
-                        lifecycle::service_request(&registry, &workspace, Action::Services)?;
-                    result["services"]
-                        .as_array()
-                        .context("invalid backend service list")?;
-                    out.emit(&result, |style| render::services(&result, style))
-                }
                 Command::Logs { service, tail } => {
                     let result = lifecycle::service_request(
                         &registry,

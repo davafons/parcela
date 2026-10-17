@@ -27,7 +27,7 @@ def main():
 
     def cli(path, *argv, check=True, timeout=20):
         target = ['--path', str(path)]
-        if args.agent_recipe and argv and argv[0] in {'status', 'services', 'url', 'logs', 'restart', 'recover', 'down', 'task'}:
+        if args.agent_recipe and argv and argv[0] in {'status', 'url', 'logs', 'restart', 'recover', 'down', 'task'}:
             workspace = next((workspace for source, workspace in sources if source == path), None)
             if workspace:
                 target = ['--workspace', workspace['id']]
@@ -142,8 +142,8 @@ process_compose:
         live = status(primary)['live']
         assert live['state'] == 'ready' and set(live['endpoints']) == {'frontend', 'backend'}, live
         assert all(endpoint['http_ready'] and endpoint['listener_owned'] for endpoint in live['endpoints'].values()), live
-        services = json.loads(cli(primary, 'services').stdout)['services']
-        assert {entry['name']: entry['status'] for entry in services} == {'frontend': 'Running', 'backend': 'Running', 'worker': 'Running'}, services
+        processes = json.loads(cli(primary, 'status').stdout)['processes']
+        assert {entry['name']: entry['state'] for entry in processes} == {'frontend': 'running', 'backend': 'running', 'worker': 'running'}, processes
         assert cli(primary, 'url', '--service', 'backend').stdout.strip() == f'https://api-sets.localhost:{https}'
         note('two-origins-one-generation-working-directories-and-worker')
         if args.agent_recipe:
@@ -247,7 +247,7 @@ process_compose:
         single = json.loads(cli(legacy, 'up', '--detach', '--process-compose', args.process_compose).stdout)
         ports.append(single['session']['backend_port'])
         assert request('legacy-sets.localhost')['id'] == legacy_workspace['id']
-        assert json.loads(cli(legacy, 'services').stdout)['services'][0]['name'] == 'server'
+        assert json.loads(cli(legacy, 'status').stdout)['processes'][0]['name'] == 'server'
         note('legacy-single-service-allows-a-different-native-process-name')
         report['complete'] = True
     finally:

@@ -115,8 +115,8 @@ def main():
             origins.append(cli(path, 'url').stdout.strip())
             assert b'<div id="app"></div>' in request(host), 'Native VitePress app bootstrap missing'
             assert b'Run development services' in request(host, '/index.md')
-            services = json.loads(cli(path, 'services').stdout)['services']
-            assert {entry['name']: entry['status'] for entry in services} == {'docs': 'Running'}
+            processes = json.loads(cli(path, 'status').stdout)['processes']
+            assert {entry['name']: entry['state'] for entry in processes} == {'docs': 'running'}
             assert 'vitepress' in cli(path, 'logs', 'docs', '--tail', '50').stdout.lower()
         report['verified'].append('Two owned loopback VitePress graphs with distinct HTTPS URLs, ports, logs and generated/cache paths')
         environment = {**os.environ, 'DOCS_BASE': '/', 'DOCS_SITE': origins[0]}

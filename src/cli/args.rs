@@ -112,7 +112,7 @@ pub enum Command {
         #[arg(long, hide = true)]
         launch_file: Option<PathBuf>,
     },
-    /// Show whether this checkout's services are running and answering.
+    /// Show whether this checkout's services are running and answering, with each process.
     Status {
         /// Show every registered environment (same as parcela ls).
         #[arg(long, conflicts_with = "workspace")]
@@ -120,8 +120,6 @@ pub enum Command {
     },
     /// List every registered environment across projects.
     Ls,
-    /// Show each service and worker process.
-    Services,
     /// Print recent output of one service. Defaults to the web service.
     Logs {
         /// Service or worker name.

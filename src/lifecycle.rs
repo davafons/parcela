@@ -45,6 +45,37 @@ pub fn status(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     )
 }
 
+/// One environment's status plus `processes`: every Process Compose service and worker with
+/// its `name`, lowercase `state` and `pid` (null when not running). The list is empty unless a
+/// live supervisor answers.
+pub fn status_with_processes(registry: &Registry, workspace: &Workspace) -> Result<Value> {
+    let mut status = status(registry, workspace)?;
+    let mut processes = Vec::new();
+    if status["live_health_verified"] == true && status["recorded_session"]["kind"] == "compose" {
+        match service_request(registry, workspace, Action::Services) {
+            Ok(listed) => {
+                processes = listed["services"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|process| {
+                        json!({
+                            "name": process["name"],
+                            "state": process["status"].as_str().map(str::to_ascii_lowercase),
+                            "pid": process["pid"].as_u64().filter(|pid| *pid > 0),
+                        })
+                    })
+                    .collect();
+            }
+            Err(error) => {
+                status["diagnostic"] = json!(format!("process list unavailable: {error:#}"))
+            }
+        }
+    }
+    status["processes"] = json!(processes);
+    Ok(status)
+}
+
 pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     let Some(session) = registry.session(&workspace.id)? else {
         return Ok(

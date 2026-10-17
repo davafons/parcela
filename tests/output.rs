@@ -89,6 +89,12 @@ fn a_terminal_gets_aligned_text() {
             path.display()
         )
     );
+    let status: serde_json::Value =
+        serde_json::from_slice(&piped(&path, &state, &["status"]).stdout).unwrap();
+    assert_eq!(
+        (&status["state"], &status["processes"]),
+        (&serde_json::json!("stopped"), &serde_json::json!([]))
+    );
     assert_eq!(
         terminal(&path, &state, &["down"]),
         "✓ output-test was already stopped\n"

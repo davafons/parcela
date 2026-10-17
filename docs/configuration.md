@@ -140,9 +140,8 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `down` / `stop` | Stop through the live supervisor or authenticated recovery; preserve source/data; repeated stop is a no-op |
 | `down --all` / `down --all-projects` | Stop every running environment of this project, or of every project; prints the targets first and exits 1 if any stop fails |
 | `restart [--detach] [--backend-port N]` | Check the replacement before stopping the healthy run, then start a new run; does not replay arbitrary `run` argv |
-| `status [--all]` | Live supervisor, loopback HTTP and router probes, with recorded state reported separately |
+| `status [--all]` | Live supervisor, loopback HTTP and router probes, with recorded state reported separately; a single environment's status also lists each Process Compose service and worker as `processes: [{name, state, pid}]` |
 | `ls` | Every registered environment across projects: project, name, state, URL and path |
-| `services` | Process Compose state of each service and worker |
 | `logs [SERVICE] --tail N` | Plain-text log tail; default is the routed service; 1–10,000 lines |
 | `url [--service NAME]` | Plain-text default or selected service URL; does not certify reachability |
 | `rm` | Forget the selected stopped environment and release its hostnames and port leases; refuses a running one; keeps source and runtime data |

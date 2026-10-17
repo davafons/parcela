@@ -31,7 +31,6 @@ For a registered target, read its UUID from the response. Prefer that exact ID w
 
 ```sh
 parcela --workspace "$ENVIRONMENT_ID" status
-parcela --workspace "$ENVIRONMENT_ID" services
 ```
 
 `--path` and `--workspace` conflict. Keep an explicit `--state-dir` prefix on every call if using a nondefault registry. UUID targeting does not select another machine. Missing source paths do not authorize source or registry deletion.
@@ -59,7 +58,6 @@ After authorized startup, use detached mode for agent operations:
 ```sh
 parcela --path "$CHECKOUT" up --detach
 parcela --path "$CHECKOUT" status
-parcela --path "$CHECKOUT" services
 parcela --path "$CHECKOUT" url
 parcela --path "$CHECKOUT" url --service backend
 ```
@@ -68,7 +66,7 @@ Use a declared service name instead of assuming every project has `backend`. `up
 
 Each run has one generation and nonce with a recorded endpoint set. All declared HTTP endpoints must have graph-owned loopback listeners and pass initial readiness before the group routes open. Non-HTTP workers belong in the native graph and need no route. Per-service working directories and PORT overrides belong in native Process Compose entries.
 
-Inspect `status.state` and `status.live.endpoints`. `live_health_verified` means the owner answered, not that every HTTP probe succeeded. Recorded `ready`, planned URLs and native `Running` states are not interchangeable with fresh HTTP health. Check the intended application path over its returned HTTPS origin when the task needs application proof. Never disable TLS verification to make a check pass.
+Inspect `status.state`, `status.live.endpoints` and `status.processes`, where each Process Compose service and worker has a `name`, lowercase `state` and `pid`. `live_health_verified` means the owner answered, not that every HTTP probe succeeded. Recorded `ready`, planned URLs and native `Running` states are not interchangeable with fresh HTTP health. Check the intended application path over its returned HTTPS origin when the task needs application proof. Never disable TLS verification to make a check pass.
 
 Report the selected environment ID, role, generation, returned URLs, observed health and unverified behavior. Leave user-managed environments running unless stop was requested.
 
@@ -76,11 +74,10 @@ Report the selected environment ID, role, generation, returned URLs, observed he
 
 ```sh
 parcela --workspace "$ENVIRONMENT_ID" status
-parcela --workspace "$ENVIRONMENT_ID" services
 parcela --workspace "$ENVIRONMENT_ID" logs backend --tail 100
 ```
 
-Read process names from `services` before selecting logs. A legacy single-service graph can have a different process name from its routed service. Logs are bounded tails, not a follow stream. Avoid copying secrets from diagnostics.
+Read process names from `status.processes` before selecting logs. A legacy single-service graph can have a different process name from its routed service. Logs are bounded tails, not a follow stream. Avoid copying secrets from diagnostics.
 
 `unknown`, `interrupted`, missing evidence or a replaced native handle is not permission to clear locks, delete sockets, free leases or kill a process. Never signal a persisted PID, use broad `pkill`, or bypass the owner through raw native commands. Preserve the diagnostic and ask for an explicit recovery or manual intervention plan.
 

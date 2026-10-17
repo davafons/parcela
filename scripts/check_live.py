@@ -155,10 +155,10 @@ process_compose:
             status = json.loads(cli(copies[2][0], 'status').stdout)
             assert status['state'] == 'ready' and status['live_health_verified']
             assert status['live']['http_ready'] and status['live']['listener_owned']
-            services = json.loads(cli(copies[2][0], 'services').stdout)['services']
-            assert {item['name']: item['status'] for item in services} == {'web': 'Running', 'worker': 'Running'}
+            assert {item['name']: item['state'] for item in status['processes']} == {'web': 'running', 'worker': 'running'}
+            assert all(item['pid'] for item in status['processes']), status['processes']
             wait_for(lambda: 'cli-worker-ready' in cli(copies[2][0], 'logs', 'worker', '--tail', '10').stdout, [compose])
-            assert 'SERVICE' in human(copies[2][0], 'services')
+            assert 'PROCESS' in human(copies[2][0], 'status')
             assert cli(copies[2][0], 'logs', 'unknown', check=False).returncode != 0
             assert cli(copies[1][0], 'restart', '--detach', '--process-compose', args.process_compose, check=False).returncode != 0
             assert preview.poll() is None

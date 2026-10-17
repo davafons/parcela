@@ -29,6 +29,21 @@ pub fn status(row: &Value, style: &Style) -> String {
             .collect();
         text.push_str(&table(&["  SERVICE", "HTTP", "URL"], &rows));
     }
+    let processes: Vec<Vec<String>> = row["processes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|process| {
+            vec![
+                format!("  {}", cell(&process["name"])),
+                style.state(&cell(&process["state"])),
+                cell(&process["pid"]),
+            ]
+        })
+        .collect();
+    if !processes.is_empty() {
+        text.push_str(&table(&["  PROCESS", "STATE", "PID"], &processes));
+    }
     let session = &row["recorded_session"];
     if session["status"] != "stopped" {
         text.push_str(&ports(&session["ports"]));
@@ -82,22 +97,6 @@ pub fn context(value: &Value, style: &Style) -> String {
     ));
     text.push_str(&format!("  {:<10}{}\n", "id", cell(&workspace["id"])));
     text
-}
-
-pub fn services(value: &Value, style: &Style) -> String {
-    let rows: Vec<Vec<String>> = value["services"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|service| {
-            vec![
-                cell(&service["name"]),
-                style.state(&cell(&service["status"]).to_ascii_lowercase()),
-                cell(&service["pid"]),
-            ]
-        })
-        .collect();
-    table(&["SERVICE", "STATE", "PID"], &rows)
 }
 
 /// How people refer to an environment: the project for its primary checkout, else the preview name.

@@ -82,8 +82,9 @@ def main():
             assert cli(path, 'url', '--service', 'backend').stdout.strip() == f'https://api-{base}:{https}'
             assert b'Parcela demo frontend' in request(base, '/')
             assert json.loads(request(f'api-{base}', '/status.json')) == {'service': 'backend', 'ready': True}
-            services = json.loads(cli(path, 'services').stdout)['services']
-            assert {entry['name']: entry['status'] for entry in services} == {'frontend': 'Running', 'backend': 'Running', 'worker': 'Running'}
+            processes = json.loads(cli(path, 'status').stdout)['processes']
+            assert {entry['name']: entry['state'] for entry in processes} == {'frontend': 'running', 'backend': 'running', 'worker': 'running'}
+            assert all(entry['pid'] for entry in processes), processes
             wait_for(lambda: 'demo worker ready' in cli(path, 'logs', 'worker', '--tail', '10').stdout, [proxy])
         primary = copies[0]
         restarted = remember(json.loads(cli(primary, 'restart', '--detach', '--process-compose', args.process_compose).stdout))
