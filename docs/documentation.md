@@ -11,55 +11,24 @@ The site at `https://parcela.davafons.com/docs/` is built with VitePress from Ma
 | `.agents/skills/parcela/SKILL.md` | Operating skill. The CLI embeds this file for `parcela --skill`. |
 | `examples/docs-demo/` | The finished Getting started app, linked from that page |
 
-`docs/website/content.mjs` lists every page and downloadable file. To add a page, put it in `docs/site/` and add it to `groups`. The build refuses files in `docs/site/` that are not listed, raw HTML, includes and `{{ }}` templates. Link between pages with relative Markdown links, such as `[CLI guide](cli.md)`. The build turns them into site routes.
+`docs/website/content.mjs` lists every page and downloadable file. To add a page, put it in `docs/site/` and add it to `groups`. Link between pages with relative Markdown links, such as `[CLI guide](cli.md)`, so they also work on GitHub. The build turns them into site routes and fails on a link to a file that is not published. It also refuses includes and `<script>` blocks. Raw HTML and `{{ }}` render as plain text.
 
 A page under `docs/site/` can have YAML frontmatter. The home page uses it for the VitePress `layout: home` hero.
 
-## Build and preview
+## Build, preview and check
 
-Use Node 22.19 or newer and Python 3.12 or newer:
+Use Node 22.19 or newer:
 
 ```sh
 npm ci --prefix docs/website
-npm run build --prefix docs/website
+npm run dev --prefix docs/website -- --port 5173
+npm run check --prefix docs/website
 ```
 
-The site is written to `target/docs` with the base `/parcela/`. Set `DOCS_BASE=/` to build for the root, and `DOCS_SITE=https://...` for canonical links.
+The dev server serves `http://127.0.0.1:5173/docs/` and reloads when a listed source changes. Search does not refresh until you restart it.
 
-For live editing, start the `docs` service from the repository's own `parcela.yaml`:
-
-```sh
-parcela up --detach
-parcela url
-```
-
-Without Parcela, run the VitePress dev server on a free port:
-
-```sh
-DOCS_BASE=/ npm run dev --prefix docs/website -- --port 5173
-```
-
-Search in the dev server does not refresh after edits. Restart it to rebuild the index.
-
-## Check
-
-```sh
-python3 -m unittest discover -s tests -p 'test_docs.py'
-python3 scripts/check_docs.py
-```
-
-`check_docs.py` builds the site at `/`, `/parcela/` and `/docs/`, then checks every link, anchor, asset, download and search record, and the theme's color contrast.
-
-Two drivers run the docs against real Caddy and Process Compose, with a disposable state directory, test ports and a test CA:
-
-```sh
-cargo build --locked
-python3 scripts/check_docs_example.py --caddy "$(which caddy)" --process-compose "$(which process-compose)" --output /tmp/docs-demo.json
-python3 scripts/check_docs_dev.py --caddy "$(which caddy)" --process-compose "$(which process-compose)" --output /tmp/docs-dev.json
-```
-
-The first runs the Getting started app from `examples/docs-demo/` in a main checkout and a Git worktree. The second runs the docs dev server in two jj workspaces and checks hot reload over HTTPS.
+`npm run check` builds the site once into `target/docs` at the production base `/docs/`. The build fails on a dead link. The check then confirms that every page has one heading and only existing anchors, that every searchable page is in the search index, that the downloads match their sources and that the rendered Claude skill install block matches `docs/site/worktrees.md`. `tests/test_skill_install.py` runs that block in a sandbox. `scripts/check-live docs-example` runs the Getting started app against real Caddy and Process Compose.
 
 ## Deploy
 
-Every push to `main` that touches the docs builds the site and publishes it to GitHub Pages through the `Documentation` workflow. The site is built with `DOCS_SITE=https://parcela.davafons.com` and `DOCS_BASE=/docs/`; the workflow adds a root page that redirects to `/docs/` and a copy of the 404 page. The custom domain `parcela.davafons.com` is set in the repository's Pages settings and needs a DNS `CNAME` to `davafons.github.io`.
+Every push to `main` that touches the docs runs `npm run check` and publishes its output to GitHub Pages through the `Documentation` workflow. `DOCS_BASE` (default `/docs/`) and `DOCS_SITE` (default `https://parcela.davafons.com`) set the base path and canonical origin. The workflow adds a root page that redirects to `/docs/` and a copy of the 404 page. The custom domain `parcela.davafons.com` is set in the repository's Pages settings and needs a DNS `CNAME` to `davafons.github.io`.

@@ -10,9 +10,6 @@ on:
       - '.agents/skills/parcela/SKILL.md'
       - 'examples/docs-demo/**'
       - 'assets/brand/logo.svg'
-      - 'scripts/check_docs.py'
-      - 'scripts/check_docs_example.py'
-      - 'tests/test_docs.py'
       - '.github/workflows/docs.yml'
   push:
     branches: [main, docs-site]
@@ -24,9 +21,6 @@ on:
       - '.agents/skills/parcela/SKILL.md'
       - 'examples/docs-demo/**'
       - 'assets/brand/logo.svg'
-      - 'scripts/check_docs.py'
-      - 'scripts/check_docs_example.py'
-      - 'tests/test_docs.py'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -41,21 +35,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: docs/website/package-lock.json
       - run: npm ci --prefix docs/website
-      - run: python -m unittest discover -s tests -p 'test_docs.py'
-      - run: python scripts/check_docs.py --output docs-check.json
-      - run: npm run build --prefix docs/website
-        env:
-          DOCS_SITE: https://parcela.davafons.com
-          DOCS_BASE: /docs/
+      - run: npm run check --prefix docs/website
       - name: Assemble the Pages site
         run: |
           mkdir -p target/pages

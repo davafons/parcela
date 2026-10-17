@@ -2,24 +2,17 @@ import { defineConfig } from 'vitepress';
 import { slug } from 'github-slugger';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { contentWatchPlugin, groups, prepareContent } from '../content.mjs';
+import { groups, prepareContent, route, srcDir, watchSources } from '../content.mjs';
 
 const project = fileURLToPath(new URL('..', import.meta.url));
-const base = process.env.DOCS_BASE ?? '/parcela/';
-if (!/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(base)) {
-  throw new Error('DOCS_BASE must be / or a slash-delimited project path such as /parcela/');
-}
-const site = process.env.DOCS_SITE ?? 'https://example.invalid';
-const origin = new URL(site);
-if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) {
-  throw new Error('DOCS_SITE must be an HTTPS origin without a path, query or credentials');
-}
+const base = process.env.DOCS_BASE ?? '/docs/';
+const site = process.env.DOCS_SITE ?? 'https://parcela.davafons.com';
 
-const content = prepareContent(base);
+prepareContent();
 
 export default defineConfig({
-  ...content,
-  vite: { plugins: [contentWatchPlugin(base, content.srcDir)] },
+  srcDir,
+  vite: { plugins: [watchSources] },
   base,
   outDir: resolve(project, process.env.DOCS_OUTPUT ?? '../../target/docs'),
   cacheDir: resolve(project, '.generated/cache'),
@@ -29,8 +22,8 @@ export default defineConfig({
   head: [['link', { rel: 'icon', href: `${base}assets/logo.svg?v=picket-a` }]],
   transformHead({ pageData }) {
     if (pageData.relativePath === '404.md') return [];
-    const route = pageData.relativePath.replace(/index\.md$/, '');
-    return [['link', { rel: 'canonical', href: `${origin.origin}${base}${route}` }]];
+    const path = pageData.relativePath.replace(/index\.md$/, '');
+    return [['link', { rel: 'canonical', href: `${site}${base}${path}` }]];
   },
   transformHtml(html, _id, { page, content }) {
     if (page !== '404.md') return html;
@@ -52,7 +45,7 @@ export default defineConfig({
     search: { provider: 'local' },
     sidebar: groups.map(({ label, pages }) => ({
       text: label,
-      items: pages.map(([slug, text]) => ({ text, link: slug === 'index' ? '/' : `/${slug}/` })),
+      items: pages.map(([slug, text]) => ({ text, link: route(slug) })),
     })),
     socialLinks: [{ icon: 'github', link: 'https://github.com/davafons/parcela' }],
   },

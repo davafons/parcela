@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "vitepress build",
-    "dev": "vitepress dev --host 127.0.0.1 --strictPort"
+    "dev": "vitepress dev --host 127.0.0.1 --strictPort",
+    "check": "node check.mjs"
   },
   "engines": {
     "node": ">=22.19.0"
@@ -17,8 +18,5 @@
     "vitepress": {
       "vite": "6.4.3"
     }
-  },
-  "devDependencies": {
-    "ws": "8.21.0"
   }
 }
