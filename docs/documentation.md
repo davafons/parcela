@@ -119,7 +119,7 @@ python3 scripts/check_docs_example.py \
 
 The driver copies only the three demo inputs into disposable primary and preview directories. It uses isolated state, unprivileged ports and an explicit test CA. It verifies named frontend and API HTTPS, worker state and logs, generation restart, independent stop, retained source and closed listeners. Failed fixtures and their diagnostics remain for inspection. The driver does not install trust, run preparation, touch real dependencies or prove the installed standard front door.
 
-## Publish the custom-domain site explicitly
+## Publish the custom-domain site
 
 The publication target is `https://parcela.davafons.com/docs/`. Cloudflare Workers serves static assets on a dedicated `parcela-docs` Worker in the `davafons` account. `docs/website/wrangler.jsonc` declares its account and custom domain. This deployment does not change repository visibility, the installed Parcela binary or a local Caddy instance.
 
@@ -131,7 +131,7 @@ npm run deploy --prefix docs/website -- --dry-run
 
 The command builds a new artifact directory under `target/docs-deployment-*`. It sets the canonical origin to `https://parcela.davafons.com` and the base to `/docs/`. Only generated public site output enters the upload. The wrapper redirects `/` to `/docs/` and supplies a real 404 page. The VitePress build retains its rendered not-found content in the HTML, rather than requiring JavaScript to display the error. Bundled VitePress and Inter notices are available in `assets/third-party-notices.txt`. Each build uses a new directory, so removed pages cannot survive as stale deployment assets.
 
-After reviewing the public artifact and obtaining deployment authorization:
+Every push to `main` deploys automatically through the `Documentation` workflow. To deploy by hand:
 
 ```sh
 npm run deploy --prefix docs/website
@@ -141,12 +141,6 @@ Wrangler uploads static assets and binds the explicitly declared custom domain. 
 
 Check the deployed HTTPS page, guide links, assets, search index and canonical downloads after publication. Verify the root redirect and an unknown path's 404 response. Local builds and a successful upload do not prove that public DNS and TLS are ready.
 
-## Prepare optional GitHub Pages without implicit publication
+## Continuous deployment
 
-The `Documentation` workflow builds and checks the site on relevant pull requests and main pushes. Its normal result is a downloadable `parcela-docs` artifact, not a deployment. CI uses Node 24 and Python 3.12.
-
-Before publishing, review the generated site and every public source. Confirm that the repository and account support the intended Pages visibility. A private source repository does not necessarily make its Pages site private. Do not change repository visibility as a shortcut.
-
-An authorized operator configures Pages to use GitHub Actions. After the reviewed change is on `main`, run the workflow manually with `publish` set to true. Only that explicit main-branch invocation uploads the Pages deployment artifact and enables the deployment job. The workflow does not enable Pages or alter repository settings itself.
-
-The publication build uses the repository owner's GitHub Pages origin and `/parcela/`. If the intended host or base differs, update that configuration before deployment. Use the URL returned by the completed deployment. No address or deployed availability is promised by a local build. Live Pages deployment, permission behavior and public availability need separate verification.
+The `Documentation` workflow builds and checks the site on relevant pull requests and pushes to `main`. CI uses Node 24 and Python 3.12. On `main`, a `deploy` job then runs `npm run deploy --prefix docs/website` with the `CLOUDFLARE_API_TOKEN` repository secret. Create that token in Cloudflare with Workers Scripts:Edit and Workers Routes:Edit on the `davafons` account and Zone:Read on `davafons.com`. Without the secret the deploy job fails and names it.
