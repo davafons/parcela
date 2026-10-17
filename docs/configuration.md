@@ -1,5 +1,36 @@
 # Configuration and CLI
 
+## Short form
+
+Most projects need one line. `parcela init` writes it for you.
+
+```yaml
+web: npm run dev -- --port $PORT --host 127.0.0.1
+```
+
+Each top-level `name: command` is an HTTP service and a Process Compose process with that command. Several services and background workers look like this:
+
+```yaml
+services:
+  web: bin/rails server -p $PORT -b 127.0.0.1
+  api: node api/server.js --port $PORT
+workers:
+  jobs: bin/jobs
+```
+
+Conventions fill in the rest:
+
+- `version` defaults to 1.
+- The project is named after the main checkout directory, sanitized to a DNS label. Every jj workspace and Git worktree of a repository resolves to the same main checkout, so they share one project. Override it with `project: my-app` or `project: {id: ..., name: ...}`.
+- The default service, which gets the base URL, is `web` when present, otherwise the only service. With several services and no `web`, set `default_service`.
+- Every service gets its own `PORT`. In a non-default service's command, `$PORT` and `${PORT}` are rewritten to that service's `${PARCELA_SERVICE_<NAME>_PORT}`, because Process Compose expands braced variables from the shared environment when it loads the graph.
+- `workers` are processes without a port or a route.
+- A service can be a mapping when it needs more: `api: {command: node api.js, subdomain: backend, readiness_path: /up}`.
+
+`tasks`, `environment`, `inherit_environment` and `shutdown_timeout_seconds` work in both forms. The short form generates `process_compose`, so it refuses a hand-written `process_compose` block. Declare services either at the top level or under `services:`, not both. A top-level key that is close to a field name, such as `defualt_service`, fails with a suggestion instead of becoming a service.
+
+## Full form
+
 Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects an adopted source instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; startup registers the selected checkout with a stable role and name.
 
 ```yaml

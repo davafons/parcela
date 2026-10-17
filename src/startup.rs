@@ -76,24 +76,8 @@ fn main_identity() -> Identity {
 }
 
 fn preview_identity(name: &str) -> Result<Identity> {
-    let label = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    ensure!(
-        !label.is_empty(),
-        "checkout name has no DNS-safe characters; choose --name NAME"
-    );
+    let label = crate::config::sanitize_label(name)
+        .context("checkout name has no DNS-safe characters; choose --name NAME")?;
     Ok(Identity {
         role: Role::Preview,
         label,
