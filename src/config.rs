@@ -495,6 +495,7 @@ impl Manifest {
     }
 
     /// What `up` needs beyond schema validity: a process to start for every HTTP service.
+    /// A single-service graph may name its one process differently.
     pub fn check_startable(&self) -> Result<()> {
         let processes = self
             .process_compose
@@ -506,7 +507,7 @@ impl Manifest {
             .context("process_compose has no processes; add one named after each service")?;
         for service in self.services.keys() {
             ensure!(
-                processes.contains_key(service),
+                self.services.len() == 1 || processes.contains_key(service),
                 "service {service} has no process to start; add process_compose.processes.{service} with its command"
             );
         }

@@ -85,21 +85,11 @@ fn tool(name: &'static str, candidates: &[&str]) -> Check {
     }
 }
 
+/// The same load and startability checks as `parcela up`, so the detail is the error up would print.
 fn config(path: &Path) -> Check {
     let source = match locate(path) {
         Ok(source) => source,
-        Err(_) => {
-            return Check::fail(
-                "config",
-                format!(
-                    "no parcela.yaml in {} or above",
-                    path.canonicalize()
-                        .unwrap_or_else(|_| path.into())
-                        .display()
-                ),
-                "parcela init",
-            );
-        }
+        Err(error) => return Check::fail("config", format!("{error:#}"), "parcela init"),
     };
     let file = source.join("parcela.yaml");
     match Manifest::load(&file).and_then(|manifest| manifest.check_startable().map(|()| manifest)) {
@@ -109,8 +99,8 @@ fn config(path: &Path) -> Check {
         ),
         Err(error) => Check::fail(
             "config",
-            format!("{:#}", error),
-            format!("fix {}, then run parcela config check", file.display()),
+            format!("{error:#}"),
+            format!("fix {}, then run parcela doctor", file.display()),
         ),
     }
 }

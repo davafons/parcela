@@ -5,7 +5,6 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py'
-cargo run --locked --quiet -- --path examples/generic config check
 # Reject remnants of the abandoned implementation without using Git.
 if find . -path './.git' -prune -o -path './.jj' -prune -o -path './target' -prune -o \
     -type f \( -name '*.go' -o -name go.mod -o -name go.sum \) -print | grep .; then

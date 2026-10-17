@@ -634,23 +634,15 @@ pub fn preflight(
             .process_compose
             .as_ref()
             .context("up requires process_compose native graph")?;
+        manifest.check_startable()?;
         ensure!(
             graph
                 .get("processes")
                 .and_then(|v| v.as_object())
-                .is_some_and(|processes| !processes.is_empty()
-                    && processes
-                        .values()
-                        .all(|p| p.get("is_daemon") != Some(&json!(true)))),
+                .is_some_and(|processes| processes
+                    .values()
+                    .all(|p| p.get("is_daemon") != Some(&json!(true)))),
             "native graph must contain supervised, non-daemon processes"
-        );
-        ensure!(
-            manifest.services.len() == 1
-                || manifest.services.keys().all(|service| graph
-                    .get("processes")
-                    .and_then(|processes| processes.get(service))
-                    .is_some()),
-            "every routed service must name a native graph process"
         );
         crate::sockets::environment(&path)?;
         use std::os::unix::fs::PermissionsExt;

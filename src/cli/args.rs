@@ -156,11 +156,6 @@ pub enum Command {
         #[arg(long, hide = true)]
         process_compose: Option<String>,
     },
-    /// Validate parcela.yaml.
-    Config {
-        #[command(subcommand)]
-        command: ConfigCommand,
-    },
     /// Start, stop or check the HTTPS proxy that serves every environment's URL.
     Proxy {
         #[command(subcommand)]
@@ -251,12 +246,6 @@ pub struct Listen {
     /// Caddy binary.
     #[arg(long, default_value = "caddy", hide = true)]
     pub caddy: String,
-}
-
-#[derive(Subcommand)]
-pub enum ConfigCommand {
-    /// Check that parcela.yaml is valid and every service has a command. Creates no state.
-    Check,
 }
 
 #[derive(Subcommand)]

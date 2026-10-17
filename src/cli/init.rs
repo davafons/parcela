@@ -85,7 +85,7 @@ pub fn run(
     let path = directory.join("parcela.yaml");
     if fs::symlink_metadata(&path).is_ok() {
         bail!(
-            "{} already exists; edit it, or check it with parcela config check",
+            "{} already exists; edit it, or check it with parcela doctor",
             path.display()
         );
     }

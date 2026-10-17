@@ -77,7 +77,7 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
         String::from_utf8_lossy(&output.stderr),
         "parcela: nothing is registered yet; start this checkout with parcela up\n"
     );
-    let output = cli(&root, &state, &["config", "check"]);
+    let output = cli(&root, &state, &["up"]);
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         format!(

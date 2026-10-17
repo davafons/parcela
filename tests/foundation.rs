@@ -213,7 +213,6 @@ fn inspection_does_not_create_state_and_cli_requires_explicit_role() {
     let temp = TempDir::new().unwrap();
     let path = checkout(temp.path(), "app");
     let state = temp.path().join("state");
-    value(&cli(&path, &state, &["config", "check"]));
     assert_eq!(
         value(&cli(&path, &state, &["workspace", "list"]))["workspaces"],
         serde_json::json!([])

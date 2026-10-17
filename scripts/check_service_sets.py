@@ -102,7 +102,7 @@ process_compose:
         primary, workspace = sources[0]
         preview, _ = sources[1]
         if args.agent_recipe:
-            assert json.loads(cli(primary, 'config', 'check').stdout)['valid']
+            assert next(c for c in json.loads(cli(primary, '--json', 'doctor', check=False).stdout)['checks'] if c['name'] == 'config')['ok']
             context = json.loads(cli(primary, 'context').stdout)
             assert context['workspace']['id'] == workspace['id'] and context['workspace']['role'] == 'primary'
             assert set(context['planned_urls']) == {'frontend', 'backend'}

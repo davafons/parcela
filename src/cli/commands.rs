@@ -1,5 +1,5 @@
 use super::{
-    args::{Cli, Command, ConfigCommand, Global, WorkspaceCommand},
+    args::{Cli, Command, Global, WorkspaceCommand},
     output::{Output, status_diagnostics},
     render,
 };
@@ -88,15 +88,6 @@ fn inventory(state: &Path, project: Option<&str>, out: Output) -> Result<()> {
 }
 fn inspect(cli: Cli, out: Output) -> Result<()> {
     match cli.command {
-        Command::Config {
-            command: ConfigCommand::Check,
-        } => {
-            let (source, manifest) = project(&cli.path)?;
-            manifest.check_startable()?;
-            let result = serde_json::json!({"valid": true, "project_id": manifest.project.id, "manifest": source.join("parcela.yaml"),
-                "backend_graph_validated": false, "schema_version": 1});
-            out.emit(&result, |style| render::config(&result, style))
-        }
         Command::Status { all } => {
             let state = state_dir(cli.state_dir)?;
             if all {
@@ -368,11 +359,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             } else {
                 project(&cli.path)?
             };
+            manifest.check_startable()?;
             let state = state_dir(cli.state_dir)?;
-            ensure!(
-                manifest.process_compose.is_some(),
-                "parcela.yaml has no process_compose graph; define the services to start or use parcela run -- COMMAND"
-            );
             let (mut registry, workspace) = if restart || snapshot.is_some() {
                 ensure!(
                     request.name.is_none() && !request.primary,

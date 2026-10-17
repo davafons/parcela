@@ -246,13 +246,3 @@ pub fn discover(value: &Value, _style: &Style) -> String {
         .collect();
     table(&["VCS", "NAME", "REFS", "ENVIRONMENT", "PATH"], &rows)
 }
-
-pub fn config(value: &Value, style: &Style) -> String {
-    format!(
-        "{} {} is valid\n  {:<10}{}\n",
-        style.ok(),
-        cell(&value["manifest"]),
-        "project",
-        cell(&value["project_id"]),
-    )
-}

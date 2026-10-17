@@ -20,12 +20,11 @@ Set `CHECKOUT` to the intended existing checkout's absolute path. Do not infer t
 ```sh
 parcela --json ls
 parcela --json --path "$CHECKOUT" doctor
-parcela --path "$CHECKOUT" config check
 parcela --path "$CHECKOUT" context
 parcela --path "$CHECKOUT" status
 ```
 
-`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `context` requires a registered configured checkout and returns its identity, planned URLs and caveats. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
+`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. `context` requires a registered configured checkout and returns its identity, planned URLs and caveats. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Its `config` check reports the same validation error `up` would print. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
 
 If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a one-line short-form manifest with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
 

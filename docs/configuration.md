@@ -147,8 +147,7 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `url [--service NAME]` | Plain-text default or selected service URL; does not certify reachability |
 | `rm` | Forget the selected stopped environment and release its hostnames and port leases; refuses a running one; keeps source and runtime data |
 | `rm --prune` | Forget every stopped environment whose checkout directory no longer exists; running ones are skipped |
-| `doctor` | Readiness checklist: Process Compose and Caddy on `PATH`, `lsof`, `ps`, the nearest `parcela.yaml`, the private state directory and the proxy; creates no state |
-| `config check` | Strict validation, including a Process Compose process for every HTTP service; creates no state |
+| `doctor` | Readiness checklist: Process Compose and Caddy on `PATH`, `lsof`, `ps`, the nearest `parcela.yaml` (the same validation and error text as `up`, including a Process Compose process for every HTTP service), the private state directory and the proxy; creates no state |
 | `run [--name NAME\|--primary] [--backend-port N] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
 | `recover [--detach]` | Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |

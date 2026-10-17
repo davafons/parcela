@@ -27,11 +27,15 @@ fn init(path: &Path, args: &[&str]) -> String {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let check = cli(path, &["config", "check"]);
+    let doctor: serde_json::Value =
+        serde_json::from_slice(&cli(path, &["--json", "doctor"]).stdout).unwrap();
     assert!(
-        check.status.success(),
-        "{}",
-        String::from_utf8_lossy(&check.stderr)
+        doctor["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["name"] == "config" && check["ok"] == true),
+        "{doctor}"
     );
     assert!(!path.join("unused-state").exists());
     fs::read_to_string(path.join("parcela.yaml")).unwrap()
@@ -64,9 +68,6 @@ fn init_writes_a_valid_one_line_manifest_named_after_the_directory() {
             "{HEADER}# No dev server detected; this serves the directory, replace it with yours\nweb: python3 -m http.server $PORT --bind 127.0.0.1\n"
         )
     );
-    let check: serde_json::Value =
-        serde_json::from_slice(&cli(&path, &["config", "check"]).stdout).unwrap();
-    assert_eq!(check["project_id"], "notes-app");
 }
 
 #[test]
@@ -126,7 +127,7 @@ fn init_never_overwrites_an_existing_manifest() {
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         format!(
-            "parcela: {} already exists; edit it, or check it with parcela config check\n",
+            "parcela: {} already exists; edit it, or check it with parcela doctor\n",
             path.join("parcela.yaml").display()
         )
     );

@@ -39,11 +39,10 @@ fn project() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
 #[test]
 fn piped_stdout_defaults_to_json_and_json_flag_forces_it() {
     let (_t, path, state) = project();
-    for args in [&["config", "check"][..], &["--json", "config", "check"]] {
+    for args in [&["status", "--all"][..], &["--json", "status", "--all"]] {
         let value: serde_json::Value =
             serde_json::from_str(&stdout(&cli(&path, &state, args))).unwrap();
-        assert_eq!(value["valid"], true);
-        assert_eq!(value["project_id"], "output-test");
+        assert_eq!(value["workspaces"], serde_json::json!([]));
     }
     let forced: serde_json::Value = serde_json::from_str(&stdout(&cli(
         &path,
@@ -60,13 +59,6 @@ fn piped_stdout_defaults_to_json_and_json_flag_forces_it() {
 #[test]
 fn human_output_is_aligned_text_without_color_when_piped() {
     let (_t, path, state) = project();
-    assert_eq!(
-        stdout(&cli(&path, &state, &["--human", "config", "check"])),
-        format!(
-            "✓ {} is valid\n  project   output-test\n",
-            path.join("parcela.yaml").display()
-        )
-    );
     assert_eq!(
         stdout(&cli(&path, &state, &["--human", "status", "--all"])),
         "No environments registered. Start one with parcela up.\n"

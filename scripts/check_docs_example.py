@@ -58,8 +58,7 @@ def main():
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source / name, destination)
             copies.append(path)
-            checked = json.loads(cli(path, 'config', 'check').stdout)
-            assert checked['valid'] is True
+            assert next(c for c in json.loads(cli(path, '--json', 'doctor', check=False).stdout)['checks'] if c['name'] == 'config')['ok'] is True
         log = open(root / 'proxy.log', 'w')
         handles.append(log)
         proxy = subprocess.Popen([str(BINARY), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,

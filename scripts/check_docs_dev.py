@@ -85,7 +85,7 @@ def main():
             copies.append(path)
             (path / 'docs/website/node_modules').symlink_to(website / 'node_modules', target_is_directory=True)
             (path / '.docs-dev-fixture.json').write_text(json.dumps({'source': str(path)}) + '\n')
-            assert json.loads(cli(path, 'config', 'check').stdout)['valid']
+            assert next(c for c in json.loads(cli(path, '--json', 'doctor', check=False).stdout)['checks'] if c['name'] == 'config')['ok']
         operation = jj(primary, '--ignore-working-copy', 'op', 'log', '--limit', '1', '--no-graph', '-T', 'id')
         discovery = json.loads(cli(primary, 'workspace', 'discover').stdout)
         assert {row['source'] for row in discovery['checkouts']} == {str(primary), str(preview)}

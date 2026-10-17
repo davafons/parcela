@@ -76,7 +76,7 @@ tasks:
 ''')
             sources.append(source)
         alpha, beta = sources
-        assert json.loads(cli(alpha, 'config', 'check').stdout)['valid']
+        assert next(c for c in json.loads(cli(alpha, '--json', 'doctor', check=False).stdout)['checks'] if c['name'] == 'config')['ok']
         proxy = subprocess.Popen([str(BINARY), '--path', str(root), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,
                                   '--port', str(https)],
                                  stdout=(log := open(root / 'proxy.log', 'w')), stderr=log)

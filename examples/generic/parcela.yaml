@@ -1,4 +1,4 @@
-# Organizer schema example. No command is executed by config check/adoption.
+# Organizer schema example. parcela doctor validates it without running any command.
 version: 1
 project:
   id: generic-demo
