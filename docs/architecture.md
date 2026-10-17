@@ -17,7 +17,7 @@ Parcela owns identity, context and integration, not a proxy stack or a second su
 
 Adoption is explicit; a preview never implicitly becomes primary. Branches/bookmarks are not identities. Missing source and uncertain runtime state do not authorize deletion. Inspection does not create absent state. Private user-owned paths are operational boundaries, not isolation against malicious same-user code.
 
-A bound port probe plus durable lease is not an atomic listener handoff. Before publishing, the runtime verifies that the loopback listener belongs to its live retained child/descendants and passes HTTP readiness. All declared HTTP endpoints must pass readiness before the group routes open. A changed listener identity withdraws the group and repeats readiness. `status` probes HTTP health on demand; the runtime does not continuously poll it after establishment. Crash recovery from stored PIDs is unsupported.
+A bound port probe plus durable lease is not an atomic listener handoff. Before publishing, the runtime verifies that every listener on the allocated port binds loopback (`127.0.0.1`, `::1`) or a wildcard (`0.0.0.0`, `::`, `*`), belongs to its live retained child/descendants, and passes HTTP readiness. Wildcard binds are accepted without a warning. Readiness and the Caddy upstream dial `127.0.0.1` when an IPv4 listener exists and `::1` otherwise. All declared HTTP endpoints must pass readiness before the group routes open. A changed listener identity withdraws the group and repeats readiness. `status` probes HTTP health on demand; the runtime does not continuously poll it after establishment. Crash recovery from stored PIDs is unsupported.
 
 ## Dedicated routing
 

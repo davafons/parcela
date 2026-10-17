@@ -238,7 +238,7 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
                 "proxy loop rejected"
             );
             routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
-                "handler":"reverse_proxy", "upstreams":[{"dial":format!("127.0.0.1:{}",endpoint.backend_port)}],
+                "handler":"reverse_proxy", "upstreams":[{"dial":crate::process::backend_address(endpoint.backend_port)?.to_string()}],
                 "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
             }], "terminal": true}));
             redirects.push(json!({"match":[{"host":[endpoint.hostname]}], "handle":[{"handler":"static_response", "status_code":308,

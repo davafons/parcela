@@ -4,6 +4,7 @@ use signal_hook::{
     flag,
 };
 use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     os::unix::process::{CommandExt, ExitStatusExt},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
@@ -215,48 +216,99 @@ pub fn version(binary: &str, argument: &str) -> Result<String> {
 }
 /// Verify the listener itself, not merely an HTTP answer at an allocated port.
 /// lsof is a diagnosed prerequisite for this initial Unix TCP implementation.
+///
+/// Every LISTEN socket on the port must be loopback (`127.0.0.1`, `::1`) or a
+/// wildcard (`0.0.0.0`, `::`, `*`) and belong to the owner's process tree.
+/// Wildcard binds are accepted without a warning: the application chose that
+/// exposure, and Parcela still routes only through loopback.
 pub fn listener_identity(port: u16, owner: u32) -> Result<Vec<u32>> {
+    let mut found = Vec::new();
+    for listener in listeners(port)? {
+        let Some(identity) = Identity::read(listener.pid)? else {
+            continue;
+        };
+        let owned = descendant(listener.pid, owner)?;
+        if !identity.alive() {
+            continue;
+        }
+        ensure!(
+            owned,
+            "allocated endpoint was acquired by a foreign listener; refusing route registration"
+        );
+        found.push(listener.pid);
+    }
+    found.sort_unstable();
+    found.dedup();
+    Ok(found)
+}
+/// The loopback address that reaches the backend on `port`, preferring IPv4.
+pub fn backend_address(port: u16) -> Result<SocketAddr> {
+    let listeners = listeners(port)?;
+    let ip = if listeners.is_empty() || listeners.iter().any(|listener| listener.loopback.is_ipv4())
+    {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    } else {
+        IpAddr::V6(Ipv6Addr::LOCALHOST)
+    };
+    Ok(SocketAddr::new(ip, port))
+}
+
+#[derive(Debug)]
+struct Listener {
+    pid: u32,
+    loopback: IpAddr,
+}
+fn listeners(port: u16) -> Result<Vec<Listener>> {
     let lsof = if std::path::Path::new("/usr/sbin/lsof").exists() {
         "/usr/sbin/lsof"
     } else {
         "lsof"
     };
     let output = Command::new(lsof)
-        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpn"])
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fptn"])
         .output()
         .context("lsof is required to verify TCP listener ownership")?;
     if output.stdout.is_empty() && output.status.code() == Some(1) {
         return Ok(Vec::new());
     }
     ensure!(output.status.success(), "lsof listener inspection failed");
-    let text = String::from_utf8(output.stdout)?;
+    parse_listeners(&String::from_utf8(output.stdout)?, port)
+}
+fn parse_listeners(text: &str, port: u16) -> Result<Vec<Listener>> {
     let mut pid = 0;
+    let mut family = None;
     let mut found = Vec::new();
     for line in text.lines() {
         if let Some(value) = line.strip_prefix('p') {
             pid = value.parse()?;
-        }
-        if let Some(name) = line.strip_prefix('n') {
-            ensure!(
-                name == format!("127.0.0.1:{port}"),
-                "backend must listen only on 127.0.0.1:{port}, found {name}"
-            );
-            let Some(identity) = Identity::read(pid)? else {
-                continue;
+        } else if line.starts_with('f') {
+            family = None;
+        } else if let Some(value) = line.strip_prefix('t') {
+            family = Some(value);
+        } else if let Some(name) = line.strip_prefix('n') {
+            let refused = || {
+                format!(
+                    "backend must listen on loopback or a wildcard at port {port}, found {name}"
+                )
             };
-            let owned = descendant(pid, owner)?;
-            if !identity.alive() {
-                continue;
-            }
-            ensure!(
-                owned,
-                "allocated endpoint was acquired by a foreign listener; refusing route registration"
-            );
-            found.push(pid);
+            let (host, bound) = name.rsplit_once(':').with_context(refused)?;
+            ensure!(bound == port.to_string(), refused());
+            let loopback = match (host, family) {
+                ("*", Some("IPv4")) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                ("*", Some("IPv6")) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                _ => match host.trim_start_matches('[').trim_end_matches(']').parse() {
+                    Ok(IpAddr::V4(Ipv4Addr::LOCALHOST | Ipv4Addr::UNSPECIFIED)) => {
+                        IpAddr::V4(Ipv4Addr::LOCALHOST)
+                    }
+                    Ok(IpAddr::V6(Ipv6Addr::LOCALHOST | Ipv6Addr::UNSPECIFIED)) => {
+                        IpAddr::V6(Ipv6Addr::LOCALHOST)
+                    }
+                    _ => anyhow::bail!(refused()),
+                },
+            };
+            found.push(Listener { pid, loopback });
         }
     }
-    found.sort_unstable();
-    found.dedup();
     Ok(found)
 }
 fn descendant(mut pid: u32, owner: u32) -> Result<bool> {
@@ -419,4 +471,79 @@ pub fn tree(root: &Identity) -> Result<Vec<Identity>> {
     pids.into_iter()
         .filter_map(|pid| Identity::read(pid).transpose())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn loopbacks(text: &str, port: u16) -> Vec<(u32, String)> {
+        parse_listeners(text, port)
+            .unwrap()
+            .into_iter()
+            .map(|listener| (listener.pid, listener.loopback.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn ipv4_loopback_reaches_ipv4_loopback() {
+        assert_eq!(
+            loopbacks("p10\nf3\ntIPv4\nn127.0.0.1:3000\n", 3000),
+            [(10, "127.0.0.1".into())]
+        );
+    }
+    #[test]
+    fn ipv6_loopback_reaches_ipv6_loopback() {
+        assert_eq!(
+            loopbacks("p10\nf3\ntIPv6\nn[::1]:3000\n", 3000),
+            [(10, "::1".into())]
+        );
+    }
+    #[test]
+    fn localhost_bind_reports_both_families() {
+        assert_eq!(
+            loopbacks(
+                "p10\nf3\ntIPv4\nn127.0.0.1:3000\nf4\ntIPv6\nn[::1]:3000\n",
+                3000
+            ),
+            [(10, "127.0.0.1".into()), (10, "::1".into())]
+        );
+    }
+    #[test]
+    fn macos_wildcards_take_their_family_from_the_type_field() {
+        assert_eq!(
+            loopbacks("p10\nf3\ntIPv4\nn*:3000\np11\nf5\ntIPv6\nn*:3000\n", 3000),
+            [(10, "127.0.0.1".into()), (11, "::1".into())]
+        );
+    }
+    #[test]
+    fn literal_wildcards_are_accepted() {
+        assert_eq!(
+            loopbacks(
+                "p10\nf3\ntIPv4\nn0.0.0.0:3000\nf4\ntIPv6\nn[::]:3000\n",
+                3000
+            ),
+            [(10, "127.0.0.1".into()), (10, "::1".into())]
+        );
+    }
+    #[test]
+    fn non_loopback_addresses_are_refused() {
+        for name in ["192.168.1.20:3000", "[fe80::1]:3000", "127.0.0.2:3000"] {
+            assert_eq!(
+                parse_listeners(&format!("p10\nf3\ntIPv4\nn{name}\n"), 3000)
+                    .unwrap_err()
+                    .to_string(),
+                format!("backend must listen on loopback or a wildcard at port 3000, found {name}")
+            );
+        }
+    }
+    #[test]
+    fn untyped_wildcard_is_refused() {
+        assert_eq!(
+            parse_listeners("p10\nf3\nn*:3000\n", 3000)
+                .unwrap_err()
+                .to_string(),
+            "backend must listen on loopback or a wildcard at port 3000, found *:3000"
+        );
+    }
 }

@@ -16,7 +16,7 @@ pub fn admin(socket: &Path, method: &str, path: &str, body: &[u8]) -> Result<(u1
     exchange(&mut stream, method, path, "localhost", body)
 }
 pub fn readiness(port: u16, host: &str, path: &str) -> Result<bool> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let address = crate::process::backend_address(port)?;
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(150))?;
     stream.set_read_timeout(Some(Duration::from_millis(300)))?;
     stream.set_write_timeout(Some(Duration::from_millis(300)))?;
