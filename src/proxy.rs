@@ -259,3 +259,57 @@ pub fn stop(state: &Path) -> Result<bool> {
     }
     Ok(true)
 }
+
+/// The root certificate of the proxy's private CA, for `curl --cacert` and trust stores.
+pub fn certificate(state: &Path) -> PathBuf {
+    router::proxy_dir(state).join("data/pki/authorities/local/root.crt")
+}
+
+/// `caddy trust` against this proxy: the same private storage and admin socket (from the
+/// generated config), so it installs Parcela's CA and never another Caddy's.
+pub fn trust_command(state: &Path, caddy: &str) -> Command {
+    let directory = router::proxy_dir(state);
+    let mut command = Command::new(caddy);
+    command
+        .arg("trust")
+        .arg("--config")
+        .arg(directory.join("caddy.json"))
+        .current_dir(&directory)
+        .env("XDG_DATA_HOME", directory.join("data"))
+        .env("XDG_CONFIG_HOME", directory.join("config"));
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ffi::OsStr, path::Path};
+
+    #[test]
+    fn trust_runs_caddy_trust_with_the_proxys_private_config_and_storage() {
+        let command = super::trust_command(Path::new("/state"), "/bin/caddy");
+        assert_eq!(command.get_program(), "/bin/caddy");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["trust", "--config", "/state/proxy/caddy.json"]
+        );
+        assert_eq!(command.get_current_dir(), Some(Path::new("/state/proxy")));
+        let envs: Vec<(&OsStr, Option<&OsStr>)> = command.get_envs().collect();
+        assert_eq!(
+            envs,
+            [
+                (
+                    OsStr::new("XDG_CONFIG_HOME"),
+                    Some(OsStr::new("/state/proxy/config"))
+                ),
+                (
+                    OsStr::new("XDG_DATA_HOME"),
+                    Some(OsStr::new("/state/proxy/data"))
+                ),
+            ]
+        );
+        assert_eq!(
+            super::certificate(Path::new("/state")),
+            Path::new("/state/proxy/data/pki/authorities/local/root.crt")
+        );
+    }
+}

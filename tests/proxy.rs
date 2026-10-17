@@ -88,6 +88,10 @@ fn the_saved_profile_beats_the_default_and_parcela_https_port_only_replaces_the_
         .unwrap();
     assert_eq!(json_of(&overridden)["url"], "https://<name>.localhost:4433");
     assert!(!state.exists(), "status creates no state");
+    let print = cli(&state, &["trust", "--print"]);
+    assert_eq!(print.status.code(), Some(1));
+    assert!(stderr(&print).ends_with("start the proxy with `parcela proxy start`\n"));
+    assert!(!state.exists(), "trust --print creates no state");
 
     parcela::frontdoor::FrontDoor::Port { https: 2000 }
         .save(&state)
@@ -150,6 +154,25 @@ fn proxy_start_runs_in_the_background_until_proxy_stop() {
     let status = cli(&proxy.state, &["--json", "proxy", "status"]);
     assert!(status.status.success());
     assert_eq!(json_of(&status)["pid"], pid);
+
+    let print = cli(&proxy.state, &["trust", "--print"]);
+    assert!(print.status.success(), "{}", stderr(&print));
+    let certificate = proxy
+        .state
+        .canonicalize()
+        .unwrap()
+        .join("proxy/data/pki/authorities/local/root.crt");
+    assert_eq!(
+        String::from_utf8_lossy(&print.stdout),
+        format!(
+            "{}\n",
+            proxy
+                .state
+                .join("proxy/data/pki/authorities/local/root.crt")
+                .display()
+        )
+    );
+    assert!(certificate.is_file());
 
     let again = json_of(&cli(&proxy.state, &["--json", "proxy", "start"]));
     assert_eq!(again["already_running"], true);

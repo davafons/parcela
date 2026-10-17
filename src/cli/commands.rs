@@ -318,6 +318,9 @@ pub fn run(mut cli: Cli) -> Result<i32> {
     let restarting = matches!(cli.command, Command::Restart { .. });
     match cli.command {
         Command::Proxy { command } => super::proxy::run(&state_dir(cli.state_dir)?, command, out),
+        Command::Trust { print, caddy } => {
+            super::proxy::trust(&state_dir(cli.state_dir)?, print, &caddy)
+        }
         Command::Run {
             backend_port,
             readiness_timeout,

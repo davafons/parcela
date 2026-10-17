@@ -122,3 +122,30 @@ fn report_started(state: &Path, started: &Started, out: Output) -> Result<i32> {
     out.emit(&report, |style| render::proxy_status(&report, style))?;
     Ok(0)
 }
+
+/// `parcela trust`: explicit, and the only command that changes system trust.
+pub fn trust(state: &Path, print: bool, caddy: &str) -> Result<i32> {
+    let certificate = proxy::certificate(state);
+    if print {
+        anyhow::ensure!(
+            certificate.is_file(),
+            "no certificate authority yet at {}; start the proxy with `parcela proxy start`",
+            certificate.display()
+        );
+        println!("{}", certificate.display());
+        return Ok(0);
+    }
+    Registry::open(state, true)?.context("cannot create the registry")?;
+    proxy::ensure_running(state, "<name>.localhost")?;
+    eprintln!(
+        "parcela: adding Parcela's local certificate authority to the system trust store, so browsers accept its https://*.localhost URLs.\n  certificate  {}\n  command      {caddy} trust (Caddy may ask for your password)\n  undo         {caddy} untrust --cert {}",
+        certificate.display(),
+        certificate.display(),
+    );
+    let status = proxy::trust_command(state, caddy)
+        .status()
+        .with_context(|| format!("run {caddy} trust"))?;
+    anyhow::ensure!(status.success(), "{caddy} trust failed ({status})");
+    eprintln!("parcela: trusted. Restart the browser if it still warns.");
+    Ok(0)
+}

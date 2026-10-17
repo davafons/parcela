@@ -246,7 +246,7 @@ pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
     ];
     let ready = checks.iter().all(|check| check.ok);
     let notes = [
-        "HTTPS trust is not checked. Parcela never installs or trusts a certificate authority; if the browser warns, trust Caddy's local CA yourself.",
+        "HTTPS trust is not checked, and only parcela trust changes it. If the browser warns, run parcela trust once.",
     ];
     let next = checks
         .iter()

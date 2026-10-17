@@ -166,6 +166,15 @@ pub enum Command {
         #[command(subcommand)]
         command: ProxyCommand,
     },
+    /// Trust Parcela's local certificate authority so browsers accept its URLs. Asks for your password.
+    Trust {
+        /// Print the CA certificate path (for curl --cacert) and change nothing.
+        #[arg(long)]
+        print: bool,
+        /// Caddy binary.
+        #[arg(long, default_value = "caddy", hide = true)]
+        caddy: String,
+    },
     /// Run one literal command as the web service instead of parcela.yaml's services.
     Run {
         /// Preview name for this checkout. Defaults to the jj workspace or Git worktree name.
