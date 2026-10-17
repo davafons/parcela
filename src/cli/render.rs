@@ -209,7 +209,7 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
     if value["front_door"]["mode"] == "port" {
         text.push_str(&format!(
             "  {}\n",
-            style.dim("Run `parcela setup` once for URLs without a port.")
+            style.dim("Run `parcela trust` once so browsers trust these URLs.")
         ));
     }
     text

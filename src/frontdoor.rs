@@ -58,7 +58,7 @@ impl FrontDoor {
         let listeners = self.listeners();
         ensure!(
             listeners.iter().all(|port| *port >= 1024),
-            "the proxy listens only on unprivileged ports (1024 or higher); standard ports 443 and 80 need `parcela setup`"
+            "the proxy listens only on unprivileged ports (1024 or higher); standard ports 443 and 80 need a separate forwarder"
         );
         ensure!(
             listeners.first() != listeners.get(1),

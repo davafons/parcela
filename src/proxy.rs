@@ -84,7 +84,7 @@ pub fn ensure_running(state: &Path, host: &str) -> Result<Router> {
 pub fn started_hint(router: &Router, host: &str) -> String {
     match router.front_door {
         FrontDoor::Port { https } => format!(
-            "Started the Parcela proxy on :{https} (run `parcela setup` once for https://{host} without a port)"
+            "Started the Parcela proxy on :{https} (run `parcela trust` once so browsers trust https://{host}:{https})"
         ),
         FrontDoor::Standard { .. } => "Started the Parcela proxy on standard ports".into(),
     }
@@ -125,7 +125,7 @@ pub fn start(state: &Path, caddy: &str, front_door: FrontDoor, explicit: bool) -
     }
     ensure!(
         matches!(front_door, FrontDoor::Port { .. }) || front_door == FrontDoor::load(state)?,
-        "standard ports must be saved by `parcela setup` before the proxy starts on them"
+        "standard ports must be saved in proxy/frontdoor.json with a forwarder in place before the proxy starts on them"
     );
     let log_file = log_path(state);
     let log = OpenOptions::new()

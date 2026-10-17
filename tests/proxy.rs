@@ -355,8 +355,9 @@ fn parallel_ups_in_two_checkouts_start_one_proxy_and_both_urls_answer() {
     for output in &outputs {
         assert!(output.status.success(), "{}", stderr(output));
     }
-    let hint =
-        format!("Started the Parcela proxy on :{port} (run `parcela setup` once for https://");
+    let hint = format!(
+        "Started the Parcela proxy on :{port} (run `parcela trust` once so browsers trust https://"
+    );
     assert_eq!(
         outputs
             .iter()
