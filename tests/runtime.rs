@@ -5,7 +5,7 @@ use parcela::{
     router::{self, Router},
     runtime,
 };
-use std::{fs, os::unix::fs::symlink};
+use std::{collections::BTreeMap, fs, os::unix::fs::symlink};
 use tempfile::TempDir;
 use uuid::Uuid;
 fn fixture() -> (TempDir, Registry, Manifest, parcela::registry::Workspace) {
@@ -300,12 +300,12 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
             "compose",
             "https://auth-app.localhost",
             &endpoints,
+            &BTreeMap::from([("db".into(), 32013)]),
         )
         .unwrap();
-    assert_eq!(
-        registry.session(&workspace.id).unwrap().unwrap().endpoints,
-        endpoints
-    );
+    let recorded = registry.session(&workspace.id).unwrap().unwrap();
+    assert_eq!(recorded.endpoints, endpoints);
+    assert_eq!(recorded.ports, BTreeMap::from([("db".into(), 32013)]));
     let other = temp.path().join("other");
     fs::create_dir(&other).unwrap();
     let other = registry
@@ -315,6 +315,12 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
         registry
             .begin_session(&other, &token, 32011, "run", "https://other-app.localhost")
             .is_err()
+    );
+    assert!(
+        registry
+            .begin_session(&other, &token, 32013, "run", "https://other-app.localhost")
+            .is_err(),
+        "a named port is leased like an endpoint"
     );
     let other_endpoints = vec![
         Endpoint {
@@ -338,7 +344,8 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
                 32012,
                 "compose",
                 "https://other-app.localhost",
-                &other_endpoints
+                &other_endpoints,
+                &BTreeMap::new()
             )
             .is_err()
     );
@@ -447,7 +454,7 @@ fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
     drop(registry);
     let state = temp.path().join("state");
     let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
-    connection.execute_batch("DROP TABLE active_ports; DROP TABLE workspace_hosts; ALTER TABLE sessions DROP COLUMN endpoints;
+    connection.execute_batch("DROP TABLE active_ports; DROP TABLE workspace_hosts; ALTER TABLE sessions DROP COLUMN endpoints; ALTER TABLE sessions DROP COLUMN ports;
         CREATE UNIQUE INDEX active_port ON sessions(backend_port) WHERE status != 'stopped'; PRAGMA user_version=2;").unwrap();
     let old = Registry::open(&state, false).unwrap().unwrap();
     assert_eq!(
@@ -516,4 +523,57 @@ fn task_runtime_has_only_generic_dirs_and_strips_only_supervisor_controls() {
         String::from_utf8(output.stdout).unwrap(),
         "cache/\ndata/\nlog/\ntask.lock\ntmp/\ninherited unset unset\n"
     );
+}
+
+#[test]
+fn schema_3_registry_migrates_to_named_ports_without_losing_the_active_lease() {
+    let (temp, mut registry, _manifest, workspace) = fixture();
+    let token = Uuid::new_v4().to_string();
+    let session = registry
+        .begin_session(
+            &workspace,
+            &token,
+            32040,
+            "compose",
+            "https://auth-app.localhost",
+        )
+        .unwrap();
+    drop(registry);
+    let state = temp.path().join("state");
+    let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
+    connection
+        .execute_batch("ALTER TABLE sessions DROP COLUMN ports; PRAGMA user_version=3;")
+        .unwrap();
+    let old = Registry::open(&state, false).unwrap().unwrap();
+    let read = old.session(&workspace.id).unwrap().unwrap();
+    assert_eq!(read.token, session.token);
+    assert!(read.ports.is_empty());
+    drop(old);
+    let mut migrated = Registry::open(&state, true).unwrap().unwrap();
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+            .unwrap(),
+        4
+    );
+    let current = migrated.session(&workspace.id).unwrap().unwrap();
+    assert_eq!(current.token, session.token);
+    assert_eq!(current.leased_ports(), [32040]);
+    migrated.session_status(&current, "stopped").unwrap();
+    let next = migrated
+        .begin_endpoints(
+            &workspace,
+            &token,
+            32041,
+            "compose",
+            "https://auth-app.localhost",
+            &[],
+            &BTreeMap::from([("db".into(), 32042)]),
+        )
+        .unwrap();
+    assert_eq!(
+        migrated.session(&workspace.id).unwrap().unwrap().ports,
+        next.ports
+    );
+    assert_eq!(next.leased_ports(), [32041, 32042]);
 }

@@ -26,7 +26,15 @@ pub fn environment(
     url: &str,
     port: Option<u16>,
 ) -> Result<BTreeMap<String, String>> {
-    environment_context(manifest, workspace, runtime, url, port, &[])
+    environment_context(
+        manifest,
+        workspace,
+        runtime,
+        url,
+        port,
+        &[],
+        &BTreeMap::new(),
+    )
 }
 pub fn session_environment(
     manifest: &Manifest,
@@ -41,6 +49,7 @@ pub fn session_environment(
         &session.public_url,
         Some(session.backend_port),
         &session.endpoints(&manifest.default_service),
+        &session.ports,
     )
 }
 fn environment_context(
@@ -50,6 +59,7 @@ fn environment_context(
     url: &str,
     port: Option<u16>,
     endpoints: &[Endpoint],
+    ports: &BTreeMap<String, u16>,
 ) -> Result<BTreeMap<String, String>> {
     let mut context = BTreeMap::from([
         ("PARCELA_PROJECT_ID".into(), workspace.project_id.clone()),
@@ -91,6 +101,9 @@ fn environment_context(
         }) {
             context.insert(format!("{prefix}_PORT"), port.to_string());
         }
+    }
+    for (name, port) in ports {
+        context.insert(crate::config::port_variable(name), port.to_string());
     }
     for (key, value) in &manifest.environment {
         let mut resolved = value.clone();
@@ -162,7 +175,8 @@ pub fn run(
     let path = runtime(registry, workspace)?;
     let _owner = Lock::acquire(&path.join("owner.lock"))?;
     converge_crashed_session(registry, workspace, &_owner)?;
-    let (endpoints, probes) = allocate(registry, manifest, workspace, &router, backend_port)?;
+    let (endpoints, ports, probes) =
+        allocate(registry, manifest, workspace, &router, backend_port)?;
     let default = endpoints
         .iter()
         .find(|endpoint| endpoint.service == manifest.default_service)
@@ -179,6 +193,7 @@ pub fn run(
         kind,
         &router.url(&workspace.hostname),
         &endpoints,
+        &ports,
     )?;
     let prepared = (|| -> Result<_> {
         let mut resolved_workspace = registry.current(&workspace.source, manifest)?;
@@ -357,39 +372,46 @@ pub fn resolve_binary(binary: &str, source: &std::path::Path) -> Result<PathBuf>
         .with_context(|| format!("backend executable unavailable: {binary}"))
 }
 
+type Allocation = (Vec<Endpoint>, BTreeMap<String, u16>, Vec<TcpListener>);
+
+/// Probe a free loopback port for every service endpoint and named port, skipping every port
+/// another active session leases. Named ports prefer the environment's previous run's port.
 fn allocate(
     registry: &Registry,
     manifest: &Manifest,
     workspace: &Workspace,
     router: &Router,
     port: Option<u16>,
-) -> Result<(Vec<Endpoint>, Vec<TcpListener>)> {
+) -> Result<Allocation> {
     let unavailable: std::collections::BTreeSet<_> = registry
         .sessions()?
         .iter()
         .filter(|session| session.status != "stopped")
-        .flat_map(Session::ports)
+        .flat_map(Session::leased_ports)
+        .chain([router.http_port, router.https_port])
         .collect();
-    let mut endpoints = Vec::new();
-    let mut probes = Vec::new();
-    for (service, hostname) in manifest.service_hosts(&workspace.hostname)? {
-        let requested = if service == manifest.default_service {
-            port.unwrap_or(0)
-        } else {
-            0
-        };
+    let probe_free = || -> Result<TcpListener> {
         let mut skipped = Vec::new();
-        let probe = loop {
-            let probe = TcpListener::bind(("127.0.0.1", requested))
-                .context("backend endpoint unavailable; foreign listeners are never stopped")?;
-            if requested != 0 || !unavailable.contains(&probe.local_addr()?.port()) {
-                break probe;
+        loop {
+            let probe = TcpListener::bind(("127.0.0.1", 0))
+                .context("no free loopback port; foreign listeners are never stopped")?;
+            if !unavailable.contains(&probe.local_addr()?.port()) {
+                return Ok(probe);
             }
             skipped.push(probe);
             ensure!(
                 skipped.len() < 32,
                 "unable to allocate an unreserved backend endpoint"
             );
+        }
+    };
+    let mut endpoints = Vec::new();
+    let mut probes = Vec::new();
+    for (service, hostname) in manifest.service_hosts(&workspace.hostname)? {
+        let probe = match port.filter(|_| service == manifest.default_service) {
+            Some(requested) => TcpListener::bind(("127.0.0.1", requested))
+                .context("backend endpoint unavailable; foreign listeners are never stopped")?,
+            None => probe_free()?,
         };
         let backend_port = probe.local_addr()?.port();
         ensure!(
@@ -406,7 +428,24 @@ fn allocate(
         });
         probes.push(probe);
     }
-    Ok((endpoints, probes))
+    let previous = registry
+        .session(&workspace.id)?
+        .map(|session| session.ports)
+        .unwrap_or_default();
+    let mut ports = BTreeMap::new();
+    for name in &manifest.ports {
+        let reused = previous
+            .get(name)
+            .filter(|port| !unavailable.contains(port))
+            .and_then(|port| TcpListener::bind(("127.0.0.1", *port)).ok());
+        let probe = match reused {
+            Some(probe) => probe,
+            None => probe_free()?,
+        };
+        ports.insert(name.clone(), probe.local_addr()?.port());
+        probes.push(probe);
+    }
+    Ok((endpoints, ports, probes))
 }
 
 pub fn preflight(
@@ -447,7 +486,7 @@ pub fn preflight(
             !registry
                 .sessions()?
                 .iter()
-                .any(|session| session.ports().contains(&port)
+                .any(|session| session.leased_ports().contains(&port)
                     && session.environment_id != workspace.id
                     && session.status != "stopped"),
             "backend endpoint reserved by another environment"
@@ -469,7 +508,7 @@ pub fn preflight(
             reusable = true;
         }
     }
-    let (mut endpoints, _probes) = allocate(
+    let (mut endpoints, ports, _probes) = allocate(
         registry,
         manifest,
         workspace,
@@ -494,6 +533,7 @@ pub fn preflight(
         &default.public_url,
         Some(default.backend_port),
         &endpoints,
+        &ports,
     )?;
     if let Launch::Compose(binary) = launch {
         let binary = resolve_binary(binary, &workspace.source)?;

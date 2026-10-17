@@ -16,6 +16,9 @@ pub struct Manifest {
     pub services: BTreeMap<String, Service>,
     #[serde(default)]
     pub tasks: BTreeMap<String, Task>,
+    /// Non-HTTP ports leased per run and exported as `PARCELA_PORT_<NAME>`; never routed or probed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<String>,
     /// Native graph passed through to Process Compose without organizer schema reinterpretation.
     #[serde(default)]
     pub process_compose: Option<Value>,
@@ -77,6 +80,18 @@ pub fn dns_label(value: &str) -> Result<()> {
     Ok(())
 }
 
+/// A named port is a DNS label, so its `PARCELA_PORT_<NAME>` variable is unique.
+pub fn port_name(name: &str) -> Result<()> {
+    dns_label(name).with_context(|| format!("invalid port name {name:?}"))
+}
+
+pub fn port_variable(name: &str) -> String {
+    format!(
+        "PARCELA_PORT_{}",
+        name.to_ascii_uppercase().replace('-', "_")
+    )
+}
+
 const FIELDS: &[&str] = &[
     "version",
     "project",
@@ -84,6 +99,7 @@ const FIELDS: &[&str] = &[
     "services",
     "workers",
     "tasks",
+    "ports",
     "process_compose",
     "environment",
     "inherit_environment",
@@ -432,6 +448,11 @@ impl Manifest {
                     "duplicate service subdomain: {subdomain}"
                 );
             }
+        }
+        let mut ports = std::collections::BTreeSet::new();
+        for name in &self.ports {
+            port_name(name)?;
+            ensure!(ports.insert(name), "duplicate port name: {name}");
         }
         for (name, task) in &self.tasks {
             dns_label(name)?;

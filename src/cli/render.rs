@@ -29,11 +29,31 @@ pub fn status(row: &Value, style: &Style) -> String {
             .collect();
         text.push_str(&table(&["  SERVICE", "HTTP", "URL"], &rows));
     }
+    let session = &row["recorded_session"];
+    if session["status"] != "stopped" {
+        text.push_str(&ports(&session["ports"]));
+    }
     text.push_str(&format!(
         "  {}\n",
         style.dim(&format!("path {}", cell(&workspace["source"])))
     ));
     text
+}
+
+/// One line per named port: the name, its number and the variable that carries it.
+fn ports(value: &Value) -> String {
+    value
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, port)| {
+            format!(
+                "  {name:<10}{:<7}{}\n",
+                cell(port),
+                parcela::config::port_variable(name)
+            )
+        })
+        .collect()
 }
 
 pub fn inventory(rows: &[Value], style: &Style) -> String {
@@ -53,6 +73,7 @@ pub fn context(value: &Value, style: &Style) -> String {
             text.push_str(&format!("  {service:<10}{}\n", style.url(&cell(url))));
         }
     }
+    text.push_str(&ports(&value["ports"]));
     text.push_str(&format!("  {:<10}{}\n", "path", cell(&workspace["source"])));
     text.push_str(&format!(
         "  {:<10}{}\n",

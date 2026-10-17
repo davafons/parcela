@@ -27,7 +27,28 @@ Conventions fill in the rest:
 - `workers` are processes without a port or a route.
 - A service can be a mapping when it needs more: `api: {command: node api.js, subdomain: backend, readiness_path: /up}`.
 
-`tasks`, `environment`, `inherit_environment` and `shutdown_timeout_seconds` work in both forms. The short form generates `process_compose`, so it refuses a hand-written `process_compose` block. Declare services either at the top level or under `services:`, not both. A top-level key that is close to a field name, such as `defualt_service`, fails with a suggestion instead of becoming a service.
+`ports`, `tasks`, `environment`, `inherit_environment` and `shutdown_timeout_seconds` work in both forms. The short form generates `process_compose`, so it refuses a hand-written `process_compose` block. Declare services either at the top level or under `services:`, not both. A top-level key that is close to a field name, such as `defualt_service`, fails with a suggestion instead of becoming a service.
+
+## Named ports
+
+Databases, Redis, HMR websockets, debuggers and mail catchers need ports too, and two worktrees running the same project must not share them. List their names under `ports` and Parcela leases a free loopback port for each one on every run:
+
+```yaml
+web: npm run dev -- --port $PORT --host 127.0.0.1 --strictPort
+workers:
+  db: postgres -D .data/pg -k /tmp -h 127.0.0.1 -p ${PARCELA_PORT_DB}
+  redis: redis-server --port ${PARCELA_PORT_REDIS}
+ports: [db, redis, vite-hmr]
+environment:
+  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/app
+```
+
+- Each name is a DNS label. Its port arrives as `PARCELA_PORT_<NAME>`, uppercased with hyphens turned into underscores, so `vite-hmr` becomes `PARCELA_PORT_VITE_HMR`. Every process, every task, `context.json` and `environment` values receive it.
+- Write `${PARCELA_PORT_DB}` in a command. Process Compose expands it when it loads the graph, and the process environment carries the same value, so `$PARCELA_PORT_DB` in a shell command resolves to it as well. Process Compose 1.122 was observed expanding both.
+- A Vite HMR socket reads its port from the config, for example `server: {hmr: {port: Number(process.env.PARCELA_PORT_VITE_HMR)}}`. Keep `--strictPort` on the dev server so Vite exits instead of drifting off its leased `PORT`.
+- Named ports are leased with the service endpoints in one transaction. No other running environment, endpoint or named port can hold the same number.
+- A new run reuses the environment's previous port for each name when it is still free, so a database URL survives `down`, `up` and `restart`. A port taken in the meantime is replaced by a fresh one, and the rest stay.
+- Parcela does not route, probe or check ownership of these ports. The program may never listen on one. `parcela status` and `parcela context` list them.
 
 ## Full form
 
@@ -104,7 +125,7 @@ Registration reserves every service hostname atomically, including collisions wi
 
 ## Context and environment
 
-`run/up/task` supply `PARCELA_PROJECT_ID`, `PARCELA_ENVIRONMENT_ID`, `PARCELA_ROLE`, `PARCELA_GENERATION`, `PARCELA_RUNTIME_DIR`, `PARCELA_URL`, `PARCELA_HOSTNAME`, `HOST=127.0.0.1`, and `PORT` when allocated/recorded. Each declared service also receives `PARCELA_SERVICE_<NAME>_URL` and `_HOSTNAME`, plus `_PORT` when allocated or recorded. Names become uppercase and hyphens become underscores. `PORT`, `PARCELA_URL` and `PARCELA_HOSTNAME` remain default-service aliases. `--backend-port` selects only the default service's port; other service ports are allocated automatically. These reserved keys cannot be overridden by organizer configuration. Manifest environment values support `${...}` substitution from the supplied context; unresolved placeholders fail.
+`run/up/task` supply `PARCELA_PROJECT_ID`, `PARCELA_ENVIRONMENT_ID`, `PARCELA_ROLE`, `PARCELA_GENERATION`, `PARCELA_RUNTIME_DIR`, `PARCELA_URL`, `PARCELA_HOSTNAME`, `HOST=127.0.0.1`, and `PORT` when allocated/recorded. Each declared service also receives `PARCELA_SERVICE_<NAME>_URL` and `_HOSTNAME`, plus `_PORT` when allocated or recorded. Each named port supplies `PARCELA_PORT_<NAME>` when recorded. Names become uppercase and hyphens become underscores. `PORT`, `PARCELA_URL` and `PARCELA_HOSTNAME` remain default-service aliases. `--backend-port` selects only the default service's port; other service ports are allocated automatically. These reserved keys cannot be overridden by organizer configuration. Manifest environment values support `${...}` substitution from the supplied context; unresolved placeholders fail.
 
 `inherit_environment` defaults to true. With false, PATH/HOME are retained and other inherited values are cleared. Inherited `PC_*` and `PARCELA_*` controls are removed before resolved context is applied. This is not sandboxing: project code can read files, load dotenv and make network requests.
 
@@ -149,9 +170,9 @@ Every command prints aligned human text when stdout is a terminal and JSON other
 
 ## Ownership and failure
 
-Registry schema 3 adds hostname and endpoint-set port reservations. Writable opening migrates schemas 1 and 2 transactionally, preserving workspace IDs, session nonces, generations and active default-port leases. Read-only opening supports those older schemas without migration. Legacy single-service owner records remain readable without rewriting them. A stopped generation cannot transition back to ready; a new run needs a new generation.
+Registry schema 3 adds hostname and endpoint-set port reservations. Schema 4 records each session's named ports, which share the active port reservations. Writable opening migrates schemas 1 to 3 transactionally, preserving workspace IDs, session nonces, generations and active default-port leases. Read-only opening supports those older schemas without migration. Legacy single-service owner records remain readable without rewriting them. A stopped generation cannot transition back to ready; a new run needs a new generation.
 
-Old binaries do not support schema 3. Upgrade the owned proxy and stop or explicitly reconcile existing owners before a new binary opens the installed registry for writing. A disposable registry migration is not an installed-host upgrade. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.
+Old binaries do not support schema 4. Upgrade the owned proxy and stop or explicitly reconcile existing owners before a new binary opens the installed registry for writing. A disposable registry migration is not an installed-host upgrade. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.
 
 Kernel lifetime locks protect each environment and the dedicated proxy. Session updates require nonce/generation identity. Full Caddy configuration updates are serialized. Backend listener PID ancestry is checked while the retained child is live; probe-and-release is not an atomic socket handoff. Changed listener identity withdraws the route and requires readiness again. The owner does not continuously poll HTTP readiness after establishment; `status` performs a fresh HTTP probe. A failed probe can report `unhealthy` while `recorded_session.status` still says `ready`. Native Process Compose remains authoritative for individual workers.
 

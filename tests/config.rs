@@ -165,3 +165,34 @@ fn linked_checkouts_share_the_main_checkout_project_name() {
         assert_eq!(manifest.project.name, expected, "{directory}");
     }
 }
+
+#[test]
+fn named_ports_parse_in_both_forms_and_reject_invalid_names() {
+    let t = TempDir::new().unwrap();
+    let short = load(
+        &t.path().join("short"),
+        "web: bin/dev\nports: [db, vite-hmr]\n",
+    )
+    .unwrap();
+    assert_eq!(short.ports, ["db", "vite-hmr"]);
+    assert!(short.services.contains_key("web") && !short.services.contains_key("ports"));
+    let full = load(
+        &t.path().join("full"),
+        "version: 1\nproject: app\ndefault_service: web\nservices: {web: {}}\nports: [redis]\nprocess_compose: {processes: {web: {command: bin/dev}}}\n",
+    )
+    .unwrap();
+    assert_eq!(full.ports, ["redis"]);
+    assert_eq!(
+        parcela::config::port_variable("vite-hmr"),
+        "PARCELA_PORT_VITE_HMR"
+    );
+    for (yaml, message) in [
+        ("web: bin/dev\nports: [Db]\n", "DNS label"),
+        ("web: bin/dev\nports: [db_1]\n", "DNS label"),
+        ("web: bin/dev\nports: [db, db]\n", "duplicate port name: db"),
+    ] {
+        let error = error(&t.path().join("bad"), yaml);
+        assert!(error.contains(message), "{yaml}: {error}");
+    }
+    assert!(load(&t.path().join("scalar"), "web: bin/dev\nports: db\n").is_err());
+}

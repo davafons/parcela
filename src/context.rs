@@ -15,6 +15,8 @@ pub struct ResolvedContext {
     pub state: &'static str,
     /// Names reserved by adoption, not evidence of a live route or listener.
     pub planned_urls: BTreeMap<String, String>,
+    /// Named ports of the latest run; the next run reuses each one that is still free.
+    pub ports: BTreeMap<String, u16>,
     pub capabilities: Capabilities,
     pub caveats: Vec<&'static str>,
 }
@@ -36,6 +38,10 @@ impl ResolvedContext {
             .filter(|(_, host)| reserved.values().any(|reserved| reserved == host))
             .map(|(name, host)| (name, format!("https://{host}")))
             .collect();
+        let ports = registry
+            .session(&workspace.id)?
+            .map(|session| session.ports)
+            .unwrap_or_default();
         Ok(Self {
             source_exists: workspace.source.is_dir(),
             runtime_dir: registry.runtime_path(&workspace),
@@ -43,6 +49,7 @@ impl ResolvedContext {
             runtime_created: false,
             state: "registered",
             planned_urls,
+            ports,
             capabilities: Capabilities {
                 workspace_registry: true,
                 routing: false,
