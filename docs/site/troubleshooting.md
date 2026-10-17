@@ -1,68 +1,85 @@
-# Diagnose and recover an environment
+# Troubleshooting
 
-## Collect the selected environment's state
-
-```sh
-parcela --workspace "$ENVIRONMENT_ID" status
-parcela --workspace "$ENVIRONMENT_ID" services
-parcela --workspace "$ENVIRONMENT_ID" logs backend --tail 100
-```
-
-Use a native process name from `services`. Preserve the diagnostic without publishing secrets. `services` and `logs` require a running Process Compose environment; they are not arbitrary orphan inspectors.
-
-| Observation | Next check |
-|---|---|
-| `starting` | Assigned ports, loopback binding, readiness path and child diagnostics |
-| `unhealthy` with recorded `ready` | Fresh endpoint health, front-door ownership and route publication |
-| `unknown` | Owner/control evidence and diagnostic; do not guess a PID |
-| `interrupted` | Qualified recovery or an explicit operator plan; retain the lease |
-| `stopped` | A new explicit start if requested, not recovery of running services |
-
-## Front-door or certificate failure
-
-Run `parcela proxy status` before modifying the host. It reports the mode, port, process IDs, log path and the Parcela version that started the proxy. Read `<state>/proxy/proxy.log` for the proxy's own errors.
-
-| Observation | Next check |
-|---|---|
-| `port N is already in use by ...` | Stop that process yourself, or choose a free port with `parcela proxy start --port <n>` |
-| `the running proxy is from Parcela X` | `parcela proxy restart` once nothing depends on the old proxy's routes |
-| `started by an older Parcela` | Stop that `parcela proxy run` (Ctrl-C or its launch agent), then `parcela proxy start` |
-| URLs answer `503` | The environment is registered but not ready; check `parcela status` |
-| Browser certificate warning | `parcela trust`, then restart the browser |
-
-In standard mode, internal listeners do not prove effective 443/80 forwarding. A successful PF rule load does not prove that loopback traffic reaches them. Do not flush global firewall state or change a skip setting blindly.
-
-If TLS trust fails, identify the exact CA and hostname before an explicit trust operation. `parcela trust --print` names the certificate. Do not disable verification. If `.localhost` resolves to `::1` while the owned front door listens on IPv4, configure the project's client address-family behavior without exposing a new listener or weakening TLS.
-
-A disposable test proxy on another port can isolate backend behavior. It does not fix or certify the installed front door. See [the front door](install.md#the-front-door).
-
-## Backend port or readiness failure
-
-Check that the app consumes the allocated context and listens only on `127.0.0.1`. `--backend-port` affects the default service only. Other services need their own generated port binding.
-
-Check each `readiness_path`. A fast 2xx response and owned listener are required for initial group routing. Verify intended dependencies separately. Do not run migrations or preparation merely because startup failed.
-
-A foreign or reserved port is a refusal, not a request to kill its listener. Restart preflight checks explicit replacement-port eligibility before stopping a healthy owner, but concurrent restart is not an atomic transaction across the host.
-
-## Recover a surviving native graph
-
-Only when the controller has died and the selected recovery is authorized:
+Start with these two commands. Most problems show up in one of them:
 
 ```sh
-parcela --workspace "$ENVIRONMENT_ID" recover --detach
-parcela --workspace "$ENVIRONMENT_ID" status
+parcela doctor
+parcela status
 ```
 
-Recovery requires matching generation, process births, original lock/socket identities and native authentication. It uses the recorded launch manifest instead of replaying startup commands from edited source.
+## The browser warns about the certificate
 
-Recovery can finish as `stopped` when stopping intent or a quiescent stopped receipt already exists. Do not insist on a ready response for a pending stop. `down` can also use qualified recovery when its live controller is gone.
+Your system does not trust Parcela's local certificate authority yet. Run `parcela trust` once, then restart the browser. For `curl`, pass `--cacert "$(parcela trust --print)"`. Don't use `curl -k`. It hides real certificate errors.
 
-If the evidence is missing or replaced, retain the record and diagnostic. Do not launch a duplicate graph, signal a saved PID, remove a socket or release the lease manually. Automatic recovery without launch evidence is not supported.
+## The proxy port is busy
 
-## Incomplete stop
+```text
+parcela: port 1443 is already in use by Python (pid 57668); choose another port with `parcela proxy start --port <n>`
+```
 
-`down` withdraws routing before native shutdown. It waits for qualified completion, within the recorded shutdown budget. An interrupted result does not prove every descendant exited.
+Another program listens on the port. Parcela never stops it. Stop it yourself, or pick another port with `parcela proxy start --port 4443`. Parcela saves the port for later starts.
 
-Retry only the same selected operation or follow a qualified recovery plan. Do not stop another environment to resolve contention. A controller request from an old generation cannot act on a successor.
+## `up` times out
 
-Manual operator cleanup, when specifically authorized and revalidated, is separate from a native stopped receipt. Preserve evidence and do not rewrite a failed run into a successful recovery claim.
+```text
+parcela: application readiness timed out; see child diagnostics
+parcela: services stopped before they were ready; full log: /Users/you/.local/state/parcela/environments/<id>/log/owner.log
+```
+
+A service never answered on its port. Check that its command:
+
+- listens on `$PORT`, not a fixed port,
+- binds `127.0.0.1`,
+- answers `GET /` with a 2xx status, or set `readiness_path` to a path that does.
+
+Read the log file named in the message for the service's own error.
+
+## The URL answers 503
+
+The environment is registered but not running, or it is still starting. Run `parcela status`. If it says `stopped`, run `parcela up --detach`.
+
+## A preview name is taken
+
+```text
+parcela: preview name signup is already used by /Users/you/code/signup; choose another with --name <name>
+```
+
+Another checkout owns that name. Start this one with another name: `parcela up --name signup-2`. To free the name, stop the other checkout and run `parcela rm` in it.
+
+## A checkout keeps its old name
+
+Parcela remembers a checkout's name after the first `up`. To rename it, run `parcela down`, `parcela rm`, then `parcela up --name NEW`. The renamed checkout gets a new runtime directory, so move any files you keep in `PARCELA_RUNTIME_DIR` yourself.
+
+## `restart` refuses a new service
+
+```text
+parcela: service hostname not reserved; explicitly re-adopt the stopped environment
+```
+
+A new or renamed service needs a new hostname, and `restart` keeps the existing ones. Run `parcela down`, then `parcela up --detach`.
+
+## `logs` needs a running environment
+
+```text
+parcela: service inspection requires a running Process Compose environment
+```
+
+`logs` reads from the running process group. Start the environment first. Output from a failed detached start is in the `owner.log` file that the error names.
+
+## The proxy is from another Parcela version
+
+```text
+parcela: the running proxy is from Parcela <old>, this is <new>; run `parcela proxy restart` to update it
+```
+
+You upgraded Parcela while the old proxy was running. It keeps serving. Run `parcela proxy restart` when nothing needs the URLs for a moment.
+
+## The state is `interrupted` or `unknown`
+
+Parcela lost contact with the process that owns the environment, for example after a crash. Run `parcela up`. If the services are still running, `up` takes control of them again without restarting them. If they are gone, it starts them fresh.
+
+Don't kill processes by PID or delete files in the state directory to fix this. Parcela refuses to act when it cannot prove which processes it started, and it keeps the record so nothing is lost.
+
+## Something else
+
+Run `parcela status --json` and read its `diagnostic` field. Report bugs at [github.com/davafons/parcela/issues](https://github.com/davafons/parcela/issues) with that output and the matching `owner.log`.

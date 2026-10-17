@@ -113,7 +113,7 @@ def main():
             assert cli(path, 'url').stdout.strip() == f'https://{host}:{https_port}'
             origins.append(cli(path, 'url').stdout.strip())
             assert b'<div id="app"></div>' in request(host), 'Native VitePress app bootstrap missing'
-            assert b'Run development services' in request(host, '/index.md')
+            assert b'Three commands' in request(host, '/index.md')
             processes = json.loads(cli(path, 'status').stdout)['processes']
             assert {entry['name']: entry['state'] for entry in processes} == {'docs': 'running'}
             assert 'vitepress' in cli(path, 'logs', 'docs', '--tail', '50').stdout.lower()
@@ -132,18 +132,18 @@ def main():
         assert f'href="{origins[0]}/"' in (primary / 'target/docs/index.html').read_text()
         assert json.loads(cli(primary, 'status').stdout)['state'] == 'ready'
         report['verified'].append('Explicit finite build task produces the environment canonical URL without stopping dev')
-        index_source = primary / 'docs/site/index.md'
+        index_source = primary / 'docs/site/getting-started.md'
         original_index = index_source.read_bytes()
         index_source.write_bytes(original_index + b'\n\n## RestartSearchProof73942\n\nFresh development search after restart.\n')
-        wait_for(lambda: b'RestartSearchProof73942' in request('parcela-docs.localhost', '/index.md'), [proxy])
+        wait_for(lambda: b'RestartSearchProof73942' in request('parcela-docs.localhost', '/getting-started/index.md'), [proxy])
         report['dev_search_refreshed_before_restart'] = b'RestartSearchProof73942' in request('parcela-docs.localhost', '/@localSearchIndexroot')
         restarted = remember(json.loads(cli(primary, 'restart', '--detach', '--process-compose', args.process_compose,
                                               '--backend-port', str(free_port()), timeout=90).stdout))
         assert restarted['generation'] == sessions[0]['generation'] + 1 and restarted['token'] != sessions[0]['token']
-        assert b'Run development services' in request('parcela-docs.localhost', '/index.md')
+        assert b'Three commands' in request('parcela-docs.localhost', '/index.md')
         assert b'RestartSearchProof73942' in request('parcela-docs.localhost', '/@localSearchIndexroot')
         index_source.write_bytes(original_index)
-        wait_for(lambda: b'RestartSearchProof73942' not in request('parcela-docs.localhost', '/index.md'), [proxy])
+        wait_for(lambda: b'RestartSearchProof73942' not in request('parcela-docs.localhost', '/getting-started/index.md'), [proxy])
         report['verified'].append('Explicit restart rebuilds development search after canonical heading changes')
         protocol(preview, origins[1], origins[0], 'preview')
         report['verified'].append('Restart creates a new generation/nonce while the independent peer retains live HMR')

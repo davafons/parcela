@@ -1,202 +1,195 @@
-# Configuration and CLI
+# Configuration
+
+Parcela reads `parcela.yaml` from the checkout root. Commands find it by looking in the current directory, or `--path`, and then in each parent directory. This page lists every field. The [CLI guide](site/cli.md) covers the commands.
 
 ## Short form
 
-Most projects need one line. `parcela init` writes it for you.
+Most projects need one line. `parcela init` writes it:
 
 ```yaml
 web: npm run dev -- --port $PORT --host 127.0.0.1
 ```
 
-Each top-level `name: command` is an HTTP service and a Process Compose process with that command. Several services and background workers look like this:
+Each top-level `name: command` is an HTTP service. The command must listen on `127.0.0.1:$PORT`.
+
+## Services
+
+Several services look like this:
+
+```yaml
+web: bin/rails server -p $PORT -b 127.0.0.1
+api: node api/server.js --port $PORT
+```
+
+Or, the same thing under `services`:
 
 ```yaml
 services:
   web: bin/rails server -p $PORT -b 127.0.0.1
   api: node api/server.js --port $PORT
-workers:
-  jobs: bin/jobs
 ```
 
-Conventions fill in the rest:
+Use one style per file, not both.
 
-- `version` defaults to 1.
-- The project is named after the main checkout directory, sanitized to a DNS label. Every jj workspace and Git worktree of a repository resolves to the same main checkout, so they share one project. Override it with `project: my-app` or `project: {id: ..., name: ...}`.
-- The default service, which gets the base URL, is `web` when present, otherwise the only service. With several services and no `web`, set `default_service`.
-- Every service gets its own `PORT`. In a non-default service's command, `$PORT` and `${PORT}` are rewritten to that service's `${PARCELA_SERVICE_<NAME>_PORT}`, because Process Compose expands braced variables from the shared environment when it loads the graph.
-- `workers` are processes without a port or a route.
-- A service can be a mapping when it needs more: `api: {command: node api.js, subdomain: backend, readiness_path: /up}`.
+- Service names are DNS labels: lowercase letters, digits and inner hyphens.
+- Every service gets its own free port in `$PORT`.
+- The default service gets the environment's URL, for example `https://hello.localhost:1443`. It is `web` when there is one, otherwise the only service. With several services and no `web`, set `default_service: NAME`.
+- Every other service gets its name in front: `https://api-hello.localhost:1443`.
 
-`ports`, `tasks`, `environment`, `inherit_environment` and `shutdown_timeout_seconds` work in both forms. The short form generates `process_compose`, so it refuses a hand-written `process_compose` block. Declare services either at the top level or under `services:`, not both. A top-level key that is close to a field name, such as `defualt_service`, fails with a suggestion instead of becoming a service.
+A service can be a mapping when it needs more:
 
-## Named ports
+```yaml
+services:
+  web: bin/dev
+  api:
+    command: node api.js --port $PORT
+    subdomain: backend
+    readiness_path: /up
+```
 
-Databases, Redis, HMR websockets, debuggers and mail catchers need ports too, and two worktrees running the same project must not share them. List their names under `ports` and Parcela leases a free loopback port for each one on every run:
+| Field | Default | Meaning |
+|---|---|---|
+| `command` | required | The shell command that starts the service. |
+| `subdomain` | the service name | The prefix for this service's hostname. Not allowed on the default service. |
+| `readiness_path` | `/` | Parcela waits until `GET` on this path returns 2xx before it opens the URLs. |
+
+`up` waits for every service to be ready, then routes them all together.
+
+## Workers
+
+Workers are processes without a port or a URL:
+
+```yaml
+web: bin/dev
+workers:
+  jobs: bin/jobs
+  css: npm run watch:css
+```
+
+A worker cannot have the same name as a service. `up`, `restart` and `down` start and stop workers with the services.
+
+## Ports
+
+List extra ports your processes need, such as a database, Redis or a dev-server websocket. Parcela leases a free port for each name on every run:
 
 ```yaml
 web: npm run dev -- --port $PORT --host 127.0.0.1 --strictPort
 workers:
-  db: postgres -D .data/pg -k /tmp -h 127.0.0.1 -p ${PARCELA_PORT_DB}
   redis: redis-server --port ${PARCELA_PORT_REDIS}
-ports: [db, redis, vite-hmr]
-environment:
-  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/app
+ports: [redis, vite-hmr]
 ```
 
-- Each name is a DNS label. Its port arrives as `PARCELA_PORT_<NAME>`, uppercased with hyphens turned into underscores, so `vite-hmr` becomes `PARCELA_PORT_VITE_HMR`. Every process, every task, `context.json` and `environment` values receive it.
-- Write `${PARCELA_PORT_DB}` in a command. Process Compose expands it when it loads the graph, and the process environment carries the same value, so `$PARCELA_PORT_DB` in a shell command resolves to it as well. Process Compose 1.122 was observed expanding both.
-- A Vite HMR socket reads its port from the config, for example `server: {hmr: {port: Number(process.env.PARCELA_PORT_VITE_HMR)}}`. Keep `--strictPort` on the dev server so Vite exits instead of drifting off its leased `PORT`.
-- Named ports are leased with the service endpoints in one transaction. No other running environment, endpoint or named port can hold the same number.
-- A new run reuses the environment's previous port for each name when it is still free, so a database URL survives `down`, `up` and `restart`. A port taken in the meantime is replaced by a fresh one, and the rest stay.
-- Parcela does not route, probe or check ownership of these ports. The program may never listen on one. `parcela status` and `parcela context` list them.
+- The port arrives as `PARCELA_PORT_<NAME>`, uppercased with hyphens turned into underscores. `vite-hmr` becomes `PARCELA_PORT_VITE_HMR`.
+- Every process and task receives it, and `environment` values can use it.
+- A run reuses the previous port for each name while it is free. A database URL survives `down`, `up` and `restart`.
+- No two running environments get the same port. Parcela does not route or check these ports.
 
-## Full form
+Service and named ports come from 20000–29999.
 
-Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects a registered environment instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; startup registers the selected checkout with a stable role and name.
+## Environment
+
+`environment` sets variables for every process and task. Values can use `${NAME}` to insert any variable Parcela sets:
 
 ```yaml
-version: 1
-project: {id: my-app, name: my-app}
-default_service: web
-services:
-  web:
-    readiness_path: /up
-inherit_environment: false
 environment:
-  APP_DATA: "${PARCELA_RUNTIME_DIR}/data"
+  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/app
+  API_ORIGIN: ${PARCELA_SERVICE_API_URL}
+  UPLOADS_DIR: ${PARCELA_RUNTIME_DIR}/data/uploads
+```
+
+A placeholder that does not resolve is an error. You cannot override the variables Parcela sets.
+
+Processes inherit your shell's environment. Set `inherit_environment: false` to start from a clean environment. `PATH` and `HOME` are kept.
+
+## Tasks
+
+Tasks are commands you run with `parcela task NAME`. They get the environment's variables:
+
+```yaml
 tasks:
   test:
     argv: [bin/test]
     timeout_seconds: 300
-process_compose:
-  version: "0.5"
-  processes:
-    web:
-      command: "your-server --bind 127.0.0.1"
-    worker:
-      command: "your-worker"
+  psql:
+    argv: [sh, -c, 'psql "$DATABASE_URL" "$@"', psql]
 ```
 
-Project IDs are 1–128 ASCII letters/digits/hyphens/underscores/dots. DNS labels are 1–63 lowercase ASCII letters/digits with internal hyphens. Preview label plus project name must fit one label. Unknown organizer fields, invalid paths/names, NUL argv and nonpositive task timeouts fail. Native `process_compose` data is preserved, not interpreted as organizer fields. `config check` does not certify backend graph compatibility or resource isolation.
+| Field | Meaning |
+|---|---|
+| `argv` | The command and its arguments as a list. No shell runs unless you call one. |
+| `timeout_seconds` | Optional. Parcela stops the task after this many seconds and exits 124. |
 
-`up` runs all declared HTTP services in one worktree environment and one native graph. `run` remains a literal single-HTTP-service command. Non-HTTP workers belong in the native graph but not in `services`. In a service set, each routed service must name a graph process. Legacy single-service graphs can retain a different native process name. Services must bind their assigned ports only on `127.0.0.1`; HTTP answers from foreign listeners cannot establish readiness.
+`parcela task psql -- -c 'select 1'` appends `-c 'select 1'` to `argv`. `up` never runs a task by itself.
 
-## Start from the project file
+## Other top-level fields
 
-`parcela up` starts the native graph in this file. No separate `workspace adopt` or task command is required. `parcela up --name review` creates a named preview on first use. Main jj/Git checkouts and plain directories use the project base URL; linked jj workspaces use their workspace name, and linked Git worktrees use their directory name. Inferred names are DNS-normalized. Ambiguous or invalid names require an explicit `--name NAME` or `--primary` choice. `run` uses the same naming flags.
+| Field | Default | Meaning |
+|---|---|---|
+| `project` | the main checkout's directory name | The project name. Write `project: shop`, or `project: {id: shop, name: shop}` to set the ID and the name separately. All jj workspaces and Git worktrees of a repository share it. |
+| `default_service` | `web`, or the only service | The service that gets the environment's URL. |
+| `shutdown_timeout_seconds` | `300` | How long `down` waits for processes to exit. 1 to 86400. |
+| `version` | `1` | The file format version. |
 
-Existing identities are reused, not renamed when branches, directories or workspace metadata change. Explicit naming flags must match the registered identity. `--primary` explicitly selects the project base from a linked checkout, but cannot take over an existing primary. Registration and namespace conflicts fail without replacing owners. Read-only commands never register a checkout or start services.
+A top-level key that looks like a misspelled field, such as `defualt_service`, is an error with a suggestion, not a service.
 
-`workspace adopt --role ... --label ...` remains an advanced explicit registration command. Project tasks are optional finite commands, not setup requirements. Startup does not install dependencies, prepare application data or repair the HTTPS front door.
+## Full form
 
-## Service sets
-
-The default service uses the environment base hostname. Other services use a flat prefix, supplied by `subdomain` or the service name. For project `my-app`, the primary frontend is `my-app.localhost` and the backend is `api-my-app.localhost`. A preview labeled `review` uses `review-my-app.localhost` and `api-review-my-app.localhost`.
+The short form generates a [Process Compose](https://f1bonacc1.github.io/process-compose/) configuration for you. When you need Process Compose features such as `working_dir`, `depends_on` or per-process `environment`, write `process_compose` yourself and list the HTTP services without commands:
 
 ```yaml
-version: 1
-project: {id: my-app, name: my-app}
+project: shop
 default_service: frontend
 services:
-  frontend: {readiness_path: /up}
+  frontend: {readiness_path: /}
   backend: {subdomain: api, readiness_path: /up}
-environment:
-  API_ORIGIN: "${PARCELA_SERVICE_BACKEND_URL}"
 process_compose:
   version: "0.5"
   processes:
     frontend:
       working_dir: frontend
-      command: "./bin/dev --host ${HOST} --port ${PORT}"
+      command: npm run dev -- --port ${PORT} --host ${HOST}
     backend:
       working_dir: backend
-      command: "./bin/dev"
+      command: bin/dev --port ${PARCELA_SERVICE_BACKEND_PORT}
       environment:
         - PORT=${PARCELA_SERVICE_BACKEND_PORT}
     worker:
-      command: "./bin/worker"
+      working_dir: backend
+      command: bin/jobs
 ```
 
-Commands and working directories are native Process Compose configuration, not framework adapters. The backend overrides its process-local `PORT`; both processes inherit the default `PARCELA_URL` unless project configuration overrides an application-specific variable. Core does not discover or start npm workspaces automatically.
+- Every name under `services` must also be a process. Processes not in `services` are workers.
+- Parcela passes `process_compose` to Process Compose unchanged, apart from adding its own variables.
+- Process Compose expands `${PORT}` in commands from the shared environment, where it is the default service's port. In another service, use `${PARCELA_SERVICE_<NAME>_PORT}` and set `PORT` in that process's `environment`. The short form does this for you.
 
-Each run records a service endpoint set under one generation and nonce. All declared HTTP services must pass startup readiness before any group route opens. A changed listener identity withdraws the group until every required endpoint passes readiness again. `status.live.endpoints` reports each service's listener ownership and fresh HTTP readiness. Whole-graph `down`, `restart` and qualified `recover` operate on the set. Individual service restart is not a Parcela command.
+## Environment variables Parcela sets
 
-Registration reserves every service hostname atomically, including collisions with another worktree's base hostname. Port allocation reserves the whole set atomically. Service and named ports come from 20000–29999, chosen at random, below the OS ephemeral ranges (macOS 49152+, Linux 32768+) so other programs binding port 0 cannot take them before the service starts. A port in use on any loopback or wildcard address is skipped. Stopped hostnames stay reserved and unavailable. To change reservations, stop the environment, change its manifest and run `up` again with its existing identity. No source or data is removed. Distinct names and runtime paths do not certify database or storage isolation.
+Every process and task receives these. Service names are uppercased, with hyphens turned into underscores.
 
-## Context and environment
-
-`run/up/task` supply `PARCELA_PROJECT_ID`, `PARCELA_ENVIRONMENT_ID`, `PARCELA_ROLE`, `PARCELA_GENERATION`, `PARCELA_RUNTIME_DIR`, `PARCELA_URL`, `PARCELA_HOSTNAME`, `HOST=127.0.0.1`, and `PORT` when allocated/recorded. Each declared service also receives `PARCELA_SERVICE_<NAME>_URL` and `_HOSTNAME`, plus `_PORT` when allocated or recorded. Each named port supplies `PARCELA_PORT_<NAME>` when recorded. Names become uppercase and hyphens become underscores. `PORT`, `PARCELA_URL` and `PARCELA_HOSTNAME` remain default-service aliases. `--backend-port` selects only the default service's port; other service ports are allocated automatically. These reserved keys cannot be overridden by organizer configuration. Manifest environment values support `${...}` substitution from the supplied context; unresolved placeholders fail.
-
-`inherit_environment` defaults to true. With false, PATH/HOME are retained and other inherited values are cleared. Inherited `PC_*` and `PARCELA_*` controls are removed before resolved context is applied. This is not sandboxing: project code can read files, load dotenv and make network requests.
-
-The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any other directories they need, such as uploads or PID-file parents. Core creates paths, not database schemas or baseline data. `context.json` records the launch generation. Tasks write `last-task.json`. Projects must consume paths explicitly; `up` never invokes preparation automatically.
-
-## Commands
-
-| Command | Behavior |
+| Variable | Example |
 |---|---|
-| `init [--name NAME] [--command CMD]` | Write a commented short-form `parcela.yaml` in `--path`, guessing the web command from `package.json`, Rails or Django files; refuses to overwrite; validates before writing |
-| `up [--name NAME\|--primary] [--detach] [--backend-port N]` | Start every service, foreground by default; detached startup returns only after live readiness and prints the URL and next commands; if the previous supervising process died while the services kept running, `up` reattaches to them instead (same generation, no replay) |
-| `down` / `stop` | Stop through the live supervisor or authenticated recovery; preserve source/data; repeated stop is a no-op |
-| `down --all` / `down --all-projects` | Stop every running environment of this project, or of every project; prints the targets first and exits 1 if any stop fails |
-| `restart [--detach] [--backend-port N]` | Check the replacement before stopping the healthy run, then start a new run; does not replay arbitrary `run` argv |
-| `status [--all]` | Live supervisor, loopback HTTP and router probes, with recorded state reported separately; a single environment's status also lists each Process Compose service and worker as `processes: [{name, state, pid}]` |
-| `ls` | Every registered environment across projects: project, name, state, URL and path. Inside a project it also lists that project's unregistered jj workspaces and Git worktrees as `not started` with the URL `up` would give them (JSON `unregistered`); it never registers them |
-| `logs [SERVICE] --tail N` | Plain-text log tail; default is the routed service; 1–10,000 lines |
-| `url [--service NAME]` | Plain-text default or selected service URL; does not certify reachability |
-| `rm` | Forget the selected stopped environment and release its hostnames and port leases; refuses a running one; keeps source and runtime data |
-| `rm --prune` | Forget every stopped environment whose checkout directory no longer exists; running ones are skipped |
-| `doctor` | Readiness checklist: Process Compose and Caddy on `PATH`, `lsof`, `ps`, the nearest `parcela.yaml` (the same validation and error text as `up`, including a Process Compose process for every HTTP service), the private state directory and the proxy; creates no state |
-| `run [--name NAME\|--primary] [--backend-port N] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
-| `recover [--detach]` | Hidden from help; `up` does this for a run that was starting or ready. Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
-| `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
-| `context` | Hidden from help. Planned context; no live-health guarantees |
-| `proxy start [--port N]` | Start the dedicated Caddy proxy in the background and wait until it answers; `--port` saves a port profile; a busy port fails naming its holder; no sudo, trust change, takeover or fallback |
-| `proxy stop` | Signal the recorded proxy process by birth identity and wait until it and its Caddy exit; environments keep running without routes |
-| `proxy restart [--port N]` | Stop, then start on `--port`, the running front door or the saved one |
-| `proxy status` | Mode, port, process IDs, log and the Parcela version that started the proxy; verifies the owned Caddy admin marker, and in standard mode the port-80 front door; exits 1 when not running |
-| `trust [--print]` | Run `caddy trust` against Parcela's private CA storage and admin socket; `--print` prints the CA certificate path and changes nothing |
-| `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
+| `PORT` | `29381`. The process's own port in the short form, the default service's port in shared expansion. |
+| `HOST` | `127.0.0.1` |
+| `PARCELA_URL` | `https://hello.localhost:1443`, the default service's URL |
+| `PARCELA_HOSTNAME` | `hello.localhost` |
+| `PARCELA_SERVICE_<NAME>_URL` | `PARCELA_SERVICE_API_URL=https://api-hello.localhost:1443` |
+| `PARCELA_SERVICE_<NAME>_HOSTNAME` | `PARCELA_SERVICE_API_HOSTNAME=api-hello.localhost` |
+| `PARCELA_SERVICE_<NAME>_PORT` | `PARCELA_SERVICE_API_PORT=26798` |
+| `PARCELA_PORT_<NAME>` | `PARCELA_PORT_DB=26953`, one per entry in `ports` |
+| `PARCELA_RUNTIME_DIR` | The environment's private directory, with `data`, `tmp`, `cache` and `log` inside |
+| `PARCELA_PROJECT_ID` | `hello` |
+| `PARCELA_ENVIRONMENT_ID` | `7cceea8f-0fd3-4cdc-843f-0883f3c0fc5e` |
+| `PARCELA_ROLE` | `primary` or `preview` |
+| `PARCELA_GENERATION` | `7`, a counter that increases on every start |
 
-### Front door
+## State locations
 
-The proxy serves the front-door profile saved in `<state>/proxy/frontdoor.json`. `up`, `restart` and `run` start the proxy on it after their launch preflight passes, when no proxy is running, and print one stderr line saying so. Concurrent starts share one proxy. Every printed URL (`init`, `up`, `url`, `status`, `ls`, `context`, `PARCELA_URL`) follows the running proxy, or the saved profile when nothing runs.
+| Path | Contents |
+|---|---|
+| `~/.local/state/parcela/` | All of Parcela's state. Override it with `--state-dir`, `PARCELA_STATE_DIR` or `XDG_STATE_HOME`. |
+| `…/registry.sqlite3` | Projects, environments, names and port leases. |
+| `…/environments/<id>/` | One environment's `PARCELA_RUNTIME_DIR`: `data`, `tmp`, `cache`, `log/owner.log` and Parcela's own records. |
+| `…/proxy/` | The proxy's Caddy config, `proxy.log` and the local certificate authority. |
+| `/tmp/parcela-<uid>/` | Unix sockets for the running environments and the proxy. |
 
-| Profile | URL | Listeners |
-|---|---|---|
-| `{"mode": "port", "https": 1443}` | `https://notes.localhost:1443` | HTTPS on `127.0.0.1:1443` only |
-| `{"mode": "standard", "https": 8443, "http": 8080}` | `https://notes.localhost` | `127.0.0.1:8443` and `:8080`, behind an external 443/80 forwarder |
-
-With no saved profile the default is port mode on 1443, or on `PARCELA_HTTPS_PORT` when that is set. `proxy start --port N` and `proxy restart --port N` save a port profile once the proxy answers; a failed start leaves the saved profile unchanged. Listeners must be 1024 or higher; Parcela never binds privileged ports itself. Standard mode needs the profile saved before the proxy starts and checks that port 80 reaches the owned proxy. The proxy runs as a detached `parcela proxy run` (hidden from help, usable in the foreground for debugging or a boot service) with output in `<state>/proxy/proxy.log`. A proxy started by another Parcela version keeps serving, with a warning to run `parcela proxy restart`.
-
-`parcela` with no command prints the current checkout's status when it is registered, and otherwise the next command to run. Rarely needed flags are accepted but hidden from help: `doctor --caddy PATH --process-compose PATH`, `--process-compose PATH` on `up` and `restart`, and `--readiness-timeout SEC` on `up`, `restart` and `run`. They default to the binaries on `PATH` and 60 seconds (30 for `run`). `doctor` exits 1 until every check passes.
-
-`--skill` is a long-flag alias for the `skill` subcommand. It runs before workspace lookup and cannot be combined with a lifecycle command. Its output is the bundled `.agents/skills/parcela/SKILL.md`, not generated from the current project. An agent can load this output directly; no global profile installation runs.
-
-Every command prints aligned human text when stdout is a terminal and JSON otherwise; `--json` forces JSON. Color appears only on a terminal without `NO_COLOR`. `url` and `logs` always print plain text. Foreground child output passes through; detached owner output appends to private `log/owner.log`. Readiness timeouts accept 1–86,400 seconds. Normal child exit status propagates; termination uses conventional signal exit codes and task timeout returns 124. Operational failures exit 1; Clap argument failures exit 2. No implicit setup, sharing, arbitrary persisted-PID signaling, or replay of an uncertain command; bulk stop happens only through explicit `down --all` or `--all-projects`. A failed detached start prints the lines it added to `log/owner.log` to stderr.
-
-## Ownership and failure
-
-Registry schema 3 adds hostname and endpoint-set port reservations. Schema 4 records each session's named ports, which share the active port reservations. Writable opening migrates schemas 1 to 3 transactionally, preserving workspace IDs, session nonces, generations and active default-port leases. Read-only opening supports those older schemas without migration. Legacy single-service owner records remain readable without rewriting them. A stopped generation cannot transition back to ready; a new run needs a new generation.
-
-Old binaries do not support schema 4. Upgrade the owned proxy and stop or explicitly reconcile existing owners before a new binary opens the installed registry for writing. A disposable registry migration is not an installed-host upgrade. Private state is user-owned, mode 700; files use mode 600 and final symlinks are rejected. Source aliases canonicalize to one identity. Conflicts roll back instead of taking ownership. Missing source paths are retained, not deleted.
-
-Kernel lifetime locks protect each environment and the dedicated proxy. Session updates require nonce/generation identity. Full Caddy configuration updates are serialized. Backend listener PID ancestry is checked while the retained child is live; probe-and-release is not an atomic socket handoff. Changed listener identity withdraws the route and requires readiness again. The owner does not continuously poll HTTP readiness after establishment; `status` performs a fresh HTTP probe. A failed probe can report `unhealthy` while `recorded_session.status` still says `ready`. Native Process Compose remains authoritative for individual workers.
-
-Stopped/unready registered hostnames answer unavailable; unknown hosts do not fall through to another owner. Route revocation precedes normal child teardown. Caddy routes require short-lived file leases renewed by the proxy guardian only while the recorded application owner and graph remain valid. Owner or guardian death expires new-request routing even if Caddy survives. Proxy outages leave application graphs running; a compatible front door can restore their routes without replacing application generations. Lease renewal does not require a Caddy configuration change. Existing streams are not forcibly closed merely because a lease expires.
-
-Recovery requires a matching generation-scoped owner record, the original lock inode, a dead former controller, and authenticated native socket, token, and process-birth evidence. A qualified native graph can recover before HTTP readiness without replaying services. Its route remains unavailable until readiness succeeds. When the former controller and every recorded supervisor/descendant birth identity are gone, in any recorded phase, `down`, `recover` and `up` finish a stopped receipt without contacting the exited supervisor. They save the stopped phase, remove only inode-matching `ctl.sock`/`pc.sock`, and release the generation's leases. A later `up` starts a new generation. Nothing is signaled. A surviving recorded identity still requires authenticated native recovery. This covers owner and Process Compose death together (for example `kill -9` or reboot); it proves desired-state convergence, not the supervisor's exit code. Descendants that escaped the recorded tree are not detected.
-
-Stop recovery callers that contend for the owner lock wait within the recorded shutdown budget for the selected generation to complete. If a live controller resumes that generation, the caller forwards stop intent through its recorded control socket. Forwarding requires matching controller birth and socket inode evidence, plus the held original lock. The durable stopping phase records admission. Generation and token checks run while waiting and after acquisition, so a stale caller cannot stop a successor. Only the elected controller requests native shutdown. File and permission errors still fail immediately. Non-stop recovery remains fail-fast on occupied ownership. Cleanup remains socket-inode-qualified.
-
-Allocations without durable launch evidence retain their leases and refuse automatic cleanup or replay. Unknown or legacy owners, daemonized descendants, replaced handles, and arbitrary orphan graphs are not automatically adopted or signaled. Private paths are operational ownership boundaries, not containment against hostile same-user programs.
-
-## Local control and discovery
-
-Each new runtime owner holds `owner.lock` and binds private `ctl.sock`. Unix socket paths are capped near 100 bytes, so the control, Process Compose and Caddy admin sockets live outside the state directory, in `/tmp/parcela-<uid>/<hash>`, the same for every shell, cron job and login session. The hash is the first 8 hex digits of FNV-1a over the canonical state path. Both directory levels must be real, user-owned and mode 700; otherwise the command refuses. `context.json` records the run's socket paths. Requests and replies carry the environment ID, generation and nonce. Stop requests run inside that owner, which retains the actual child handle. The client waits for stopped intent and released ownership. Socket cleanup removes only the socket inode this owner created; existing/foreign sockets are never replaced. Malformed or stale requests cannot trigger an operation. Malformed health replies remain unknown.
-
-Detached startup verifies that the answering owner is the retained child it just launched. Its output includes the launch generation and private log path. `up --detach` is explicit; it does not install a launch agent or boot service. `restart` restarts the whole graph, not one named service, and requires the selected backend to be available. Before stopping the current graph, it checks the replacement binary, native graph, and explicit backend endpoint. A busy endpoint is reusable only with matching routable ownership and authenticated native control. Other listeners, reserved endpoints, privileged ports, and router ports are refused without stopping the current graph. These checks do not make concurrent restart atomic. No arbitrary command replay or automatic restart policy is added to `run`.
-
-`status` separates `recorded_session`, `state`, `live`, and `live_health_verified`. The verification flag means an owner answered a fresh health probe, not that its HTTP probe passed or all workers are healthy. Missing, legacy or interrupted owners report `unknown` with a diagnostic. Stopped/never-started sessions have no live verification. Inspection does not recover an owner or release an uncertain lease. Explicit lifecycle recovery uses the qualified evidence described above.
-
-`workspace discover` finds the nearest VCS root and prefers jj over Git in a colocated root. jj uses `--ignore-working-copy --at-op=@`, so inventory neither snapshots edits nor merges operations. Its revisions/bookmarks describe the recorded operation, not unsnapshotted file contents. Git uses NUL-delimited read-only worktree inventory, including detached checkouts. Discovery never adopts a sibling or infers its primary/preview role. Plain directories remain valid. jj workspace-root templates were tested with 0.40.0 on macOS and 0.45.1 on Linux; unavailable capabilities produce an error, never a Git fallback.
+The state directory is private to your user. `rm` keeps an environment's directory. Delete it yourself when you no longer need its data.

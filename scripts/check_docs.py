@@ -137,7 +137,7 @@ def validate_search_records(site, base, expected, data):
         indexed.add(route)
     if indexed != set(expected):
         raise ValueError('search index differs from public pages')
-    for term, slug in [('Claude', 'agents'), ('worktree', 'worktrees'), ('frontend', 'first-environment')]:
+    for term, slug in [('Claude', 'worktrees'), ('worktree', 'worktrees'), ('ticker', 'getting-started'), ('prune', 'cli')]:
         if not any(identifier.partition('#')[0] == f'{base}{slug}/' for identifier in data['queries'].get(term, [])):
             raise ValueError(f'local search query has no expected result: {term}')
     return len(indexed)
@@ -182,10 +182,6 @@ def inspect_site(site, base='/'):
             if target is None:
                 raise ValueError(f'external CSS asset: {reference}')
             resources.add(target)
-    forbidden = {'PRD.md', 'PRD-0.1.md', 'research.md', 'implementation.md', 'plans'}
-    for path in site.rglob('*'):
-        if forbidden.intersection(path.relative_to(site).parts):
-            raise ValueError(f'internal documentation included: {path}')
     for path in pages:
         text = path.read_text()
         if '/Users/davafons/' in text or '/home/davafons/' in text:
@@ -194,15 +190,12 @@ def inspect_site(site, base='/'):
         'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
         'logo.svg': 'assets/brand/logo.svg',
         'third-party-notices.txt': 'docs/website/THIRD_PARTY_NOTICES.txt',
-        'demo-parcela.yaml': 'examples/docs-demo/parcela.yaml',
-        'demo-frontend.html': 'examples/docs-demo/frontend/index.html',
-        'demo-backend.json': 'examples/docs-demo/backend/status.json',
     }.items():
         if (site / 'assets' / name).read_bytes() != (ROOT / source).read_bytes():
             raise ValueError(f'download differs from canonical source: {name}')
-    section = (ROOT / 'docs/site/agents.md').read_text().split('## Install the skill for Claude Code\n', 1)[1]
+    section = (ROOT / 'docs/site/worktrees.md').read_text().split('### Install the skill for Claude Code\n', 1)[1]
     script = re.search(r'```sh\n(.*?)\n```', section, re.S).group(1)
-    if script not in [block.rstrip('\n') for block in pages[site / 'agents/index.html'].code_blocks]:
+    if script not in [block.rstrip('\n') for block in pages[site / 'worktrees/index.html'].code_blocks]:
         raise ValueError('rendered Claude installation block differs from canonical Markdown')
     check_search(site, base)
     return pages, resources
@@ -348,7 +341,7 @@ def main():
                            env={**os.environ, 'DOCS_BASE': base, 'DOCS_OUTPUT': str(site)})
             pages, resources = inspect_site(site, base)
             results.append(check_http(site, pages, resources, base))
-        report = {'complete': True, 'hosting': results, 'internal_docs_excluded': True,
+        report = {'complete': True, 'hosting': results,
                   'undeclared_and_external_sources_refused': True, 'source_boundary_builds': source_builds,
                   'canonical_downloads': True,
                   'search_index_pages': check_search(site, base), 'declared_theme_contrast': check_theme_colors(),

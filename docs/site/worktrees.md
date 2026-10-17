@@ -1,71 +1,172 @@
-# Manage primary and preview worktrees
+# Parallel worktrees and agents
 
-## Select the intended checkout
+Every checkout of a project gets its own environment: its own ports, logs, processes and URLs. This page shows how checkouts are named, how to run several agents at once and how to keep their data apart.
 
-Start with an existing configured checkout. Create jj workspaces or Git worktrees through the project's VCS workflow, not through an inferred Parcela action. Parcela also supports plain configured directories.
+## How checkouts are named
 
-```sh
-parcela --path "$CHECKOUT" workspace discover
-parcela --path "$CHECKOUT" workspace list
-```
+The main checkout of a project uses the project URL. Every other checkout puts its name in front:
 
-Discovery reads sibling VCS metadata. It does not adopt a directory, create a worktree or change history. In a colocated repository, jj takes precedence over Git. A missing source path stays recorded.
+| Checkout | Name | URL |
+|---|---|---|
+| Main checkout, or a plain directory | `primary` | `https://shop.localhost:1443` |
+| jj workspace `signup` | `signup` | `https://signup-shop.localhost:1443` |
+| Git worktree in directory `billing` | `billing` | `https://billing-shop.localhost:1443` |
+| Any checkout started with `parcela up --name review` | `review` | `https://review-shop.localhost:1443` |
 
-For explicit machine-wide inventory, including from outside a project:
+Other services add their name in front again, so the `api` service of `signup` is `https://api-signup-shop.localhost:1443`.
 
-```sh
-parcela workspace list --all
-```
+- The project name comes from the main checkout's directory. All jj workspaces and Git worktrees of a repository share it. Set `project: shop` in `parcela.yaml` to choose it yourself.
+- Parcela remembers the name on the first `up`. Renaming a branch or a workspace keeps the same URL.
+- A name that another checkout already uses is refused. Parcela never takes over another environment's URL.
+- Use `parcela up --primary` to give a linked checkout the project URL, when no other checkout holds it.
 
-Read the actual environment IDs, source paths, roles and observed states. Do not select an environment from a branch name or focused terminal alone.
+## Run several agents at once
 
-## Adopt an existing preview
-
-Read the preview's project instructions and `parcela.yaml`. Keep the same `project.id` and project name across copies. Choose a preview name when overriding the VCS-derived name, and define the project-owned data policy.
-
-> **Names are not data isolation.**
->
-> Do not launch a preview whose dotenv, database, uploads or queue still point at primary resources unless that sharing is explicitly intended. Parcela does not clone, migrate or seed those resources. A project launcher may refuse previews until bindings are configured.
-
-After the required bindings are in place:
+Give each agent its own worktree and start the app in it:
 
 ```sh
-parcela --path "$PREVIEW" config check
-parcela --path "$PREVIEW" up --name review --detach
-parcela --path "$PREVIEW" context
+git worktree add ../signup && (cd ../signup && parcela up --detach)
+git worktree add ../billing && (cd ../billing && parcela up --detach)
 ```
 
-For project `my-app`, the default service reserves `review-my-app.localhost`. An API prefix reserves `api-review-my-app.localhost`. Registration during startup refuses conflicts with another environment's base or secondary names rather than taking them over.
+```text
+✓ signup (shop) is running at https://signup-shop.localhost:1443
+✓ billing (shop) is running at https://billing-shop.localhost:1443
+```
 
-The primary uses `my-app.localhost`. Main VCS checkouts and plain directories use the base URL by default; linked jj workspaces use their workspace name, and linked Git worktrees use their directory name. Use `--name` for a chosen preview name or `--primary` for an explicit primary override. Once registered, an environment keeps its identity, role and name even if VCS metadata changes. A conflicting name or role is refused. The advanced `workspace adopt` command remains available but is not required before startup.
+With jj, use `jj workspace add ../signup`. Each agent then works only in its own directory. Inside it, `parcela url`, `parcela logs` and `parcela restart` act on that checkout and nothing else.
 
-## Operate from another directory
-
-Set `ENVIRONMENT_ID` to the exact UUID returned by startup context or inventory:
+To act on a checkout from somewhere else, pass `--path`:
 
 ```sh
-parcela --workspace "$ENVIRONMENT_ID" status
-parcela --workspace "$ENVIRONMENT_ID" up --detach
-parcela --workspace "$ENVIRONMENT_ID" services
-parcela --workspace "$ENVIRONMENT_ID" url --service backend
+parcela --path ../billing url
 ```
 
-Use an actual declared service name. `--workspace` and `--path` conflict. Keep the same `--state-dir` prefix on all calls when using a nondefault registry. UUID selection does not forward a command to another machine.
+```text
+https://billing-shop.localhost:1443
+```
 
-## Restart or stop only that environment
+See everything that runs on the machine:
 
 ```sh
-parcela --workspace "$ENVIRONMENT_ID" restart --detach
-parcela --workspace "$ENVIRONMENT_ID" status
-parcela --workspace "$ENVIRONMENT_ID" down
+parcela ls
 ```
 
-Restart operates on the whole graph. It preflights the replacement, then starts a new generation with a new nonce and endpoint allocation. Stop preserves source and data. Stale stop requests cannot silently act on a successor generation.
+```text
+PROJECT  NAME     STATE    URL                                  PATH
+shop     billing  ready    https://billing-shop.localhost:1443  /Users/you/code/billing
+shop     signup   ready    https://signup-shop.localhost:1443   /Users/you/code/signup
+shop     primary  stopped  https://shop.localhost:1443          /Users/you/code/shop
+```
 
-Status and qualified stop can still use an environment ID when its source has gone missing. Starting or restarting requires its current valid source manifest. Do not delete an uncertain record as a remedy.
+## Keep data separate
 
-## Change service reservations explicitly
+Parcela separates ports, URLs, processes and logs. It does not copy or separate your data. If two checkouts read the same `.env` and the same database, they share it.
 
-Stop the selected environment first. Edit its service names or prefixes, then run `up` again. Startup preserves the existing role and name while refreshing the stopped service reservations. Resolve any reported collision before startup.
+Each environment has a private runtime directory in `PARCELA_RUNTIME_DIR`, with `data`, `tmp`, `cache` and `log` inside. Put per-checkout files there. For SQLite, point the database file at it, in whatever variable your app reads:
 
-Stopped hostnames stay reserved. Source moves, role changes and project renames do not have an automatic rebind command. Do not simulate one by modifying the private registry.
+```yaml
+environment:
+  DATABASE_PATH: ${PARCELA_RUNTIME_DIR}/data/app.sqlite3
+```
+
+For a server database, run one per checkout as a worker on a named port. This Postgres worker creates its data directory on first start:
+
+```yaml
+web: python3 -m http.server $PORT --bind 127.0.0.1
+workers:
+  db: sh -c 'test -d "$PARCELA_RUNTIME_DIR/data/pg" || initdb -D "$PARCELA_RUNTIME_DIR/data/pg"; exec postgres -D "$PARCELA_RUNTIME_DIR/data/pg" -h 127.0.0.1 -p "$PARCELA_PORT_DB" -k /tmp'
+ports: [db]
+environment:
+  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/postgres
+tasks:
+  psql:
+    argv: [sh, -c, 'psql "$DATABASE_URL" "$@"', psql]
+```
+
+Each checkout now has its own cluster on its own port:
+
+```sh
+parcela task psql -- -tAc 'show port'
+(cd ../search && parcela task psql -- -tAc 'show port')
+```
+
+```text
+26341
+22030
+```
+
+Seeding and migrations stay your project's job. Run them with your usual commands, or define them as tasks and run them with `parcela task`.
+
+## Clean up
+
+```sh
+parcela down --all            # stop every environment of this project
+parcela down --all-projects   # stop every environment on the machine
+git worktree remove ../billing
+parcela rm --prune            # forget checkouts whose directory is gone
+```
+
+`down` keeps everything on disk. `rm` forgets a stopped environment and frees its URLs. It keeps the runtime directory, so a database there survives until you delete it yourself.
+
+## Set up a coding agent
+
+Parcela ships instructions for coding agents inside the binary. Print them with:
+
+```sh
+parcela --skill
+```
+
+The output is Markdown. It tells the agent how to pick the right checkout, start it with `--detach`, read `--json` output, find URLs and logs and stop only its own environment. You can also [read the operating skill](../../.agents/skills/parcela/SKILL.md) here or [download it](../../.agents/skills/parcela/SKILL.md?raw=1).
+
+### Install the skill for Claude Code
+
+[Claude Code discovers skills](https://code.claude.com/docs/en/skills) in `.claude/skills/<name>/SKILL.md`. Run this from the project root:
+
+```sh
+(
+	set -eu
+	skill_root=.claude
+	skill_dir="$skill_root/skills/parcela"
+	for skill_path in "$skill_root" "$skill_root/skills" "$skill_dir"; do
+		if test -L "$skill_path"; then
+			printf 'Refusing symlinked skill directory: %s\n' "$skill_path" >&2
+			exit 1
+		fi
+	done
+	mkdir -p "$skill_dir"
+	stage=$(mktemp -d "$skill_dir/.install.XXXXXX")
+	trap 'rm -f "$stage/SKILL.md"; rmdir "$stage"' EXIT
+	parcela --skill > "$stage/SKILL.md"
+	test -s "$stage/SKILL.md"
+	ln "$stage/SKILL.md" "$skill_dir/"
+)
+```
+
+It writes `.claude/skills/parcela/SKILL.md` and refuses to replace an existing one. To install it for every project, replace the `skill_root=.claude` line with `skill_root="$HOME/.claude"`. After upgrading Parcela, compare `parcela --skill` with the installed copy and update it.
+
+Then ask Claude Code something bounded:
+
+```text
+/parcela Show this checkout's status and URLs. Don't start or stop anything.
+```
+
+### Ask an agent to configure a project
+
+Paste this into your agent to have it write `parcela.yaml` for a project:
+
+```text
+Configure this checkout for Parcela.
+
+Read `parcela --skill` and https://parcela.davafons.com/docs/configuration/.
+Look at how the project starts its dev servers, workers and databases today.
+Don't read .env files or credentials.
+
+Write a minimal parcela.yaml with the project's real commands. Every HTTP
+service must listen on 127.0.0.1:$PORT. Put databases and other ports under
+`ports:` and per-checkout files under $PARCELA_RUNTIME_DIR.
+Ask me before choosing how databases, uploads or queues are shared.
+
+Run `parcela doctor`. Don't start services, run migrations or install anything.
+Show me the diff and the commands to start it.
+```

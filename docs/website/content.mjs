@@ -6,21 +6,18 @@ const project = dirname(fileURLToPath(import.meta.url));
 const repository = resolve(project, '../..');
 
 export const groups = [
-  { label: 'Learn', pages: [
-    ['index', 'Overview', 'docs/site/index.md'],
-    ['install', 'Build and host setup', 'docs/site/install.md'],
-    ['first-environment', 'First environment', 'docs/site/first-environment.md'],
-    ['worktrees', 'Manage worktrees', 'docs/site/worktrees.md'],
-    ['agents', 'Work with an agent', 'docs/site/agents.md'],
+  { label: 'Introduction', pages: [
+    ['index', 'Home', 'docs/site/index.md'],
+    ['getting-started', 'Getting started', 'docs/site/getting-started.md'],
   ] },
   { label: 'Guides', pages: [
-    ['services', 'Configure service sets', 'docs/site/services.md'],
-    ['troubleshooting', 'Troubleshoot and recover', 'docs/site/troubleshooting.md'],
+    ['worktrees', 'Parallel worktrees and agents', 'docs/site/worktrees.md'],
+    ['cli', 'CLI guide', 'docs/site/cli.md'],
+    ['troubleshooting', 'Troubleshooting', 'docs/site/troubleshooting.md'],
   ] },
   { label: 'Reference', pages: [
-    ['configuration', 'Configuration and CLI', 'docs/configuration.md'],
+    ['configuration', 'Configuration', 'docs/configuration.md'],
     ['operating-skill', 'Operating skill', '.agents/skills/parcela/SKILL.md'],
-    ['limits', 'Supported scope', 'docs/site/limits.md'],
   ] },
 ];
 
@@ -28,9 +25,6 @@ export const downloads = {
   'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
   'logo.svg': 'assets/brand/logo.svg',
   'third-party-notices.txt': 'docs/website/THIRD_PARTY_NOTICES.txt',
-  'demo-parcela.yaml': 'examples/docs-demo/parcela.yaml',
-  'demo-frontend.html': 'examples/docs-demo/frontend/index.html',
-  'demo-backend.json': 'examples/docs-demo/backend/status.json',
 };
 
 export function validatePublicSources(directory) {
@@ -85,12 +79,14 @@ export function prepareContent(base, srcDir) {
   const titles = {};
   for (const [slug, , source] of groups.flatMap(({ pages }) => pages)) {
     const path = join(repository, source);
-    let markdown = sourceBytes(source).toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-    validateMarkdownSource(markdown, source);
-    const heading = /^# (.+)\r?$/m.exec(markdown);
-    if (!heading) throw new Error(`Public page has no title: ${source}`);
-    const title = heading[1];
-    titles[routes[source]] = title;
+    const text = sourceBytes(source).toString('utf8');
+    validateMarkdownSource(text, source);
+    const front = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
+    let markdown = front ? text.slice(front[0].length) : text;
+    const pageFront = front && source.startsWith('docs/site/') ? front[1] : '';
+    const title = /^# (.+)\r?$/m.exec(markdown)?.[1] ?? /^title: (.+)\r?$/m.exec(pageFront)?.[1];
+    if (!title) throw new Error(`Public page has no title: ${source}`);
+    if (!/^search: false\r?$/m.test(pageFront)) titles[routes[source]] = title;
     markdown = markdown.replace(/\]\(([^)]+)\)/g, (match, reference) => {
       if (/^(?:[a-z]+:|#|\/)/i.test(reference)) return match;
       const [filename, suffix = ''] = reference.split(/(?=[?#])/s);
@@ -101,7 +97,8 @@ export function prepareContent(base, srcDir) {
       return `](${route.slice(base.length - 1)}${suffix === '?raw=1' ? '' : suffix})`;
     });
     const output = join(src, slug === 'index' ? 'index.md' : `${slug}/index.md`);
-    files.set(output, Buffer.from(`---\ntitle: ${JSON.stringify(title)}\n---\n\n${markdown}`));
+    const frontmatter = /^title: /m.test(pageFront) ? pageFront : `title: ${JSON.stringify(title)}\n${pageFront}`;
+    files.set(output, Buffer.from(`---\n${frontmatter.trimEnd()}\n---\n\n${markdown}`));
   }
   files.set(join(publicDir, 'documentation-pages.json'), Buffer.from(JSON.stringify(titles, null, 2) + '\n'));
   for (const [output, bytes] of files) {

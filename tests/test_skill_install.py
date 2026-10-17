@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 
-DOCUMENT = Path(__file__).resolve().parents[1] / 'docs/site/agents.md'
+DOCUMENT = Path(__file__).resolve().parents[1] / 'docs/site/worktrees.md'
 PAYLOAD = b'---\nname: parcela\ndescription: Test fixture\n---\nFixture instructions.\n'
 ZSH = shutil.which('zsh')
 
@@ -35,7 +35,7 @@ class ClaudeSkillInstallation(unittest.TestCase):
             'HOME': str(self.home),
             'PARCELA_STATE_DIR': str(self.state),
         }
-        section = DOCUMENT.read_text().split('## Install the skill for Claude Code\n', 1)[1]
+        section = DOCUMENT.read_text().split('### Install the skill for Claude Code\n', 1)[1]
         self.script = re.search(r'```sh\n(.*?)\n```', section, re.S).group(1)
 
     def install(self, script=None, shell='/bin/sh'):

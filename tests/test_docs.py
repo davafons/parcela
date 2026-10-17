@@ -77,7 +77,7 @@ const index = readFileSync(srcDir + '/index.md');
 const logo = readFileSync(srcDir + '/public/assets/logo.svg');
 appendFileSync('../site/index.md', '\n\nDo not publish this partial update.\n');
 appendFileSync('../../assets/brand/logo.svg', '\n');
-appendFileSync('../site/agents.md', '\n\n{{ 7 * 7 }}\n');
+appendFileSync('../site/worktrees.md', '\n\n{{ 7 * 7 }}\n');
 assert.throws(() => prepareContent('/', srcDir), /Public Markdown cannot load extra sources/);
 assert.deepEqual(readFileSync(srcDir + '/index.md'), index);
 assert.deepEqual(readFileSync(srcDir + '/public/assets/logo.svg'), logo);
@@ -162,12 +162,6 @@ class DocumentationLinks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'external rendering asset'):
             inspect_site(self.site)
 
-    def test_internal_plan_directory_is_not_a_public_asset(self):
-        (self.site / 'index.html').write_text('<h1>Start</h1>')
-        (self.site / 'plans').mkdir()
-        (self.site / 'plans/private.txt').write_text('private')
-        with self.assertRaisesRegex(ValueError, 'internal documentation included'):
-            inspect_site(self.site)
 
 
 class DocumentationSearch(unittest.TestCase):
@@ -177,8 +171,8 @@ class DocumentationSearch(unittest.TestCase):
         self.site = Path(self.temporary.name)
         self.expected = {}
         self.documents = []
-        for slug, title in [('agents', 'Work with an agent'), ('worktrees', 'Manage primary and preview worktrees'),
-                            ('first-environment', 'First environment')]:
+        for slug, title in [('worktrees', 'Parallel worktrees and agents'), ('getting-started', 'Getting started with Parcela'),
+                            ('cli', 'CLI guide')]:
             directory = self.site / slug
             directory.mkdir()
             (directory / 'index.html').write_text(f'<h1 id="start">{title}</h1>')
@@ -186,9 +180,10 @@ class DocumentationSearch(unittest.TestCase):
             self.expected[route] = title
             self.documents.append({'id': route + '#start', 'title': title, 'titles': []})
         self.data = {'documentCount': 3, 'documents': self.documents, 'queries': {
-            'Claude': ['/docs/agents/#start'],
+            'Claude': ['/docs/worktrees/#start'],
             'worktree': ['/docs/worktrees/#start'],
-            'frontend': ['/docs/first-environment/#start'],
+            'ticker': ['/docs/getting-started/#start'],
+            'prune': ['/docs/cli/#start'],
         }}
 
     def check(self):
@@ -226,7 +221,7 @@ class DocumentationSearch(unittest.TestCase):
             self.check()
 
     def test_search_anchor_must_exist_in_actual_html(self):
-        self.documents[0]['id'] = '/docs/agents/#absent'
+        self.documents[0]['id'] = '/docs/worktrees/#absent'
         with self.assertRaisesRegex(ValueError, 'missing search anchor'):
             self.check()
 

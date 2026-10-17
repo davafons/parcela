@@ -1,25 +1,10 @@
-version: 1
-project: {id: parcela-docs-demo, name: parcela-demo}
-default_service: frontend
-services:
-  frontend: {readiness_path: /}
-  backend: {subdomain: api, readiness_path: /status.json}
-process_compose:
-  version: "0.5"
-  processes:
-    frontend:
-      working_dir: frontend
-      command: python3 -m http.server ${PORT} --bind ${HOST}
-      availability:
-        restart: "no"
-    backend:
-      working_dir: backend
-      command: python3 -m http.server ${PARCELA_SERVICE_BACKEND_PORT} --bind ${HOST}
-      environment:
-        - PORT=${PARCELA_SERVICE_BACKEND_PORT}
-      availability:
-        restart: "no"
-    worker:
-      command: python3 -u -c 'import time; print("demo worker ready", flush=True); time.sleep(86400)'
-      availability:
-        restart: "no"
+web: python3 -m http.server $PORT --bind 127.0.0.1
+api: python3 api.py
+workers:
+  ticker: python3 worker.py
+ports: [db]
+environment:
+  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/hello
+tasks:
+  db-url:
+    argv: [sh, -c, 'echo "$DATABASE_URL"']

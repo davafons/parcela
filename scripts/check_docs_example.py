@@ -1,4 +1,4 @@
-"""Drive the downloadable tutorial demo through real isolated Parcela backends."""
+"""Drive the getting-started app through real isolated Parcela backends: two checkouts, then cleanup."""
 import argparse
 import hashlib
 import json
@@ -11,7 +11,7 @@ import tempfile
 
 from check_live import BINARY, ROOT, free_port, wait_for
 
-INPUTS = ['parcela.yaml', 'frontend/index.html', 'backend/status.json']
+INPUTS = ['parcela.yaml', 'index.html', 'api.py', 'worker.py']
 
 
 def main():
@@ -26,13 +26,18 @@ def main():
     state = root / 'state'
     https = free_port()
     report = {'complete': False, 'fixture': str(root), 'front_ports': [https], 'backend_ports': []}
-    handles, children, copies = [], [], []
+    handles, children = [], []
+    primary, signup = root / 'hello', root / 'signup'
 
     def cli(path, *argv, check=True):
         return subprocess.run([str(BINARY), '--path', str(path), '--state-dir', str(state), *argv],
                               capture_output=True, text=True, check=check, timeout=30)
 
-    def request(host, path, expected=200):
+    def git(*argv):
+        subprocess.run(['git', '-C', str(primary), '-c', 'user.name=docs', '-c', 'user.email=docs@example.invalid', *argv],
+                       check=True, capture_output=True, timeout=30)
+
+    def request(host, path='/', expected=200):
         context = ssl.create_default_context(cafile=str(state / 'proxy/data/pki/authorities/local/root.crt'))
         with context.wrap_socket(socket.create_connection(('127.0.0.1', https), timeout=3), server_hostname=host) as connection:
             connection.sendall(f'GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n'.encode())
@@ -42,66 +47,73 @@ def main():
         head, body = response.split(b'\r\n\r\n', 1)
         if not head.startswith(f'HTTP/1.1 {expected}'.encode()):
             raise ValueError(f'expected {expected}, got {head!r}')
-        return body
+        if b'transfer-encoding: chunked' not in head.lower():
+            return body
+        decoded = b''
+        while True:
+            size, _, body = body.partition(b'\r\n')
+            if not int(size, 16):
+                return decoded
+            decoded, body = decoded + body[:int(size, 16)], body[int(size, 16) + 2:]
 
     def remember(result):
         session = result['session']
-        assert len(session['endpoints']) == 2
+        assert {endpoint['service'] for endpoint in session['endpoints']} == {'web', 'api'}
         report['backend_ports'].extend(endpoint['backend_port'] for endpoint in session['endpoints'])
         return session
 
     try:
-        for label, role in [('primary', 'primary'), ('review', 'preview')]:
-            path = root / label
-            for name in INPUTS:
-                destination = path / name
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source / name, destination)
-            copies.append(path)
-            assert next(c for c in json.loads(cli(path, '--json', 'doctor', check=False).stdout)['checks'] if c['name'] == 'config')['ok'] is True
+        primary.mkdir()
+        for name in INPUTS:
+            shutil.copyfile(source / name, primary / name)
+        git('init', '-q')
+        git('add', '.')
+        git('commit', '-qm', 'hello app')
+        git('worktree', 'add', '-q', str(signup))
         log = open(root / 'proxy.log', 'w')
         handles.append(log)
         proxy = subprocess.Popen([str(BINARY), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,
                                   '--port', str(https)], stdout=log, stderr=log)
         children.append(proxy)
         wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
-        sessions = []
-        for index, (path, base) in enumerate(zip(copies, ['parcela-demo.localhost', 'review-parcela-demo.localhost'])):
-            naming = [] if index == 0 else ['--name', 'review']
-            started = json.loads(cli(path, 'up', *naming, '--detach', '--process-compose', args.process_compose).stdout)
-            context = json.loads(cli(path, 'context').stdout)
-            assert context['workspace']['role'] == ('primary' if index == 0 else 'preview')
-            assert set(context['planned_urls']) == {'frontend', 'backend'}
-            session = remember(started)
-            sessions.append(session)
-            assert session['generation'] == 2
+        sessions, database_urls = [], []
+        for path, base in [(primary, 'hello.localhost'), (signup, 'signup-hello.localhost')]:
+            sessions.append(remember(json.loads(cli(path, 'up', '--detach', '--process-compose', args.process_compose).stdout)))
             status = json.loads(cli(path, 'status').stdout)
             assert status['state'] == 'ready' and status['live_health_verified']
             assert all(endpoint['listener_owned'] and endpoint['http_ready'] for endpoint in status['live']['endpoints'].values())
             assert cli(path, 'url').stdout.strip() == f'https://{base}:{https}'
-            assert cli(path, 'url', '--service', 'backend').stdout.strip() == f'https://api-{base}:{https}'
-            assert b'Parcela demo frontend' in request(base, '/')
-            assert json.loads(request(f'api-{base}', '/status.json')) == {'service': 'backend', 'ready': True}
+            assert cli(path, 'url', '--service', 'api').stdout.strip() == f'https://api-{base}:{https}'
+            assert b'Hello from Parcela' in request(base)
+            assert json.loads(request(f'api-{base}')) == {'message': 'hello from the API', 'url': f'https://api-{base}:{https}'}
             processes = json.loads(cli(path, 'status').stdout)['processes']
-            assert {entry['name']: entry['state'] for entry in processes} == {'frontend': 'running', 'backend': 'running', 'worker': 'running'}
-            assert all(entry['pid'] for entry in processes), processes
-            wait_for(lambda: 'demo worker ready' in cli(path, 'logs', 'worker', '--tail', '10').stdout, [proxy])
-        primary = copies[0]
+            assert {entry['name']: entry['state'] for entry in processes} == {'web': 'running', 'api': 'running', 'ticker': 'running'}, processes
+            wait_for(lambda: 'tick 1' in cli(path, 'logs', 'ticker', '--tail', '10').stdout, [proxy])
+            database_url = cli(path, 'task', 'db-url').stdout.strip()
+            assert database_url.startswith('postgres://127.0.0.1:') and database_url.endswith('/hello')
+            database_urls.append(database_url)
+        assert len(set(database_urls)) == 2, database_urls
+        listed = json.loads(cli(primary, 'ls').stdout)['workspaces']
+        assert {Path(entry['workspace']['source']).resolve() for entry in listed} >= {primary, signup}
         restarted = remember(json.loads(cli(primary, 'restart', '--detach', '--process-compose', args.process_compose).stdout))
-        assert restarted['generation'] == 3 and restarted['token'] != sessions[0]['token']
-        assert json.loads(request('api-parcela-demo.localhost', '/status.json')) == {'service': 'backend', 'ready': True}
+        assert restarted['generation'] == sessions[0]['generation'] + 1 and restarted['token'] != sessions[0]['token']
+        assert cli(primary, 'task', 'db-url').stdout.strip() == database_urls[0]
         cli(primary, 'down')
         assert json.loads(cli(primary, 'status').stdout)['state'] == 'stopped'
-        request('parcela-demo.localhost', '/', 503)
-        request('api-parcela-demo.localhost', '/status.json', 503)
-        assert json.loads(request('api-review-parcela-demo.localhost', '/status.json'))['ready'] is True
-        for path in copies:
-            for name, digest in hashes.items():
-                assert hashlib.sha256((path / name).read_bytes()).hexdigest() == digest
+        request('hello.localhost', '/', 503)
+        assert b'Hello from Parcela' in request('signup-hello.localhost')
+        cli(primary, 'down', '--all')
+        git('worktree', 'remove', str(signup))
+        cli(primary, 'rm', '--prune')
+        remaining = {Path(entry['workspace']['source']).resolve() for entry in json.loads(cli(primary, 'ls').stdout)['workspaces']}
+        assert signup not in remaining and primary in remaining, remaining
+        for name, digest in hashes.items():
+            assert hashlib.sha256((primary / name).read_bytes()).hexdigest() == digest
         report['complete'] = True
-        report['verified'] = ['organizer validation', 'automatic primary/named-preview registration', 'planned context', 'two named TLS origins per environment',
-                              'owned readiness', 'native frontend/backend/worker', 'worker logs', 'whole-graph generation restart',
-                              'independent stop and route withdrawal', 'source retention']
+        report['verified'] = ['primary and Git worktree environments', 'named HTTPS web and API per checkout',
+                              'per-service URL variables', 'worker logs', 'distinct named ports per checkout',
+                              'generation restart keeps the named port', 'independent stop and route withdrawal',
+                              'down --all, worktree removal and rm --prune', 'source retention']
     except Exception as error:
         report['error'] = str(error)
         raise
@@ -110,9 +122,8 @@ def main():
             context = json.loads(context_file.read_text())
             report['backend_ports'].extend(endpoint['backend_port'] for endpoint in context['session']['endpoints'])
         report['backend_ports'] = sorted(set(report['backend_ports']))
-        for path in copies:
-            stopped = cli(path, 'down', check=False)
-            if stopped.returncode != 0:
+        for path in [primary, signup]:
+            if path.exists() and cli(path, 'down', check=False).returncode != 0:
                 report['complete'] = False
         for child in reversed(children):
             if child.poll() is None:
