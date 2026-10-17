@@ -319,6 +319,23 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                     "launch predecessor changed; successor preserved"
                 );
             }
+            if !restart
+                && snapshot.is_none()
+                && let Some(session) = lifecycle::orphaned(&registry, &workspace)?
+            {
+                eprintln!(
+                    "parcela: the Parcela process that started {} exited; taking back control of its running services",
+                    render::name(&serde_json::to_value(&workspace)?)
+                );
+                parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
+                let result = if detach {
+                    lifecycle::recover_detached(&registry, &workspace)?
+                } else {
+                    parcela::runtime::recover(&mut registry, &workspace, &session, false)?
+                };
+                out.emit(&result, |style| render::recovered(&result, style))?;
+                return Ok(0);
+            }
             let operation = if restart {
                 parcela::private::directory(&registry.runtime_path(&workspace))?;
                 Some(parcela::private::Lock::wait(

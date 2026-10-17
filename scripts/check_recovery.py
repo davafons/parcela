@@ -338,6 +338,54 @@ def recover_surviving_graph(f):
     assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'recovery must not replay or replace service processes'
     return {'controller_recovered': True, 'service_pid_preserved': True, 'generation_preserved': True}
 
+def up_recovers_surviving_graph(f):
+    app = f.app('upreattach')
+    f.start_proxy()
+    owner = f.start(app)
+    before = f.session(app)
+    service = json.loads(f.request(app)[1])
+    owner.kill()
+    owner.wait(timeout=5)
+    recovered = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    assert recovered.returncode == 0, recovered.stderr
+    assert 'taking back control of its running services' in recovered.stderr, recovered.stderr
+    result = json.loads(recovered.stdout)
+    assert result['recovered'] is True and result['detached'] is True and result['live']['state'] == 'ready', result
+    after = f.session(app)
+    assert (after['token'], after['generation'], after['status']) == (before['token'], before['generation'], 'ready')
+    assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'up must reattach, not replay the service'
+    status = json.loads(f.cli(app['path'], 'status').stdout)
+    assert status['state'] == 'ready' and [process['name'] for process in status['processes']] == ['web'], status
+    assert status['processes'][0]['state'] == 'running' and status['processes'][0]['pid'], status
+    duplicate = f.cli(app['path'], 'up', '--detach', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    assert duplicate.returncode != 0 and json.loads(f.request(app)[1])['pid'] == service['pid'], 'a live owner is never replaced'
+    down = f.cli(app['path'], 'down')
+    assert down.returncode == 0 and json.loads(down.stdout)['state'] == 'stopped', down.stderr
+    assert not listening(app['port'])
+    return {'up_detach_recovered': True, 'service_pid_preserved': True, 'generation_preserved': True, 'duplicate_up_refused': True}
+
+def up_foreground_recovers_surviving_graph(f):
+    app = f.app('upforeground')
+    f.start_proxy()
+    owner = f.start(app)
+    before = f.session(app)
+    service = json.loads(f.request(app)[1])
+    owner.kill()
+    owner.wait(timeout=5)
+    recovered = f.spawn(app['path'], 'up', '--process-compose', f.args.compose, '--backend-port', str(app['port']))
+    def reattached():
+        live = json.loads(f.cli(app['path'], 'status').stdout)['live']
+        return live and live['owner_pid'] == recovered.pid and live['state'] == 'ready'
+    wait_for(reattached)
+    after = f.session(app)
+    assert (after['token'], after['generation']) == (before['token'], before['generation'])
+    assert json.loads(f.request(app)[1])['pid'] == service['pid'], 'up must reattach, not replay the service'
+    down = f.cli(app['path'], 'down')
+    assert down.returncode == 0, down.stderr
+    assert recovered.wait(timeout=20) == 0
+    assert not listening(app['port'])
+    return {'up_foreground_recovered': True, 'service_pid_preserved': True, 'foreground_exit': 0}
+
 def guardian_death(f):
     app = f.app('guardian')
     f.start_proxy()
@@ -843,7 +891,7 @@ def crashed_tree_up(f):
     return {'up_after_crash_exit': 0, 'next_generation': after['generation'], 'https_code': 200}
 
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
-         recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
+         recover_surviving_graph, up_recovers_surviving_graph, up_foreground_recovers_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
          replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
          recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop,
          occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,

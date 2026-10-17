@@ -136,7 +136,7 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | Command | Behavior |
 |---|---|
 | `init [--name NAME] [--command CMD]` | Write a commented short-form `parcela.yaml` in `--path`, guessing the web command from `package.json`, Rails or Django files; refuses to overwrite; validates before writing |
-| `up [--name NAME\|--primary] [--detach] [--backend-port N]` | Start every service, foreground by default; detached startup returns only after live readiness and prints the URL and next commands |
+| `up [--name NAME\|--primary] [--detach] [--backend-port N]` | Start every service, foreground by default; detached startup returns only after live readiness and prints the URL and next commands; if the previous supervising process died while the services kept running, `up` reattaches to them instead (same generation, no replay) |
 | `down` / `stop` | Stop through the live supervisor or authenticated recovery; preserve source/data; repeated stop is a no-op |
 | `down --all` / `down --all-projects` | Stop every running environment of this project, or of every project; prints the targets first and exits 1 if any stop fails |
 | `restart [--detach] [--backend-port N]` | Check the replacement before stopping the healthy run, then start a new run; does not replay arbitrary `run` argv |
@@ -148,7 +148,7 @@ The private runtime has `data`, `tmp`, `cache` and `log`. Projects create any ot
 | `rm --prune` | Forget every stopped environment whose checkout directory no longer exists; running ones are skipped |
 | `doctor` | Readiness checklist: Process Compose and Caddy on `PATH`, `lsof`, `ps`, the nearest `parcela.yaml` (the same validation and error text as `up`, including a Process Compose process for every HTTP service), the private state directory and the proxy; creates no state |
 | `run [--name NAME\|--primary] [--backend-port N] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
-| `recover [--detach]` | Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
+| `recover [--detach]` | Hidden from help; `up` does this for a run that was starting or ready. Reattach to surviving authenticated services without replaying them; an interrupted stop remains a stop |
 | `task NAME -- ARGS` | Literal project argv plus literal appended args; optional timeout |
 | `context` | Hidden from help. Planned context; no live-health guarantees |
 | `proxy start [--port N]` | Start the dedicated Caddy proxy in the background and wait until it answers; `--port` saves a port profile; a busy port fails naming its holder; no sudo, trust change, takeover or fallback |

@@ -81,14 +81,14 @@ Read process names from `status.processes` before selecting logs. A legacy singl
 
 `unknown`, `interrupted`, missing evidence or a replaced native handle is not permission to clear locks, delete sockets, free leases or kill a process. Never signal a persisted PID, use broad `pkill`, or bypass the owner through raw native commands. Preserve the diagnostic and ask for an explicit recovery or manual intervention plan.
 
-When the owner has died and the task authorizes recovery of a proven native graph:
+When the owner has died while its services still run, and the task authorizes starting the environment, `up` takes them back instead of starting a second graph. It prints `taking back control of its running services` on stderr and returns `recovered: true`:
 
 ```sh
-parcela --workspace "$ENVIRONMENT_ID" recover --detach
+parcela --workspace "$ENVIRONMENT_ID" up --detach
 parcela --workspace "$ENVIRONMENT_ID" status
 ```
 
-Recovery requires matching generation, process births, original lock/socket identities and native authentication. It uses the recorded launch manifest and does not replay startup. A pending stop remains a stop; a successful recovered result can be `stopped` rather than `ready`. Do not retry by launching a duplicate graph when recovery refuses.
+Recovery requires matching generation, process births, original lock/socket identities and native authentication. It uses the recorded launch manifest and does not replay startup. `up` reattaches only to a run that was starting or ready. A run that was stopping or interrupted still needs `parcela down` or the hidden `parcela recover`; a pending stop remains a stop, so that result can be `stopped` rather than `ready`. Do not retry by launching a duplicate graph when recovery refuses.
 
 ## Restart, stop and optional project tasks
 

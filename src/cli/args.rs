@@ -61,7 +61,7 @@ pub enum Command {
         #[arg(long)]
         command: Option<String>,
     },
-    /// Start this checkout's services. Registers the checkout on first use.
+    /// Start this checkout's services. Registers it on first use; reattaches to services left running.
     Up {
         /// Preview name for this checkout. Defaults to the jj workspace or Git worktree name.
         #[arg(long, conflicts_with_all = ["primary", "workspace"])]
@@ -189,6 +189,8 @@ pub enum Command {
         args: Vec<String>,
     },
     /// Take back control of services that kept running after Parcela was interrupted.
+    /// `up` does this automatically.
+    #[command(hide = true)]
     Recover {
         /// Return once control is restored and keep the services in the background.
         #[arg(long)]

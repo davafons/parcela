@@ -324,6 +324,21 @@ pub struct LaunchSnapshot {
     pub predecessor: Option<Session>,
 }
 
+/// A running Process Compose session whose owner died while recorded processes survive, by
+/// birth identity. `up` takes it back through the recover path instead of starting a duplicate.
+pub fn orphaned(registry: &Registry, workspace: &Workspace) -> Result<Option<Session>> {
+    let Some(session) = registry.session(&workspace.id)? else {
+        return Ok(None);
+    };
+    if session.kind != "compose" || !matches!(session.status.as_str(), "starting" | "ready") {
+        return Ok(None);
+    }
+    let Ok(record) = crate::owner::Record::read(&registry.runtime_path(workspace), &session) else {
+        return Ok(None);
+    };
+    Ok((!record.owner.alive() && !record.quiescent()).then_some(session))
+}
+
 pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     let session = registry
         .session(&workspace.id)?
