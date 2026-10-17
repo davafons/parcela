@@ -21,7 +21,7 @@ Read the actual environment IDs, source paths, roles and observed states. Do not
 
 ## Adopt an existing preview
 
-Read the preview's project instructions and `parcela.yaml`. Keep the same `project.id` and project name across copies. Choose an explicit label and a project-owned data policy.
+Read the preview's project instructions and `parcela.yaml`. Keep the same `project.id` and project name across copies. Choose a preview name when overriding the VCS-derived name, and define the project-owned data policy.
 
 > **Names are not data isolation.**
 >
@@ -31,17 +31,17 @@ After the required bindings are in place:
 
 ```sh
 parcela --path "$PREVIEW" config check
-parcela --path "$PREVIEW" workspace adopt --role preview --label review
+parcela --path "$PREVIEW" up --name review --detach
 parcela --path "$PREVIEW" context
 ```
 
-For project `my-app`, the default service reserves `review-my-app.localhost`. An API prefix reserves `api-review-my-app.localhost`. Adoption refuses conflicts with another environment's base or secondary names rather than taking them over.
+For project `my-app`, the default service reserves `review-my-app.localhost`. An API prefix reserves `api-review-my-app.localhost`. Registration during startup refuses conflicts with another environment's base or secondary names rather than taking them over.
 
-The primary uses `my-app.localhost`, regardless of its label. A role does not change because a bookmark moves. Repeating identical adoption keeps the environment identity; implicit role or path rebind is not supported.
+The primary uses `my-app.localhost`. Main VCS checkouts and plain directories use the base URL by default; linked jj workspaces use their workspace name, and linked Git worktrees use their directory name. Use `--name` for a chosen preview name or `--primary` for an explicit primary override. Once registered, an environment keeps its identity, role and name even if VCS metadata changes. A conflicting name or role is refused. The advanced `workspace adopt` command remains available but is not required before startup.
 
 ## Operate from another directory
 
-Set `ENVIRONMENT_ID` to the exact UUID returned by adoption or inventory:
+Set `ENVIRONMENT_ID` to the exact UUID returned by startup context or inventory:
 
 ```sh
 parcela --workspace "$ENVIRONMENT_ID" status
@@ -66,6 +66,6 @@ Status and qualified stop can still use an environment ID when its source has go
 
 ## Change service reservations explicitly
 
-Stop the selected environment first. Edit its service names or prefixes, then re-adopt with the same role and label. Resolve any reported collision before startup.
+Stop the selected environment first. Edit its service names or prefixes, then run `up` again. Startup preserves the existing role and name while refreshing the stopped service reservations. Resolve any reported collision before startup.
 
 Stopped hostnames stay reserved. Source moves, role changes and project renames do not have an automatic rebind command. Do not simulate one by modifying the private registry.

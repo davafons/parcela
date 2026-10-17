@@ -277,7 +277,7 @@ impl Registry {
                     || (old_hosts.len() == 1
                         && old_hosts.get("") == Some(&workspace.hostname)
                         && hosts.len() == 1),
-                "service hostname changes require a stopped environment and explicit adoption"
+                "service hostname changes require a stopped environment; stop it before starting the updated configuration"
             );
             transaction.execute(
                 "DELETE FROM workspace_hosts WHERE environment_id=?1",
@@ -315,7 +315,9 @@ impl Registry {
             )
             .optional()?;
         let Some(workspace) = workspace else {
-            bail!("checkout not adopted; run workspace adopt with explicit --role and --label");
+            bail!(
+                "checkout not registered; start it with parcela up (or use explicit workspace adopt)"
+            );
         };
         ensure!(
             workspace.project_id == manifest.project.id

@@ -34,7 +34,7 @@ Caddy handles HTTPS. Process Compose handles processes, dependencies, logs and s
 
 ## Keep the ownership boundary clear
 
-Adoption registers an existing directory. It does not create a worktree, move a branch, prepare a database or start a service.
+The project file defines the services and commands. `up` registers the selected checkout on first use and starts that graph. It does not create a worktree, move a branch or prepare a database. A linked checkout gets its own preview name; use `--name` to choose one.
 
 `up` starts one explicitly configured native graph. All declared HTTP services must become ready before its group routes open. `down` stops that selected environment without deleting source or data. `restart` creates a new generation. Qualified `recover` can reattach to a surviving native graph without replaying startup.
 

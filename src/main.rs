@@ -5,7 +5,8 @@ use parcela::{
     context::ResolvedContext,
     control::Action,
     lifecycle,
-    registry::{Registry, Role},
+    registry::{Registry, Role, Workspace},
+    startup,
 };
 use std::path::{Path, PathBuf};
 
@@ -59,8 +60,14 @@ enum Command {
         #[command(subcommand)]
         command: ProxyCommand,
     },
-    /// Run literal argv under the current adopted environment; foreground, one HTTP service.
+    /// Run a command in the selected checkout; register its identity on first use.
     Run {
+        /// Preview name; otherwise reuse identity or infer it from the checkout.
+        #[arg(long, conflicts_with_all = ["primary", "workspace"])]
+        name: Option<String>,
+        /// Explicitly use the project base URL, even from a linked checkout.
+        #[arg(long, conflicts_with = "workspace")]
+        primary: bool,
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=86400))]
@@ -68,8 +75,14 @@ enum Command {
         #[arg(last = true, required = true, allow_hyphen_values = true)]
         argv: Vec<String>,
     },
-    /// Run the native Process Compose graph with a private Unix control socket.
+    /// Start the configured services; registration is automatic for this checkout.
     Up {
+        /// Preview name; otherwise reuse identity or infer it from the checkout.
+        #[arg(long, conflicts_with_all = ["primary", "workspace"])]
+        name: Option<String>,
+        /// Explicitly use the project base URL, even from a linked checkout.
+        #[arg(long, conflicts_with = "workspace")]
+        primary: bool,
         #[arg(long, default_value = "process-compose")]
         process_compose: String,
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
@@ -82,7 +95,7 @@ enum Command {
         #[arg(long, hide = true)]
         launch_file: Option<PathBuf>,
     },
-    /// Execute an explicit project-defined task, with literal appended arguments.
+    /// Optionally run a named project command with environment context and a timeout.
     Task {
         name: String,
         #[arg(last = true, allow_hyphen_values = true)]
@@ -216,6 +229,20 @@ fn target_workspace(
         registry.current(&source, &manifest)
     }
 }
+fn startup_registry(
+    state: &Path,
+    source: &Path,
+    manifest: &Manifest,
+    request: &startup::Request,
+) -> Result<(Registry, Workspace)> {
+    let existing = Registry::open(state, false)?;
+    let identity = request.resolve(existing.as_ref(), manifest, source)?;
+    drop(existing);
+    let mut registry = Registry::open(state, true)?.context("no registry")?;
+    let workspace = registry.adopt(manifest, source, identity.role, &identity.label)
+        .context("cannot register checkout; choose --name NAME for a separate preview; existing owners were preserved")?;
+    Ok((registry, workspace))
+}
 fn cell(value: &serde_json::Value) -> String {
     let text = value
         .as_str()
@@ -310,8 +337,9 @@ fn inspect(cli: Cli) -> Result<()> {
             if all {
                 inventory(&state, None, cli.human)
             } else {
-                let registry =
-                    Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+                let registry = Registry::open(&state, false)?.context(
+                    "no registered environment; start the selected checkout with parcela up",
+                )?;
                 let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
                 let status = lifecycle::status(&registry, &workspace)?;
                 if cli.human {
@@ -324,8 +352,9 @@ fn inspect(cli: Cli) -> Result<()> {
         }
         Command::Services | Command::Logs { .. } | Command::Url { .. } => {
             let state = state_dir(cli.state_dir)?;
-            let registry =
-                Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+            let registry = Registry::open(&state, false)?.context(
+                "no registered environment; start the selected checkout with parcela up",
+            )?;
             let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
             match cli.command {
                 Command::Services => {
@@ -383,8 +412,9 @@ fn inspect(cli: Cli) -> Result<()> {
             command: ProxyCommand::Status,
         } => {
             let state = state_dir(cli.state_dir)?;
-            let registry =
-                Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+            let registry = Registry::open(&state, false)?.context(
+                "no registered environment; start the selected checkout with parcela up",
+            )?;
             let router = parcela::router::current(registry.state_path())?;
             json(
                 &serde_json::json!({"router":router,"owned_admin_verified":true,"browser_trust_verified":false}),
@@ -452,7 +482,7 @@ fn inspect(cli: Cli) -> Result<()> {
             let (source, manifest) = project(&cli.path)?;
             let state = state_dir(cli.state_dir)?;
             let Some(registry) = Registry::open(&state, false)? else {
-                bail!("no registry; run workspace adopt with explicit --role and --label");
+                bail!("no registered environment; start the selected checkout with parcela up");
             };
             let workspace = registry.current(&source, &manifest)?;
             json(&ResolvedContext::new(&registry, &manifest, workspace)?)
@@ -470,8 +500,8 @@ fn run(mut cli: Cli) -> Result<i32> {
     }
     if let Some(id) = cli.workspace {
         let state = state_dir(cli.state_dir.clone())?;
-        let registry =
-            Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+        let registry = Registry::open(&state, false)?
+            .context("no registered environment; start the selected checkout with parcela up")?;
         cli.path = registry
             .list(None)?
             .into_iter()
@@ -479,6 +509,15 @@ fn run(mut cli: Cli) -> Result<i32> {
             .context("unknown adopted workspace ID")?
             .source;
     }
+    let request = match &cli.command {
+        Command::Up { name, primary, .. } | Command::Run { name, primary, .. } => {
+            startup::Request {
+                name: name.clone(),
+                primary: *primary,
+            }
+        }
+        _ => startup::Request::default(),
+    };
     let restarting = matches!(cli.command, Command::Restart { .. });
     match cli.command {
         Command::Proxy {
@@ -506,11 +545,11 @@ fn run(mut cli: Cli) -> Result<i32> {
             backend_port,
             readiness_timeout,
             argv,
+            ..
         } => {
             let (source, manifest) = project(&cli.path)?;
             let state = state_dir(cli.state_dir)?;
-            let mut registry = Registry::open(&state, true)?.context("no registry")?;
-            let workspace = registry.current(&source, &manifest)?;
+            let (mut registry, workspace) = startup_registry(&state, &source, &manifest, &request)?;
             parcela::runtime::run(
                 &mut registry,
                 &manifest,
@@ -526,6 +565,7 @@ fn run(mut cli: Cli) -> Result<i32> {
             readiness_timeout,
             detach,
             launch_file,
+            ..
         }
         | Command::Restart {
             process_compose,
@@ -549,8 +589,21 @@ fn run(mut cli: Cli) -> Result<i32> {
                 project(&cli.path)?
             };
             let state = state_dir(cli.state_dir)?;
-            let mut registry = Registry::open(&state, true)?.context("no registry")?;
-            let workspace = registry.current(&source, &manifest)?;
+            ensure!(
+                manifest.process_compose.is_some(),
+                "parcela.yaml has no process_compose graph; define the services to start or use parcela run -- COMMAND"
+            );
+            let (mut registry, workspace) = if restart || snapshot.is_some() {
+                ensure!(
+                    request.name.is_none() && !request.primary,
+                    "pinned startup cannot change environment identity"
+                );
+                let registry = Registry::open(&state, true)?.context("no registry")?;
+                let workspace = registry.current(&source, &manifest)?;
+                (registry, workspace)
+            } else {
+                startup_registry(&state, &source, &manifest, &request)?
+            };
             if let Some(snapshot) = &snapshot {
                 ensure!(
                     launch_file.as_ref()
@@ -637,8 +690,9 @@ fn run(mut cli: Cli) -> Result<i32> {
         }
         Command::Down => {
             let state = state_dir(cli.state_dir)?;
-            let registry =
-                Registry::open(&state, false)?.context("no registry; adopt checkout first")?;
+            let registry = Registry::open(&state, false)?.context(
+                "no registered environment; start the selected checkout with parcela up",
+            )?;
             let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
             json(&lifecycle::down(&registry, &workspace)?)?;
             Ok(0)

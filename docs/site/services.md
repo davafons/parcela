@@ -68,7 +68,7 @@ After a listener identity changes, Parcela withdraws group routing and requires 
 
 Use native process checks for workers and application checks for behavior. Neither a Running process nor an HTTP liveness response proves a database migration, a queue's correctness or a complete UI workflow.
 
-## Define explicit finite tasks
+## Optionally define finite tasks
 
 ```yaml
 tasks:
@@ -77,7 +77,7 @@ tasks:
     timeout_seconds: 300
 ```
 
-Run a declared task with literal appended arguments:
+Tasks are optional. Keep using existing npm, Make or other project commands directly when they do not need Parcela context. Run a declared task with literal appended arguments:
 
 ```sh
 parcela task test -- focused-example

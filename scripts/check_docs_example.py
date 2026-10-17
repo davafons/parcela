@@ -60,10 +60,6 @@ def main():
             copies.append(path)
             checked = json.loads(cli(path, 'config', 'check').stdout)
             assert checked['valid'] is True
-            adopted = json.loads(cli(path, 'workspace', 'adopt', '--role', role, '--label', label).stdout)
-            assert adopted['workspace']['role'] == role
-            context = json.loads(cli(path, 'context').stdout)
-            assert set(context['planned_urls']) == {'frontend', 'backend'}
         log = open(root / 'proxy.log', 'w')
         handles.append(log)
         proxy = subprocess.Popen([str(BINARY), '--state-dir', str(state), 'proxy', 'run', '--caddy', args.caddy,
@@ -71,8 +67,12 @@ def main():
         children.append(proxy)
         wait_for(lambda: cli(root, 'proxy', 'status', check=False).returncode == 0, [proxy])
         sessions = []
-        for path, base in zip(copies, ['parcela-demo.localhost', 'review-parcela-demo.localhost']):
-            started = json.loads(cli(path, 'up', '--detach', '--process-compose', args.process_compose).stdout)
+        for index, (path, base) in enumerate(zip(copies, ['parcela-demo.localhost', 'review-parcela-demo.localhost'])):
+            naming = [] if index == 0 else ['--name', 'review']
+            started = json.loads(cli(path, 'up', *naming, '--detach', '--process-compose', args.process_compose).stdout)
+            context = json.loads(cli(path, 'context').stdout)
+            assert context['workspace']['role'] == ('primary' if index == 0 else 'preview')
+            assert set(context['planned_urls']) == {'frontend', 'backend'}
             session = remember(started)
             sessions.append(session)
             assert session['generation'] == 2
@@ -99,7 +99,7 @@ def main():
             for name, digest in hashes.items():
                 assert hashlib.sha256((path / name).read_bytes()).hexdigest() == digest
         report['complete'] = True
-        report['verified'] = ['organizer validation', 'explicit primary/preview adoption', 'planned context', 'two named TLS origins per environment',
+        report['verified'] = ['organizer validation', 'automatic primary/named-preview registration', 'planned context', 'two named TLS origins per environment',
                               'owned readiness', 'native frontend/backend/worker', 'worker logs', 'whole-graph generation restart',
                               'independent stop and route withdrawal', 'source retention']
     except Exception as error:

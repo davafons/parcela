@@ -32,7 +32,7 @@ Keep your primary checkout and previews identifiable, with their own service gra
 | Preview named `auth` | `https://auth-notes.localhost` |
 
 - **Named HTTPS.** Flat hostnames, standard ports, and exact-host routing through Caddy.
-- **Stable workspace identities.** UUIDs survive bookmark and branch changes. Adopt existing jj, Git, or plain-directory checkouts.
+- **Stable workspace identities.** UUIDs survive bookmark and branch changes. Startup registers the selected jj, Git or plain-directory checkout automatically.
 - **Native service graphs.** Process Compose runs the web service and workers. Each environment gets a private control socket.
 - **Explicit lifecycle control.** Start, stop, restart, inspect, and recover qualified native graphs without guessing which PID to kill.
 - **Project-owned policy.** Your configuration defines commands, preparation, and data bindings. Core does not assume Rails, Node, or a database layout.
@@ -93,11 +93,10 @@ process_compose:
       command: 'python3 -m http.server "${PORT}" --bind 127.0.0.1'
 ```
 
-Validate the configuration and adopt the checkout explicitly:
+Validate the configuration, then start its configured services:
 
 ```sh
 parcela config check
-parcela workspace adopt --role primary --label primary
 ```
 
 If the dedicated front door is already running, check it with `parcela proxy status`. Otherwise, run it in a separate terminal with the profile selected during host setup.
@@ -132,7 +131,18 @@ When you finish:
 parcela down
 ```
 
-Stopping preserves source and data. Preparation, migrations, and resets are never an implicit part of `up`. The [configuration reference](docs/configuration.md) covers workers, tasks, environment bindings, and preview adoption.
+Stopping preserves source and data. Preparation, migrations, and resets are never an implicit part of `up`. The [configuration reference](docs/configuration.md) covers workers, optional tasks, environment bindings and preview naming.
+
+For a named preview in another checkout:
+
+```sh
+parcela up --name review --detach
+parcela url
+```
+
+The main checkout uses the project base URL. Linked jj workspaces use their workspace name; linked Git worktrees use their directory name. `--name` overrides the inferred preview name. The name is remembered after first startup, so branch or workspace renames do not rename a registered environment. `--primary` is an explicit override when a linked checkout is intended to own the base URL. Conflicts refuse rather than replacing another owner. No separate adoption command is required.
+
+A project file defines what starts, not how to install its dependencies or prepare data. Keep using the project's existing test/build commands. `parcela task` is an optional wrapper for commands that need its environment context or timeout, not a prerequisite for `up`.
 
 ## Commands
 

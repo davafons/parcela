@@ -27,26 +27,17 @@ backend/status.json
 
 The manifest declares two HTTP services and three native processes. The frontend command consumes the default `PORT`. The backend command uses `PARCELA_SERVICE_BACKEND_PORT` directly and also sets its process-local `PORT`. Process Compose interpolates command text before applying process-local environment overrides. The worker has no HTTP route.
 
-## Validate and adopt
-
-Validate the organizer schema:
+## Validate the configuration
 
 ```sh
 parcela config check
 ```
 
-The response has `valid: true`. This does not start Python or verify native graph compatibility.
+The response has `valid: true`. This does not start Python, register an environment or verify native graph compatibility.
 
-Register the demo explicitly as primary:
+The project file defines the frontend, API and worker commands. Startup registers only this selected directory. A plain directory or main VCS checkout uses the base URL; a linked checkout uses a preview name. For a separate named copy, use `parcela up --name review --detach` as described in [preview startup](worktrees.md#adopt-an-existing-preview).
 
-```sh
-parcela workspace adopt --role primary --label primary
-parcela context
-```
-
-Read the returned `workspace.id`. The planned origins are `https://parcela-demo.localhost` and `https://api-parcela-demo.localhost`. They are reserved names, not live-health claims.
-
-If this project already has a primary elsewhere, stop here and inspect its inventory. Do not take its role or hostname. To run another copy, follow [preview adoption](worktrees.md#adopt-an-existing-preview).
+If the project base is already owned elsewhere, startup refuses rather than taking it over. Choose a preview name instead.
 
 ## Start the graph
 
@@ -54,11 +45,12 @@ If this project already has a primary elsewhere, stop here and inspect its inven
 parcela up --detach
 ```
 
-Detached startup returns after both HTTP endpoints are ready. Its JSON includes the current generation, endpoint set, live observations and owner log path.
+No separate adoption command is required. Detached startup returns after both HTTP endpoints are ready. Its JSON includes the current generation, endpoint set, live observations and owner log path.
 
 Inspect the processes and endpoints:
 
 ```sh
+parcela context
 parcela status
 parcela services --human
 parcela url

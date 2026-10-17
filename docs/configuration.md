@@ -1,6 +1,6 @@
 # Configuration and CLI
 
-Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects an adopted source instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; adoption supplies machine-local roles and labels.
+Commands locate the nearest `parcela.yaml` at or above `--path`. The manifest directory is the checkout root. `--workspace UUID` selects an adopted source instead of `--path`; the two options conflict. Explicit UUID inspection and stop still work when the source directory is missing. Starting or restarting always requires the current valid manifest. Use the same project identity across checkouts; startup registers the selected checkout with a stable role and name.
 
 ```yaml
 version: 1
@@ -28,6 +28,14 @@ process_compose:
 Project IDs are 1–128 ASCII letters/digits/hyphens/underscores/dots. DNS labels are 1–63 lowercase ASCII letters/digits with internal hyphens. Preview label plus project name must fit one label. Unknown organizer fields, invalid paths/names, NUL argv and nonpositive task timeouts fail. Native `process_compose` data is preserved, not interpreted as organizer fields. `config check` does not certify backend graph compatibility or resource isolation.
 
 `up` runs all declared HTTP services in one worktree environment and one native graph. `run` remains a literal single-HTTP-service command. Non-HTTP workers belong in the native graph but not in `services`. In a service set, each routed service must name a graph process. Legacy single-service graphs can retain a different native process name. Services must bind their assigned ports only on `127.0.0.1`; HTTP answers from foreign listeners cannot establish readiness.
+
+## Start from the project file
+
+`parcela up` starts the native graph in this file. No separate `workspace adopt` or task command is required. `parcela up --name review` creates a named preview on first use. Main jj/Git checkouts and plain directories use the project base URL; linked jj workspaces use their workspace name, and linked Git worktrees use their directory name. Inferred names are DNS-normalized. Ambiguous or invalid names require an explicit `--name NAME` or `--primary` choice. `run` uses the same naming flags.
+
+Existing identities are reused, not renamed when branches, directories or workspace metadata change. Explicit naming flags must match the registered identity. `--primary` explicitly selects the project base from a linked checkout, but cannot take over an existing primary. Registration and namespace conflicts fail without replacing owners. Read-only commands never register a checkout or start services.
+
+`workspace adopt --role ... --label ...` remains an advanced explicit registration command. Project tasks are optional finite commands, not setup requirements. Startup does not install dependencies, prepare application data or repair the HTTPS front door.
 
 ## Service sets
 
@@ -61,7 +69,7 @@ Commands and working directories are native Process Compose configuration, not f
 
 Each run records a service endpoint set under one generation and nonce. All declared HTTP services must pass startup readiness before any group route opens. A changed listener identity withdraws the group until every required endpoint passes readiness again. `status.live.endpoints` reports each service's listener ownership and fresh HTTP readiness. Whole-graph `down`, `restart` and qualified `recover` operate on the set. Individual service restart is not a Parcela command.
 
-Adoption reserves every service hostname atomically, including collisions with another worktree's base hostname. Port allocation reserves the whole set atomically. Stopped hostnames stay reserved and unavailable. To change reservations, stop the environment, change its manifest and explicitly adopt it again with the same role and label. No source or data is removed. Distinct names and runtime paths do not certify database or storage isolation.
+Registration reserves every service hostname atomically, including collisions with another worktree's base hostname. Port allocation reserves the whole set atomically. Stopped hostnames stay reserved and unavailable. To change reservations, stop the environment, change its manifest and run `up` again with its existing identity. No source or data is removed. Distinct names and runtime paths do not certify database or storage isolation.
 
 ## Context and environment
 
@@ -77,7 +85,7 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 |---|---|
 | `--skill` / `skill` | Print the embedded agent operating skill as plain Markdown; no project, registry or backend access |
 | `config check` | Strict organizer validation, no state creation |
-| `workspace adopt --role primary\|preview --label LABEL` | Explicit source identity and hostname reservation |
+| `workspace adopt --role primary\|preview --label LABEL` | Optional advanced explicit source identity and hostname reservation |
 | `workspace list [--all] [--human]` | Registered inventory plus live owner probes, scoped to the current project or explicit machine-wide view |
 | `workspace discover [--human]` | Read-only sibling jj/Git checkout paths, revisions, refs and adoption IDs; no manifest or registry required |
 | `context` / `workspace inspect` | Planned context; no live-health guarantees |
@@ -85,8 +93,8 @@ The private runtime has `data`, `uploads`, `cache`, `tmp/pids` and `log`. Core c
 | `proxy run --test-profile --http-port N --https-port N` | Explicit disposable high-port profile |
 | `proxy run --forwarded-standard-ports --http-port 8080 --https-port 8443` | Explicit external 80/443 forwarding, canonical port-free URL |
 | `proxy status` | Verify owned Caddy admin marker; mapped profile also verifies port-80 front door |
-| `run [--backend-port N] [--readiness-timeout SEC] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
-| `up [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Native graph, foreground by default; detached startup returns only after live readiness |
+| `run [--name NAME\|--primary] [--backend-port N] [--readiness-timeout SEC] -- ARGV` | Literal foreground command, startup readiness and owned listener monitoring |
+| `up [--name NAME\|--primary] [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Native graph, foreground by default; detached startup returns only after live readiness |
 | `down` / `stop` | Stop through the live owner or authenticated native recovery; preserve source/data; reconcile completed shutdown and make repeated completed stop a no-op |
 | `recover [--detach]` | Reattach to a surviving authenticated native graph without replaying services; an interrupted stop remains a stop operation, including detached stopped completion |
 | `restart [--detach] [--process-compose PATH] [--backend-port N] [--readiness-timeout SEC]` | Preflight the replacement backend/native graph before stopping the healthy owner, then launch in a fresh generation; does not replay arbitrary `run` argv |
