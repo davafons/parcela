@@ -64,6 +64,9 @@ impl Style {
     pub fn ok(&self) -> String {
         self.paint("32", "✓")
     }
+    pub fn bad(&self) -> String {
+        self.paint("31", "✗")
+    }
     pub fn url(&self, text: &str) -> String {
         self.paint("1;36", text)
     }

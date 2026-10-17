@@ -1,0 +1,238 @@
+use super::output::Output;
+use anyhow::Result;
+use parcela::config::{Manifest, locate};
+use serde::Serialize;
+use std::{
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+};
+
+/// One readiness fact. `fix` is the command or action that turns it green.
+#[derive(Serialize)]
+struct Check {
+    name: &'static str,
+    ok: bool,
+    detail: String,
+    fix: Option<String>,
+}
+
+impl Check {
+    fn pass(name: &'static str, detail: impl Into<String>) -> Self {
+        Self {
+            name,
+            ok: true,
+            detail: detail.into(),
+            fix: None,
+        }
+    }
+    fn fail(name: &'static str, detail: impl Into<String>, fix: impl Into<String>) -> Self {
+        Self {
+            name,
+            ok: false,
+            detail: detail.into(),
+            fix: Some(fix.into()),
+        }
+    }
+}
+
+fn on_path(program: &str) -> Option<PathBuf> {
+    if program.contains('/') {
+        return Path::new(program).is_file().then(|| program.into());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
+fn backend(name: &'static str, binary: &str, expect: &str, install: &str) -> Check {
+    let Some(path) = on_path(binary) else {
+        return Check::fail(name, format!("{binary} not found on PATH"), install);
+    };
+    match parcela::process::version(binary, "version") {
+        Ok(version) if version.contains(expect) => {
+            let version = version
+                .split_whitespace()
+                .find(|word| word.starts_with('v'))
+                .unwrap_or(&version)
+                .to_owned();
+            Check::pass(name, format!("{version} at {}", path.display()))
+        }
+        Ok(version) => Check::fail(
+            name,
+            format!(
+                "unsupported version at {}: {}",
+                path.display(),
+                version.lines().next().unwrap_or_default()
+            ),
+            install,
+        ),
+        Err(error) => Check::fail(name, format!("{error:#}"), install),
+    }
+}
+
+fn tool(name: &'static str, candidates: &[&str]) -> Check {
+    match candidates.iter().find_map(|candidate| on_path(candidate)) {
+        Some(path) => Check::pass(name, path.display().to_string()),
+        None => Check::fail(
+            name,
+            format!("{name} not found"),
+            format!("install {name}; Parcela uses it to verify which process owns a port"),
+        ),
+    }
+}
+
+fn config(path: &Path) -> Check {
+    let source = match locate(path) {
+        Ok(source) => source,
+        Err(_) => {
+            return Check::fail(
+                "config",
+                format!(
+                    "no parcela.yaml in {} or above",
+                    path.canonicalize()
+                        .unwrap_or_else(|_| path.into())
+                        .display()
+                ),
+                "parcela init",
+            );
+        }
+    };
+    let file = source.join("parcela.yaml");
+    match Manifest::load(&file).and_then(|manifest| manifest.check_startable().map(|()| manifest)) {
+        Ok(manifest) => Check::pass(
+            "config",
+            format!("{} (project {})", file.display(), manifest.project.name),
+        ),
+        Err(error) => Check::fail(
+            "config",
+            format!("{:#}", error),
+            format!("fix {}, then run parcela config check", file.display()),
+        ),
+    }
+}
+
+fn state(path: &Path) -> Check {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        let parent = path.ancestors().skip(1).find(|ancestor| ancestor.exists());
+        return match parent {
+            Some(parent) if writable(parent) => Check::pass(
+                "state",
+                format!("{} will be created on first parcela up", path.display()),
+            ),
+            _ => Check::fail(
+                "state",
+                format!("cannot create {}", path.display()),
+                "set PARCELA_STATE_DIR or --state-dir to a writable directory",
+            ),
+        };
+    };
+    // SAFETY: getuid takes no pointers and has no failure case.
+    let uid = unsafe { libc::getuid() };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() || metadata.uid() != uid {
+        Check::fail(
+            "state",
+            format!("{} is not a directory you own", path.display()),
+            "set PARCELA_STATE_DIR or --state-dir to a private directory you own",
+        )
+    } else if metadata.mode() & 0o077 != 0 {
+        Check::fail(
+            "state",
+            format!("{} is readable by other users", path.display()),
+            format!("chmod 700 {}", path.display()),
+        )
+    } else if !writable(path) {
+        Check::fail(
+            "state",
+            format!("{} is not writable", path.display()),
+            format!("chmod u+w {}", path.display()),
+        )
+    } else {
+        Check::pass("state", format!("{} (private)", path.display()))
+    }
+}
+
+fn writable(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: path is a valid NUL-terminated string that outlives the call.
+    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+}
+
+fn proxy(state: &Path) -> Check {
+    let fix = "start the HTTPS proxy in another terminal: parcela proxy run";
+    let Ok(state) = state.canonicalize() else {
+        return Check::fail("proxy", "not running", fix);
+    };
+    match parcela::router::current(&state) {
+        Ok(router) => Check::pass(
+            "proxy",
+            format!(
+                "running (HTTPS {}, HTTP {})",
+                router.https_port, router.http_port
+            ),
+        ),
+        Err(error) => Check::fail("proxy", format!("not running: {:#}", error), fix),
+    }
+}
+
+pub struct Probes<'a> {
+    pub path: &'a Path,
+    pub state: &'a Path,
+    pub caddy: Option<&'a str>,
+    pub process_compose: Option<&'a str>,
+}
+
+/// Report whether `parcela up` can work here. Read-only: creates no state and changes no host setting.
+pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
+    let checks = [
+        backend(
+            "process-compose",
+            probes.process_compose.unwrap_or("process-compose"),
+            "v1.",
+            "install Process Compose 1.x: brew install f1bonacci/tap/process-compose",
+        ),
+        backend(
+            "caddy",
+            probes.caddy.unwrap_or("caddy"),
+            "v2.",
+            "install Caddy 2: brew install caddy",
+        ),
+        tool("lsof", &["/usr/sbin/lsof", "lsof"]),
+        tool("ps", &["/bin/ps", "ps"]),
+        config(probes.path),
+        state(probes.state),
+        proxy(probes.state),
+    ];
+    let ready = checks.iter().all(|check| check.ok);
+    let notes = [
+        "HTTPS trust is not checked. Parcela never installs or trusts a certificate authority; if the browser warns, trust Caddy's local CA yourself.",
+    ];
+    let next = checks
+        .iter()
+        .find_map(|check| check.fix.clone())
+        .unwrap_or_else(|| "parcela up".into());
+    out.emit(
+        &serde_json::json!({"ready": ready, "checks": checks, "notes": notes}),
+        |style| {
+            let width = checks
+                .iter()
+                .map(|check| check.name.len())
+                .max()
+                .unwrap_or(0)
+                + 2;
+            let mut text = String::new();
+            for check in &checks {
+                let mark = if check.ok { style.ok() } else { style.bad() };
+                text.push_str(&format!("{mark} {:<width$}{}\n", check.name, check.detail));
+            }
+            for note in notes {
+                text.push_str(&format!("{}\n", style.dim(&format!("· {note}"))));
+            }
+            text.push_str(&format!("\nNext step: {}\n", style.bold(&next)));
+            text
+        },
+    )?;
+    Ok(ready)
+}

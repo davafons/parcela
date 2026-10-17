@@ -94,32 +94,6 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
                 "backend_graph_validated": false, "schema_version": 1});
             out.emit(&result, |style| render::config(&result, style))
         }
-        Command::Doctor {
-            caddy,
-            process_compose,
-        } => {
-            let probe = |binary: Option<String>, argument: &str| -> serde_json::Value {
-                match binary {
-                    None => serde_json::json!({"availability":"not_probed"}),
-                    Some(binary) => match parcela::process::version(&binary, argument) {
-                        Ok(version) => {
-                            serde_json::json!({"binary":binary,"availability":"available","version":version})
-                        }
-                        Err(error) => {
-                            serde_json::json!({"binary":binary,"availability":"unavailable","error":format!("{error:#}")})
-                        }
-                    },
-                }
-            };
-            let result = serde_json::json!({
-                "implementation":"rust", "planned_architecture":{"http_tls":"managed Caddy","supervision":"managed Process Compose"},
-                "backend_probes":{"caddy":probe(caddy,"version"),"process_compose":probe(process_compose,"version")},
-                "supported":["skill (--skill)","config check","workspace adopt/list/inspect/discover","context","live status (--all, --human)","down/stop","restart","services/logs/url","proxy run/status","run","up (--detach, worktree service sets)","task"],
-                "unsupported":["automatic crash reconciliation","control of older ownerless runs","automatic backend installation","privilege/trust setup","sharing","boot service"],
-                "data_isolation_verified":false,"host_configuration_modified":false
-            });
-            out.emit(&result, |style| render::fields(&result, style))
-        }
         Command::Status { all } => {
             let state = state_dir(cli.state_dir)?;
             if all {
@@ -264,6 +238,23 @@ pub fn run(mut cli: Cli) -> Result<i32> {
     if let Command::Init { name, command } = &cli.command {
         super::init::run(&cli.path, name.as_deref(), command.as_deref(), out)?;
         return Ok(0);
+    }
+    if let Command::Doctor {
+        caddy,
+        process_compose,
+    } = &cli.command
+    {
+        let state = state_dir(cli.state_dir.clone())?;
+        let ready = super::doctor::run(
+            super::doctor::Probes {
+                path: &cli.path,
+                state: &state,
+                caddy: caddy.as_deref(),
+                process_compose: process_compose.as_deref(),
+            },
+            out,
+        )?;
+        return Ok(if ready { 0 } else { 1 });
     }
     if let Some(id) = cli.workspace {
         let state = state_dir(cli.state_dir.clone())?;

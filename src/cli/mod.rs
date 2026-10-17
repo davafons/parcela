@@ -1,5 +1,6 @@
 mod args;
 mod commands;
+mod doctor;
 mod init;
 mod output;
 mod render;

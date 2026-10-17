@@ -185,15 +185,3 @@ pub fn config(value: &Value, style: &Style) -> String {
         cell(&value["project_id"]),
     )
 }
-
-/// Fallback for results without a dedicated layout: one `key value` line per field.
-pub fn fields(value: &Value, _style: &Style) -> String {
-    let Some(object) = value.as_object() else {
-        return format!("{}\n", cell(value));
-    };
-    let width = object.keys().map(String::len).max().unwrap_or(0) + 2;
-    object
-        .iter()
-        .map(|(key, value)| format!("{key:<width$}{}\n", cell(value)))
-        .collect()
-}

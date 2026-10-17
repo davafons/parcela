@@ -52,11 +52,13 @@ pub enum Command {
     },
     /// Print JSON context with planned URLs and explicit unsupported capabilities.
     Context,
-    /// Report implemented capabilities, without launching backends or changing the host.
+    /// Check whether this machine and checkout are ready for parcela up. Changes nothing.
     Doctor {
-        #[arg(long)]
+        /// Caddy binary to probe instead of caddy on PATH.
+        #[arg(long, hide = true)]
         caddy: Option<String>,
-        #[arg(long)]
+        /// Process Compose binary to probe instead of process-compose on PATH.
+        #[arg(long, hide = true)]
         process_compose: Option<String>,
     },
     /// Start dedicated Caddy in the foreground. No install, sudo, trust or takeover.

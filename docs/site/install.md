@@ -40,13 +40,13 @@ The command prints Markdown without reading or creating project or registry stat
 
 Install Caddy 2.x and Process Compose 1.x through your chosen package or release workflow. Parcela also needs `lsof` and `ps` for Unix listener and process inspection. Python 3 is needed for the documentation demo, not for every project.
 
-Inspect the exact tools you intend to use:
+Check that this machine is ready:
 
 ```sh
-parcela doctor --caddy caddy --process-compose process-compose
+parcela doctor
 ```
 
-Read `backend_probes` in the JSON response. Both tools should have `availability: "available"` and a version. An unavailable probe does not install the missing tool. Version availability is not proof that the front door is ready.
+Doctor probes `process-compose` and `caddy` on `PATH`, `lsof`, `ps`, the nearest `parcela.yaml`, the private state directory and the HTTPS proxy. Each line is a ✓ or ✗ with a fix, and the last line names the next step. With `--json`, or when stdout is not a terminal, it prints `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until every check passes. Doctor installs nothing and changes no host setting. A passing version probe is not proof that the front door or the application is healthy.
 
 The native acceptance fixtures use Caddy 2.11.7 and Process Compose 1.122.0. Other versions require their own verification. A successful version probe does not prove graph compatibility or application health.
 
