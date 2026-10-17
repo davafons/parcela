@@ -25,14 +25,16 @@ Parcela gives each checkout of your project its own web server, API, workers, po
 
 ## Install
 
+With Homebrew, which also installs Caddy and Process Compose:
+
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
+brew install davafons/tap/parcela
 ```
 
-Parcela drives [Caddy](https://caddyserver.com/docs/install) 2.x and [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1.x. On macOS:
+Or with the shell installer, then install [Caddy](https://caddyserver.com/docs/install) 2.x and [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1.x yourself:
 
 ```sh
-brew install caddy f1bonacc1/tap/process-compose
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
 ```
 
 Builds cover macOS and Linux. From source: `cargo install --git https://github.com/davafons/parcela --locked`.

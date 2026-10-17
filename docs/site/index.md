@@ -35,8 +35,10 @@ features:
 Install Parcela:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
+brew install davafons/tap/parcela
 ```
+
+Or, without Homebrew: `curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh`
 
 Then, in your project:
 
