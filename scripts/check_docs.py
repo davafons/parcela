@@ -335,6 +335,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
+    if not (WEBSITE / 'node_modules').is_dir():
+        raise SystemExit('docs/website/node_modules is missing; run npm ci --prefix docs/website first')
     with tempfile.TemporaryDirectory(prefix='parcela-docs-') as directory:
         directory = Path(directory).resolve()
         check_public_sources(directory)
