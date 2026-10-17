@@ -6,17 +6,17 @@ const project = dirname(fileURLToPath(import.meta.url));
 const repository = resolve(project, '../..');
 
 export const groups = [
-  { label: 'Start here', pages: [['index', 'Start here', 'docs/site/index.md']] },
-  { label: 'Get started', pages: [
+  { label: 'Learn', pages: [
+    ['index', 'Overview', 'docs/site/index.md'],
     ['install', 'Build and host setup', 'docs/site/install.md'],
     ['first-environment', 'First environment', 'docs/site/first-environment.md'],
+    ['worktrees', 'Manage worktrees', 'docs/site/worktrees.md'],
+    ['agents', 'Work with an agent', 'docs/site/agents.md'],
   ] },
   { label: 'Guides', pages: [
-    ['worktrees', 'Manage worktrees', 'docs/site/worktrees.md'],
     ['services', 'Configure service sets', 'docs/site/services.md'],
-    ['agents', 'Work with an agent', 'docs/site/agents.md'],
-    ['troubleshooting', 'Troubleshoot and recover', 'docs/site/troubleshooting.md'],
     ['transfer', 'Paused checkpoints', 'docs/site/transfer.md'],
+    ['troubleshooting', 'Troubleshoot and recover', 'docs/site/troubleshooting.md'],
   ] },
   { label: 'Reference', pages: [
     ['configuration', 'Configuration and CLI', 'docs/configuration.md'],
@@ -28,6 +28,7 @@ export const groups = [
 const downloads = {
   'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
   'logo.svg': 'logo.svg',
+  'third-party-notices.txt': 'docs/website/THIRD_PARTY_NOTICES.txt',
   'demo-parcela.yaml': 'examples/docs-demo/parcela.yaml',
   'demo-frontend.html': 'examples/docs-demo/frontend/index.html',
   'demo-backend.json': 'examples/docs-demo/backend/status.json',
@@ -53,6 +54,12 @@ export function validatePublicSources(directory) {
   visit(root);
 }
 
+export function validateMarkdownSource(markdown, source) {
+  if (/<!--\s*@include:|^\s*<<<|<script(?:\s|>)/mi.test(markdown)) {
+    throw new Error(`Public Markdown cannot load extra sources: ${source}`);
+  }
+}
+
 function sourceBytes(source) {
   const path = join(repository, source);
   const resolved = relative(repository, realpathSync(path));
@@ -68,8 +75,7 @@ export function prepareContent(base) {
   mkdirSync(generatedRoot, { recursive: true });
   const generated = mkdtempSync(join(generatedRoot, 'build-'));
   const src = join(generated, 'src');
-  const publicDir = join(generated, 'public');
-  mkdirSync(join(src, 'content/docs'), { recursive: true });
+  const publicDir = join(src, 'public');
   mkdirSync(join(publicDir, 'assets'), { recursive: true });
   const routes = Object.fromEntries(groups.flatMap(({ pages }) => pages)
     .map(([slug, , source]) => [source, `${base}${slug === 'index' ? '' : `${slug}/`}`]));
@@ -83,11 +89,11 @@ export function prepareContent(base) {
   for (const [slug, , source] of groups.flatMap(({ pages }) => pages)) {
     const path = join(repository, source);
     let markdown = sourceBytes(source).toString('utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    validateMarkdownSource(markdown, source);
     const heading = /^# (.+)\r?$/m.exec(markdown);
     if (!heading) throw new Error(`Public page has no title: ${source}`);
     const title = heading[1];
     titles[routes[source]] = title;
-    markdown = markdown.replace(heading[0], '').trimStart();
     markdown = markdown.replace(/\]\(([^)]+)\)/g, (match, reference) => {
       if (/^(?:[a-z]+:|#|\/)/i.test(reference)) return match;
       const [filename, suffix = ''] = reference.split(/(?=[?#])/s);
@@ -95,11 +101,12 @@ export function prepareContent(base) {
       const route = suffix === '?raw=1' && target === join(repository, '.agents/skills/parcela/SKILL.md')
         ? `${base}assets/parcela-skill.txt` : links.get(target);
       if (!route) throw new Error(`Undeclared public link: ${reference} from ${source}`);
-      return `](${route}${suffix === '?raw=1' ? '' : suffix})`;
+      return `](${route.slice(base.length - 1)}${suffix === '?raw=1' ? '' : suffix})`;
     });
-    writeFileSync(join(src, 'content/docs', `${slug}.md`), `---\ntitle: ${JSON.stringify(title)}\n---\n\n${markdown}`);
+    const output = join(src, slug === 'index' ? 'index.md' : `${slug}/index.md`);
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, `---\ntitle: ${JSON.stringify(title)}\n---\n\n${markdown}`);
   }
-  writeFileSync(join(src, 'content.config.ts'), `import { defineCollection } from 'astro:content';\nimport { docsLoader } from '@astrojs/starlight/loaders';\nimport { docsSchema } from '@astrojs/starlight/schema';\nexport const collections = { docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }) };\n`);
   writeFileSync(join(publicDir, 'documentation-pages.json'), JSON.stringify(titles, null, 2) + '\n');
-  return { srcDir: src, publicDir };
+  return { srcDir: src };
 }

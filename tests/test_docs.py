@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scripts.check_docs import Page, check_theme_colors, contrast_ratio, inspect_site, target_file
+from scripts.check_docs import Page, check_theme_colors, contrast_ratio, inspect_site, target_file, validate_search_records
 
 
 class DocumentationLinks(unittest.TestCase):
@@ -42,6 +42,10 @@ class DocumentationLinks(unittest.TestCase):
         page = Page('<h1>Start</h1><link rel="canonical" href="https://example.test/parcela/">')
         self.assertEqual(page.references, [])
 
+    def test_rendered_code_preserves_shell_characters(self):
+        page = Page("<pre><code>test &quot;$value&quot; &amp;&amp; printf '&lt;ok&gt;'</code></pre>")
+        self.assertEqual(page.code_blocks, ["test \"$value\" && printf '<ok>'"])
+
     def test_unsupported_schemes_are_not_treated_as_external_web_links(self):
         for reference in ['javascript:alert(1)', 'file:///private/file', 'data:text/html,hello', '//example.test/']:
             with self.subTest(reference=reference), self.assertRaises(ValueError):
@@ -60,8 +64,8 @@ class DocumentationLinks(unittest.TestCase):
     def test_unreadable_declared_theme_is_rejected(self):
         (self.site / 'src').mkdir()
         (self.site / 'src/parcela.css').write_text(
-            ':root { --sl-color-text: #111318; --sl-color-bg: #111318; }'
-            ':root[data-theme="light"] { --sl-color-text: #ffffff; --sl-color-bg: #ffffff; }')
+            ':root.dark { --vp-c-text-1: #111318; --vp-c-bg: #111318; }'
+            ':root { --vp-c-text-1: #ffffff; --vp-c-bg: #ffffff; }')
         with patch('scripts.check_docs.WEBSITE', self.site):
             with self.assertRaisesRegex(ValueError, 'dark body contrast 1.00 is below 4.5'):
                 check_theme_colors()
@@ -86,6 +90,77 @@ class DocumentationLinks(unittest.TestCase):
         (self.site / 'plans/private.txt').write_text('private')
         with self.assertRaisesRegex(ValueError, 'internal documentation included'):
             inspect_site(self.site)
+
+
+class DocumentationSearch(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.site = Path(self.temporary.name)
+        self.expected = {}
+        self.documents = []
+        for slug, title in [('agents', 'Work with an agent'), ('transfer', 'Paused checkpoints'),
+                            ('first-environment', 'First environment')]:
+            directory = self.site / slug
+            directory.mkdir()
+            (directory / 'index.html').write_text(f'<h1 id="start">{title}</h1>')
+            route = f'/docs/{slug}/'
+            self.expected[route] = title
+            self.documents.append({'id': route + '#start', 'title': title, 'titles': []})
+        self.data = {'documentCount': 3, 'documents': self.documents, 'queries': {
+            'Claude': ['/docs/agents/#start'],
+            'checkpoint': ['/docs/transfer/#start'],
+            'frontend': ['/docs/first-environment/#start'],
+        }}
+
+    def check(self):
+        return validate_search_records(self.site, '/docs/', self.expected, self.data)
+
+    def test_every_page_and_real_query_result_is_required(self):
+        self.assertEqual(self.check(), 3)
+
+    def test_missing_public_page_is_rejected(self):
+        self.documents.pop()
+        self.data['documentCount'] = 2
+        with self.assertRaisesRegex(ValueError, 'search index differs'):
+            self.check()
+
+    def test_empty_index_is_rejected(self):
+        self.documents.clear()
+        self.data['documentCount'] = 0
+        with self.assertRaisesRegex(ValueError, 'empty or inconsistent'):
+            self.check()
+
+    def test_count_mismatch_is_rejected(self):
+        self.data['documentCount'] = 4
+        with self.assertRaisesRegex(ValueError, 'empty or inconsistent'):
+            self.check()
+
+    def test_duplicate_record_is_rejected(self):
+        self.documents.append(self.documents[0].copy())
+        self.data['documentCount'] = 4
+        with self.assertRaisesRegex(ValueError, 'duplicate or unexpected'):
+            self.check()
+
+    def test_private_or_unlisted_page_is_rejected(self):
+        self.documents[0]['id'] = '/docs/plans/private/#start'
+        with self.assertRaisesRegex(ValueError, 'duplicate or unexpected'):
+            self.check()
+
+    def test_search_anchor_must_exist_in_actual_html(self):
+        self.documents[0]['id'] = '/docs/agents/#absent'
+        with self.assertRaisesRegex(ValueError, 'missing search anchor'):
+            self.check()
+
+    def test_title_must_match_canonical_page(self):
+        self.documents[0]['title'] = 'Different page'
+        with self.assertRaisesRegex(ValueError, 'search title differs'):
+            self.check()
+
+    def test_empty_query_results_are_not_search_proof(self):
+        self.data['queries']['Claude'] = []
+        with self.assertRaisesRegex(ValueError, 'no expected result: Claude'):
+            self.check()
 
 
 if __name__ == '__main__':

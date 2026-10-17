@@ -234,7 +234,7 @@ The opt-in [Shirabe replica check](docs/check-portable-shirabe.md) covers paused
 
 - [Public documentation](https://parcela.davafons.com/docs/) covers the development build and its supported scope.
 - [Task-first guides](docs/site/index.md) cover setup, the first environment, worktrees, service sets and agent use.
-- [Build the documentation site](docs/documentation.md) describes the Starlight build, verification and explicit publication gate.
+- [Build the documentation site](docs/documentation.md) describes the VitePress build, verification and explicit publication gate.
 - [Configuration and CLI](docs/configuration.md) contains the executable manifest and command contract.
 - [Implementation status](docs/implementation.md) records verified behavior and remaining gaps.
 - [Architecture](docs/architecture.md) describes ownership and backend boundaries.
