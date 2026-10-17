@@ -31,6 +31,38 @@ impl Role {
     }
 }
 
+/// Where a recorded run is in its lifecycle. Stored and printed in lowercase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Starting,
+    Ready,
+    Stopping,
+    Stopped,
+    Interrupted,
+}
+impl SessionStatus {
+    const ALL: [Self; 5] = [
+        Self::Starting,
+        Self::Ready,
+        Self::Stopping,
+        Self::Stopped,
+        Self::Interrupted,
+    ];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::Stopping => "stopping",
+            Self::Stopped => "stopped",
+            Self::Interrupted => "interrupted",
+        }
+    }
+    fn parse(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|status| status.as_str() == text)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Workspace {
     pub id: String,
@@ -560,7 +592,7 @@ impl Registry {
             router_token: router_token.into(),
             generation,
             backend_port: port,
-            status: "starting".into(),
+            status: SessionStatus::Starting,
             kind: kind.into(),
             public_url: public_url.into(),
             endpoints: endpoints.to_vec(),
@@ -568,7 +600,7 @@ impl Registry {
         };
         transaction.execute("INSERT INTO sessions (environment_id, token, router_token, generation, backend_port, status, kind, public_url, endpoints, ports) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
             ON CONFLICT(environment_id) DO UPDATE SET token=excluded.token, router_token=excluded.router_token, generation=excluded.generation, backend_port=excluded.backend_port, status=excluded.status, kind=excluded.kind, public_url=excluded.public_url, endpoints=excluded.endpoints, ports=excluded.ports WHERE sessions.status='stopped'",
-            params![session.environment_id, session.token, session.router_token, session.generation, port, session.status, kind, public_url, serde_json::to_string(endpoints)?, serde_json::to_string(ports)?])
+            params![session.environment_id, session.token, session.router_token, session.generation, port, session.status.as_str(), kind, public_url, serde_json::to_string(endpoints)?, serde_json::to_string(ports)?])
             .context("endpoint lease conflict; no foreign listener was changed")?;
         transaction.execute(
             "DELETE FROM active_ports WHERE environment_id=?1",
@@ -586,18 +618,14 @@ impl Registry {
         Ok(session)
     }
 
-    pub fn session_status(&mut self, session: &Session, status: &str) -> Result<()> {
-        ensure!(
-            ["starting", "ready", "stopping", "stopped", "interrupted"].contains(&status),
-            "invalid session transition"
-        );
+    pub fn session_status(&mut self, session: &Session, status: SessionStatus) -> Result<()> {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let changed = transaction.execute(
             "UPDATE sessions SET status=?1 WHERE environment_id=?2 AND token=?3 AND generation=?4 AND (status != 'stopped' OR ?1 = 'stopped')",
             params![
-                status,
+                status.as_str(),
                 session.environment_id,
                 session.token,
                 session.generation
@@ -607,7 +635,7 @@ impl Registry {
             changed == 1,
             "session ownership changed; refusing stale update"
         );
-        if status == "stopped" {
+        if status == SessionStatus::Stopped {
             transaction.execute(
                 "DELETE FROM active_ports WHERE environment_id=?1",
                 [&session.environment_id],
@@ -755,7 +783,7 @@ pub struct Session {
     pub router_token: String,
     pub generation: i64,
     pub backend_port: u16,
-    pub status: String,
+    pub status: SessionStatus,
     pub kind: String,
     pub public_url: String,
     #[serde(default)]
@@ -813,7 +841,8 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
         router_token: row.get(2)?,
         generation: row.get(3)?,
         backend_port: row.get(4)?,
-        status: row.get(5)?,
+        status: SessionStatus::parse(&row.get::<_, String>(5)?)
+            .ok_or(rusqlite::Error::InvalidQuery)?,
         kind: row.get(6)?,
         public_url: row.get(7)?,
         endpoints: serde_json::from_str(&row.get::<_, String>(8)?)
@@ -829,8 +858,6 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     .iter()
     .any(|id| Uuid::parse_str(id).is_err())
         || session.generation <= 0
-        || !["starting", "ready", "stopping", "stopped", "interrupted"]
-            .contains(&session.status.as_str())
         || session.backend_port < 1024
         || session
             .endpoints

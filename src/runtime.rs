@@ -5,7 +5,7 @@ use crate::{
     lifecycle::current_session,
     private::{self, Lock},
     process::{OwnedChild, Signals, exit_code, listener_identity, version},
-    registry::{Endpoint, Registry, Session, Workspace},
+    registry::{Endpoint, Registry, Session, SessionStatus, Workspace},
     router::{self, Router},
 };
 use anyhow::{Context, Result, ensure};
@@ -246,7 +246,7 @@ pub fn run(
     let (workspace, signals, control, child) = match launched {
         Ok(launched) => launched,
         Err(error) => {
-            registry.session_status(&session, "stopped")?;
+            registry.session_status(&session, SessionStatus::Stopped)?;
             return Err(error);
         }
     };
@@ -314,7 +314,7 @@ fn allocate(
     let unavailable: BTreeSet<_> = registry
         .sessions()?
         .iter()
-        .filter(|session| session.status != "stopped")
+        .filter(|session| session.status != SessionStatus::Stopped)
         .flat_map(Session::leased_ports)
         .chain(router.front_door.listeners())
         .collect();
@@ -499,7 +499,7 @@ pub fn preflight(
                 .iter()
                 .any(|session| session.leased_ports().contains(&port)
                     && session.environment_id != workspace.id
-                    && session.status != "stopped"),
+                    && session.status != SessionStatus::Stopped),
             "backend endpoint reserved by another environment"
         );
         if TcpListener::bind(("127.0.0.1", port)).is_err() {
@@ -507,7 +507,7 @@ pub fn preflight(
                 .session(&workspace.id)?
                 .context("backend endpoint unavailable; foreign listeners are never stopped")?;
             ensure!(
-                session.backend_port == port && session.status != "stopped",
+                session.backend_port == port && session.status != SessionStatus::Stopped,
                 "backend endpoint unavailable; foreign listeners are never stopped"
             );
             let record = crate::owner::Record::read(&path, &session)?;
@@ -660,7 +660,7 @@ fn monitor(
                         Action::Stop => {
                             record.phase = Phase::Stopping;
                             record.save(path)?;
-                            registry.session_status(&session, "stopping")?;
+                            registry.session_status(&session, SessionStatus::Stopping)?;
                             requested_stop = true;
                             Ok(
                                 json!({"stop_accepted":true,"operation_id":session.token,"generation":session.generation}),
@@ -696,7 +696,7 @@ fn monitor(
             if ready && observed != listener {
                 record.phase = Phase::Starting;
                 record.save(path)?;
-                registry.session_status(&session, "starting")?;
+                registry.session_status(&session, SessionStatus::Starting)?;
                 if let Ok(router) = router::current(registry.state_path()) {
                     let _ = router::sync(registry, &router);
                 }
@@ -722,7 +722,14 @@ fn monitor(
                     Phase::Starting
                 };
                 record.save(path)?;
-                registry.session_status(&session, if ready { "ready" } else { "starting" })?;
+                registry.session_status(
+                    &session,
+                    if ready {
+                        SessionStatus::Ready
+                    } else {
+                        SessionStatus::Starting
+                    },
+                )?;
                 published = None;
                 if ready {
                     eprintln!(
@@ -776,7 +783,7 @@ fn monitor(
                 .into(),
         );
         record.save(path)?;
-        registry.session_status(&session, "interrupted")?;
+        registry.session_status(&session, SessionStatus::Interrupted)?;
         revoke(registry);
         anyhow::bail!(
             "native supervisor exited unexpectedly; lease retained and graph quiescence not claimed"
@@ -784,7 +791,7 @@ fn monitor(
     }
     record.phase = Phase::Stopping;
     record.save(path)?;
-    registry.session_status(&session, "stopping")?;
+    registry.session_status(&session, SessionStatus::Stopping)?;
     revoke(registry);
     let shutdown = supervisor.shutdown(
         &record,
@@ -830,7 +837,7 @@ fn monitor(
         record.diagnostic =
             Some("shutdown incomplete; lease retained, native recovery required".into());
         record.save(path)?;
-        registry.session_status(&session, "interrupted")?;
+        registry.session_status(&session, SessionStatus::Interrupted)?;
         anyhow::bail!("shutdown incomplete; endpoint lease retained, no saved PID was signaled");
     }
     record.phase = Phase::Stopped;
@@ -840,7 +847,7 @@ fn monitor(
     {
         identity.remove_socket(&crate::sockets::environment(path)?.compose)?;
     }
-    registry.session_status(&session, "stopped")?;
+    registry.session_status(&session, SessionStatus::Stopped)?;
     result
 }
 
@@ -856,7 +863,7 @@ pub fn recover(
     );
     let session = current_session(registry, expected)?;
     ensure!(
-        stop || session.status != "stopped",
+        stop || session.status != SessionStatus::Stopped,
         "session is already stopped; use an explicit up to start it"
     );
     let path = registry.runtime_path(workspace);
@@ -892,7 +899,7 @@ pub fn recover(
         thread::sleep(Duration::from_millis(50));
     };
     let session = current_session(registry, expected)?;
-    if stop && session.status == "stopped" {
+    if stop && session.status == SessionStatus::Stopped {
         return Ok(
             json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","already_stopped":true}),
         );
@@ -914,7 +921,7 @@ pub fn recover(
         .context("recovery owner birth unavailable")?;
     record.control = private::Identity::read(&sockets.control)?;
     record.phase = if stop
-        || session.status == "stopping"
+        || session.status == SessionStatus::Stopping
         || matches!(
             record.phase,
             crate::owner::Phase::Stopping | crate::owner::Phase::Interrupted
@@ -928,9 +935,9 @@ pub fn recover(
     registry.session_status(
         &session,
         if record.phase == crate::owner::Phase::Stopping {
-            "stopping"
+            SessionStatus::Stopping
         } else {
-            "starting"
+            SessionStatus::Starting
         },
     )?;
     let supervisor = crate::owner::Supervisor::Peer(record.supervisor.clone());
@@ -974,7 +981,7 @@ fn converge_crashed(
     {
         socket.remove_socket(&sockets.compose)?;
     }
-    registry.session_status(session, "stopped")?;
+    registry.session_status(session, SessionStatus::Stopped)?;
     if let Ok(router) = router::current(registry.state_path()) {
         let _ = router::sync(registry, &router);
     }
@@ -988,7 +995,7 @@ pub fn converge_crashed_session(
     lock: &Lock,
 ) -> Result<()> {
     if let Some(session) = registry.session(&workspace.id)?
-        && session.status != "stopped"
+        && session.status != SessionStatus::Stopped
     {
         converge_crashed(registry, &registry.runtime_path(workspace), &session, lock)?;
     }
@@ -1099,11 +1106,15 @@ fn live_status(
     let route_published = current_router
         .as_ref()
         .is_some_and(|router| router::route_published(registry, router, &current));
-    let state = if current.status == "stopping" {
+    let state = if current.status == SessionStatus::Stopping {
         LiveState::Stopping
-    } else if current.status == "ready" && http_ready && router_owned && route_published {
+    } else if current.status == SessionStatus::Ready
+        && http_ready
+        && router_owned
+        && route_published
+    {
         LiveState::Ready
-    } else if current.status == "starting" {
+    } else if current.status == SessionStatus::Starting {
         LiveState::Starting
     } else {
         LiveState::Unhealthy

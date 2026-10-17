@@ -2,7 +2,7 @@ use parcela::{
     config::Manifest,
     control::{self, Action, Server},
     lifecycle, private, process,
-    registry::{Registry, Role},
+    registry::{Registry, Role, SessionStatus},
 };
 use std::{
     fs,
@@ -62,7 +62,9 @@ fn unavailable_owner_is_unknown_and_inspection_creates_no_runtime() {
 #[test]
 fn repeated_down_is_noop_without_runtime_or_process_signaling() {
     let (_temp, mut registry, workspace, session) = fixture();
-    registry.session_status(&session, "stopped").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Stopped)
+        .unwrap();
     for _ in 0..2 {
         assert_eq!(
             lifecycle::down(&registry, &workspace).unwrap()["already_stopped"],
@@ -256,12 +258,14 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
     record.processes.push(survivor_identity.clone());
     record.phase = Phase::Stopping;
     record.save(&path).unwrap();
-    registry.session_status(&session, "stopping").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Stopping)
+        .unwrap();
     assert!(lifecycle::down(&registry, &workspace).is_err());
     assert!(survivor_identity.alive());
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().status,
-        "stopping"
+        SessionStatus::Stopping
     );
     survivor.stop(libc::SIGTERM).unwrap();
     assert_eq!(
@@ -270,7 +274,7 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
     );
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().status,
-        "stopped"
+        SessionStatus::Stopped
     );
     assert_eq!(Record::read(&path, &session).unwrap().phase, Phase::Stopped);
     assert!(!control_socket(&path).exists());
@@ -318,7 +322,9 @@ fn contending_stop(replace_session: bool) {
     };
     record.save(&path).unwrap();
     drop(control);
-    registry.session_status(&session, "stopping").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Stopping)
+        .unwrap();
     let state = registry.state_path().to_path_buf();
     let expected = session.clone();
     let target = workspace.clone();
@@ -327,7 +333,9 @@ fn contending_stop(replace_session: bool) {
         let mut writer = Registry::open(&state, true).unwrap().unwrap();
         record.phase = Phase::Stopped;
         record.save(&path).unwrap();
-        writer.session_status(&expected, "stopped").unwrap();
+        writer
+            .session_status(&expected, SessionStatus::Stopped)
+            .unwrap();
         let successor = replace_session.then(|| {
             writer
                 .begin_session(
@@ -353,7 +361,7 @@ fn contending_stop(replace_session: bool) {
                 .contains("generation changed")
         );
         assert_eq!(current.token, successor.token);
-        assert_eq!(current.status, "starting");
+        assert_eq!(current.status, SessionStatus::Starting);
     } else {
         assert_eq!(result.unwrap()["state"], "stopped");
         assert_eq!(current.token, session.token);
@@ -415,13 +423,17 @@ fn waiting_stop(replace_control: bool) {
                 record.phase = Phase::Stopping;
                 record.save(&path).unwrap();
                 let mut writer = Registry::open(&state, true).unwrap().unwrap();
-                writer.session_status(&expected, "stopping").unwrap();
+                writer
+                    .session_status(&expected, SessionStatus::Stopping)
+                    .unwrap();
                 pending
                     .reply(&expected, Ok(serde_json::json!({"stop_accepted":true})))
                     .unwrap();
                 record.phase = Phase::Stopped;
                 record.save(&path).unwrap();
-                writer.session_status(&expected, "stopped").unwrap();
+                writer
+                    .session_status(&expected, SessionStatus::Stopped)
+                    .unwrap();
                 break true;
             }
             if Instant::now() >= deadline {
@@ -440,7 +452,7 @@ fn waiting_stop(replace_control: bool) {
         assert!(result.is_err());
         assert_eq!(
             registry.session(&workspace.id).unwrap().unwrap().status,
-            "starting"
+            SessionStatus::Starting
         );
         assert!(retained_path.exists());
     } else {
@@ -524,7 +536,9 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     use parcela::owner::{Native, Phase, Record};
 
     let (_temp, mut registry, workspace, session) = fixture();
-    registry.session_status(&session, "ready").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Ready)
+        .unwrap();
     let path = registry.runtime_path(&workspace);
     private::directory(&path).unwrap();
     let lock = private::Lock::acquire(&path.join("owner.lock")).unwrap();
@@ -593,7 +607,7 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     );
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().status,
-        "ready"
+        SessionStatus::Ready
     );
 
     unsafe { libc::kill(survivor.pid as i32, libc::SIGKILL) };
@@ -617,7 +631,7 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     assert_eq!(stopped["generation"], session.generation);
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().status,
-        "stopped"
+        SessionStatus::Stopped
     );
     record = Record::read(&path, &record.session).unwrap();
     assert_eq!(record.phase, Phase::Stopped);

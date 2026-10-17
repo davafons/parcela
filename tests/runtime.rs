@@ -2,7 +2,7 @@ use parcela::{
     config::Manifest,
     frontdoor::FrontDoor,
     private,
-    registry::{Registry, Role},
+    registry::{Registry, Role, SessionStatus},
     router::{self, Router},
     runtime,
 };
@@ -49,9 +49,17 @@ fn lease_token_generation_and_interrupted_ownership() {
     );
     let mut wrong = session.clone();
     wrong.token = Uuid::new_v4().to_string();
-    assert!(registry.session_status(&wrong, "stopped").is_err());
-    registry.session_status(&session, "ready").unwrap();
-    registry.session_status(&session, "stopped").unwrap();
+    assert!(
+        registry
+            .session_status(&wrong, SessionStatus::Stopped)
+            .is_err()
+    );
+    registry
+        .session_status(&session, SessionStatus::Ready)
+        .unwrap();
+    registry
+        .session_status(&session, SessionStatus::Stopped)
+        .unwrap();
     let next = registry
         .begin_session(
             &workspace,
@@ -62,7 +70,11 @@ fn lease_token_generation_and_interrupted_ownership() {
         )
         .unwrap();
     assert_eq!(next.generation, 3);
-    assert!(registry.session_status(&session, "ready").is_err());
+    assert!(
+        registry
+            .session_status(&session, SessionStatus::Ready)
+            .is_err()
+    );
 }
 #[test]
 fn port_conflict_rolls_back_generation() {
@@ -121,7 +133,9 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
             .len(),
         2
     );
-    registry.session_status(&session, "ready").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Ready)
+        .unwrap();
     let config = router::configuration(&registry, &router).unwrap();
     assert_eq!(session.public_url, "https://auth-app.localhost:34443");
     assert_eq!(
@@ -151,13 +165,17 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
         config["apps"]["tls"]["automation"]["policies"][0]["issuers"][0]["module"],
         "internal"
     );
-    registry.session_status(&session, "stopping").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Stopping)
+        .unwrap();
     assert_eq!(router::configuration(&registry,&router).unwrap()["apps"]["http"]["servers"]["https"]["routes"].as_array().unwrap().len(),2);
     let replacement = Router {
         token: Uuid::new_v4().to_string(),
         ..router
     };
-    registry.session_status(&session, "ready").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Ready)
+        .unwrap();
     assert_eq!(
         router::configuration(&registry, &replacement).unwrap()["apps"]["http"]["servers"]["https"]
             ["routes"]
@@ -396,13 +414,21 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
             .adopt(&manifest, &workspace.source, Role::Preview, "auth")
             .is_err()
     );
-    registry.session_status(&session, "stopped").unwrap();
+    registry
+        .session_status(&session, SessionStatus::Stopped)
+        .unwrap();
     let next = registry
         .begin_session(&other, &token, 32011, "run", "https://other-app.localhost")
         .unwrap();
     assert_eq!(next.backend_port, 32011);
-    assert!(registry.session_status(&session, "ready").is_err());
-    registry.session_status(&session, "stopped").unwrap();
+    assert!(
+        registry
+            .session_status(&session, SessionStatus::Ready)
+            .is_err()
+    );
+    registry
+        .session_status(&session, SessionStatus::Stopped)
+        .unwrap();
     assert!(
         registry
             .begin_session(
@@ -498,7 +524,9 @@ fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
             .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
             .is_err()
     );
-    migrated.session_status(&current, "stopped").unwrap();
+    migrated
+        .session_status(&current, SessionStatus::Stopped)
+        .unwrap();
     migrated
         .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
         .unwrap();
@@ -574,7 +602,9 @@ fn schema_3_registry_migrates_to_named_ports_without_losing_the_active_lease() {
     let current = migrated.session(&workspace.id).unwrap().unwrap();
     assert_eq!(current.token, session.token);
     assert_eq!(current.leased_ports(), [32040]);
-    migrated.session_status(&current, "stopped").unwrap();
+    migrated
+        .session_status(&current, SessionStatus::Stopped)
+        .unwrap();
     let next = migrated
         .begin_endpoints(
             &workspace,

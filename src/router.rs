@@ -3,7 +3,7 @@ use crate::{
     http,
     private::{self, Lock},
     process::{OwnedChild, Signals, exit_code, version},
-    registry::Registry,
+    registry::{Registry, SessionStatus},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -155,7 +155,7 @@ fn renew_leases(registry: &Registry, router: &Router) -> Result<()> {
             .join("environments")
             .join(&session.environment_id);
         let directory = lease_directory(registry.state_path(), router, &session);
-        let active = session.status == "ready"
+        let active = session.status == SessionStatus::Ready
             && crate::owner::Record::read(&path, &session)
                 .is_ok_and(|record| record.routable(&path));
         if active {
@@ -210,7 +210,7 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
     }
     for session in sessions
         .iter()
-        .filter(|s| s.status == "ready" && s.router_token == router.token)
+        .filter(|s| s.status == SessionStatus::Ready && s.router_token == router.token)
     {
         let path = state.join("environments").join(&session.environment_id);
         let Ok(record) = crate::owner::Record::read(&path, session) else {

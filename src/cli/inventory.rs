@@ -10,7 +10,7 @@ use parcela::{
     discovery,
     frontdoor::FrontDoor,
     lifecycle,
-    registry::{Registry, Role, Workspace},
+    registry::{Registry, Role, SessionStatus, Workspace},
     startup,
 };
 use serde_json::{Value, json};
@@ -86,7 +86,7 @@ fn unregistered(state: &Path, registry: Option<&Registry>, path: &Path) -> Resul
 fn running(registry: &Registry, workspace: &Workspace) -> Result<bool> {
     Ok(registry
         .session(&workspace.id)?
-        .is_some_and(|session| session.status != "stopped"))
+        .is_some_and(|session| session.status != SessionStatus::Stopped))
 }
 
 /// Stop every running environment, scoped to one project unless `project` is None.

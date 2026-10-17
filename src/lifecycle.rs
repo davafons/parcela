@@ -4,7 +4,7 @@ use crate::{
     frontdoor::FrontDoor,
     private,
     process::{OwnedChild, Signals},
-    registry::{Registry, Session, Workspace},
+    registry::{Registry, Session, SessionStatus, Workspace},
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -21,7 +21,7 @@ pub fn status(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     let mut error = None;
     let mut state = "stopped";
     if let Some(session) = &recorded
-        && session.status != "stopped"
+        && session.status != SessionStatus::Stopped
     {
         state = "unknown";
         match control::request(&registry.runtime_path(workspace), session, Action::Status)
@@ -82,7 +82,7 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
             json!({"environment_id": workspace.id, "state": "stopped", "already_stopped": true}),
         );
     };
-    if session.status == "stopped" {
+    if session.status == SessionStatus::Stopped {
         return Ok(
             json!({"environment_id": workspace.id, "state": "stopped", "already_stopped": true}),
         );
@@ -95,11 +95,11 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     };
     let owner_died =
         || crate::owner::Record::read(&path, &session).is_ok_and(|record| !record.owner.alive());
-    if session.status != "stopping"
+    if session.status != SessionStatus::Stopping
         && let Err(error) = control::request(&path, &session, Action::Stop)
     {
         let current = current_session(registry, &session)?;
-        if current.status != "stopping" && current.status != "stopped" {
+        if current.status != SessionStatus::Stopping && current.status != SessionStatus::Stopped {
             let evidence = crate::owner::Record::read(&path, &session).with_context(|| {
                 format!("{error:#}; authenticated recovery evidence unavailable")
             })?;
@@ -110,7 +110,7 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
             return finish_stop();
         }
     }
-    if session.status == "stopping" && owner_died() {
+    if session.status == SessionStatus::Stopping && owner_died() {
         return finish_stop();
     }
     let budget = crate::owner::Record::read(&path, &session)
@@ -124,14 +124,14 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
             current.token == session.token && current.generation == session.generation,
             "owner changed during stop; successor was not stopped"
         );
-        if current.status == "stopping" && owner_died() {
+        if current.status == SessionStatus::Stopping && owner_died() {
             return finish_stop();
         }
         ensure!(
-            current.status != "interrupted",
+            current.status != SessionStatus::Interrupted,
             "shutdown incomplete; authenticated recovery is required, no PID was signaled"
         );
-        if current.status == "stopped"
+        if current.status == SessionStatus::Stopped
             && let Ok(_released) = private::Lock::acquire(&path.join("owner.lock"))
         {
             return Ok(
@@ -187,7 +187,7 @@ pub fn detached(
     ensure!(
         previous
             .as_ref()
-            .is_none_or(|session| session.status == "stopped"),
+            .is_none_or(|session| session.status == SessionStatus::Stopped),
         "environment already has an active or interrupted run; use status/down, never force takeover"
     );
     let (log_path, log) = owner_log(&path)?;
@@ -230,7 +230,7 @@ pub fn detached(
             && previous
                 .as_ref()
                 .is_none_or(|old| old.token != session.token)
-            && session.status == "ready"
+            && session.status == SessionStatus::Ready
             && let Ok(live) = control::request(&path, &session, Action::Status)
             && live["state"] == "ready"
             && live["owner_pid"].as_u64() == Some(u64::from(owner.id()))
@@ -260,7 +260,7 @@ pub fn service_request(
         .session(&workspace.id)?
         .context("environment is not running")?;
     ensure!(
-        session.status != "stopped" && session.kind == "compose",
+        session.status != SessionStatus::Stopped && session.kind == "compose",
         "service inspection requires a running Process Compose environment"
     );
     control::request(&registry.runtime_path(workspace), &session, action)
@@ -280,7 +280,7 @@ pub fn current_session(registry: &Registry, expected: &Session) -> Result<Sessio
 fn active(registry: &Registry, workspace: &Workspace) -> Result<Option<Session>> {
     Ok(registry
         .session(&workspace.id)?
-        .filter(|session| session.status != "stopped"))
+        .filter(|session| session.status != SessionStatus::Stopped))
 }
 
 /// A running environment's routed URL, else its reserved URL on the saved front door.
@@ -331,7 +331,12 @@ pub fn orphaned(registry: &Registry, workspace: &Workspace) -> Result<Option<Ses
     let Some(session) = registry.session(&workspace.id)? else {
         return Ok(None);
     };
-    if session.kind != "compose" || !matches!(session.status.as_str(), "starting" | "ready") {
+    if session.kind != "compose"
+        || !matches!(
+            session.status,
+            SessionStatus::Starting | SessionStatus::Ready
+        )
+    {
         return Ok(None);
     }
     let Ok(record) = crate::owner::Record::read(&registry.runtime_path(workspace), &session) else {
@@ -368,7 +373,7 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
         if let Some(exit) = owner.poll()? {
             let current = current_session(registry, &session)?;
             ensure!(
-                exit.success() && current.status == "stopped",
+                exit.success() && current.status == SessionStatus::Stopped,
                 "recovery owner exited; inspect {}",
                 log_path.display()
             );
