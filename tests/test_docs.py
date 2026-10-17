@@ -76,7 +76,7 @@ const {srcDir} = prepareContent('/');
 const index = readFileSync(srcDir + '/index.md');
 const logo = readFileSync(srcDir + '/public/assets/logo.svg');
 appendFileSync('../site/index.md', '\n\nDo not publish this partial update.\n');
-appendFileSync('../../logo.svg', '\n');
+appendFileSync('../../assets/brand/logo.svg', '\n');
 appendFileSync('../site/agents.md', '\n\n{{ 7 * 7 }}\n');
 assert.throws(() => prepareContent('/', srcDir), /Public Markdown cannot load extra sources/);
 assert.deepEqual(readFileSync(srcDir + '/index.md'), index);

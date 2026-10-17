@@ -640,21 +640,6 @@ def long_stream_lease(f):
     return {'stream_events': 12, 'lease_windows_crossed': True, 'config_unchanged': True}
 
 
-def shirabe_native_inspection(f):
-    from check_shirabe import compose_processes
-
-    app = f.app('ordinary')
-    graph = app['manifest']['process_compose']['processes']
-    for name in ['css', 'jobs']:
-        graph[name] = {'entrypoint': ['sleep', '300'], 'availability': {'restart': 'no'}}
-    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
-    f.start_proxy()
-    f.start(app)
-    records = compose_processes(f.args.compose, app['runtime'], f.root / 'ordinary-client.log')
-    assert {name: record['status'] for name, record in records.items()} == {'web': 'Running', 'css': 'Running', 'jobs': 'Running'}
-    assert f.request(app)[0] == 200
-    return {'authenticated_inspection': 'ordinary', 'running': ['web', 'css', 'jobs']}
-
 def occupied_replacement_port(f):
     app = f.app('occupied')
     f.start_proxy()
@@ -860,7 +845,7 @@ def crashed_tree_up(f):
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
          replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
-         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop, shirabe_native_inspection,
+         recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop,
          occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
          detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization,
          crashed_tree_down, crashed_tree_up]

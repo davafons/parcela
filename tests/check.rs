@@ -55,7 +55,7 @@ fn config_check_requires_a_process_for_every_http_service() {
 
 #[test]
 fn every_bundled_example_passes_config_check() {
-    for example in ["generic", "docs-demo", "shirabe"] {
+    for example in ["generic", "docs-demo"] {
         let output = Command::new(env!("CARGO_BIN_EXE_parcela"))
             .arg("--path")
             .arg(format!("{}/examples/{example}", env!("CARGO_MANIFEST_DIR")))

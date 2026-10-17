@@ -4,7 +4,7 @@ Two designs are retained from the logo studies.
 
 | File | Purpose |
 | --- | --- |
-| [`../../logo.svg`](../../logo.svg) | Smooth mascot A, traced from the selected reference into editable vector paths. White fill, dark outline and eyes, and cobalt gesture marks. The canvas is transparent. |
+| [`logo.svg`](logo.svg) | Smooth mascot A, traced from the selected reference into editable vector paths. White fill, dark outline and eyes, and cobalt gesture marks. The canvas is transparent. |
 | [`mascot-pixel.png`](mascot-pixel.png) | Pixel 01, the steady-wave mascot. A transparent 32×32 PNG with a one-pixel dark outline. |
 | [`mascot-pixel.json`](mascot-pixel.json) | Editable pixel grid and exact RGBA palette. The builder adds the outline without changing the original foreground pixels. |
 | [`mascot-reference.png`](mascot-reference.png) | Unmodified native image-generation output A, retained as the master reference. This raster has an opaque background and is not the reusable logo. |

@@ -192,7 +192,7 @@ def inspect_site(site, base='/'):
             raise ValueError(f'machine-specific artifact path included: {path}')
     for name, source in {
         'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
-        'logo.svg': 'logo.svg',
+        'logo.svg': 'assets/brand/logo.svg',
         'third-party-notices.txt': 'docs/website/THIRD_PARTY_NOTICES.txt',
         'demo-parcela.yaml': 'examples/docs-demo/parcela.yaml',
         'demo-frontend.html': 'examples/docs-demo/frontend/index.html',
