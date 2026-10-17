@@ -1,25 +1,41 @@
 # Build Parcela and prepare HTTPS
 
-## Build the CLI
+## Install the CLI
 
-Use macOS or Linux. You need Rust 1.89 or newer and a C toolchain for bundled SQLite. Release archives, a public shell installer and automatic backend installation are not available yet.
+Use macOS or Linux.
 
-The source repository is currently private. You need repository access or an existing source checkout to build the CLI. Public documentation and example downloads do not grant that access.
+> **No release has been published yet.** The Homebrew and shell installer commands take effect once the first `v*` tag is released. Until then, build from source.
 
-Build the [`main` source branch](https://github.com/davafons/parcela/tree/main) for the commands in these guides. Select the intended revision through your project's VCS workflow before building.
-
-From that Parcela source checkout, copy this block into your shell:
+With Homebrew, which also installs Caddy and Process Compose:
 
 ```sh
-cargo build --release --locked &&
-  export PATH="$PWD/target/release:$PATH" &&
-  parcela --version &&
+brew install davafons/tap/parcela
+```
+
+With the shell installer, which installs only the `parcela` binary into `~/.local/bin`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
+```
+
+Release builds target macOS on Apple silicon and Intel, and Linux on x86_64 and arm64 with glibc. Each archive includes `LICENSE`, `COPYRIGHT` and `THIRD_PARTY_NOTICES.txt`. The release also attaches the matching source archive.
+
+From source, with Rust 1.89 or newer and a C toolchain for bundled SQLite:
+
+```sh
+cargo install --git https://github.com/davafons/parcela --locked
+```
+
+Then check the binary:
+
+```sh
+parcela --version &&
   parcela --help
 ```
 
-Expect `parcela 0.1.0` followed by command help. If the build fails, the remaining commands do not run.
+Expect `parcela 0.1.0` followed by command help.
 
-The PATH change affects this shell only. It does not replace an installed binary or restart its proxy. Keep the same binary and registry for later environment commands.
+An installed binary does not restart a running proxy. Keep the same binary and registry for later environment commands.
 
 To print instructions your agent can read:
 
@@ -38,7 +54,7 @@ The command prints Markdown without reading or creating project or registry stat
 
 ## Check the backends
 
-Install Caddy 2.x and Process Compose 1.x through your chosen package or release workflow. Parcela also needs `lsof` and `ps` for Unix listener and process inspection. Python 3 is needed for the documentation demo, not for every project.
+Homebrew installs Caddy and Process Compose with Parcela. Otherwise, install Caddy 2.x and Process Compose 1.x through your chosen package or release workflow. Parcela also needs `lsof` and `ps` for Unix listener and process inspection. Python 3 is needed for the documentation demo, not for every project.
 
 Check that this machine is ready:
 

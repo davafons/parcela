@@ -1,0 +1,5 @@
+- name: Generate third-party notices
+  run: |
+    cargo install --locked --features cli cargo-about@0.9.2
+    mkdir -p target/notices
+    cargo about generate --locked --fail about.hbs -o target/notices/THIRD_PARTY_NOTICES.txt

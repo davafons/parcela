@@ -1,0 +1,15 @@
+Parcela third-party notices
+
+The parcela binary includes the Rust crates below. Each retains its own license.
+Caddy and Process Compose are separate programs with their own licenses.
+{{#each licenses}}
+========================================================================
+{{{name}}} ({{id}})
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+{{/each}}

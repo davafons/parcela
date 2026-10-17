@@ -6,9 +6,10 @@ rust-version = "1.89"
 description = "Workspace and local environment organizer"
 license = "AGPL-3.0-only"
 repository = "https://github.com/davafons/parcela"
+homepage = "https://github.com/davafons/parcela"
 publish = false
-readme = "docs/source-build.md"
-include = ["src/**", ".agents/skills/parcela/SKILL.md", "Cargo.lock", "LICENSE", "COPYRIGHT", "docs/source-build.md"]
+readme = "README.md"
+include = ["src/**", ".agents/skills/parcela/SKILL.md", "Cargo.lock", "LICENSE", "COPYRIGHT", "/README.md"]
 
 [package.metadata.dist]
 dist = true

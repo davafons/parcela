@@ -40,28 +40,31 @@ Keep your primary checkout and previews identifiable, with their own service gra
 
 Parcela is experimental. The tested source build is not a finished installer. See [project status](#project-status) for the current limits.
 
-## Build from source
+## Install
 
-Requirements:
+> **No release has been published yet.** The commands below take effect once the first `v*` tag is released. Until then, build from source.
 
-- Rust 1.89 or newer and a C toolchain for bundled SQLite.
-- Caddy 2.x and Process Compose 1.x, available separately.
-- `lsof` and `ps` for process and listener inspection.
-
-From this checkout:
+With Homebrew on macOS or Linux, which also installs Caddy and Process Compose:
 
 ```sh
-cargo build --release --locked
-./target/release/parcela --help
+brew install davafons/tap/parcela
 ```
 
-To use the built command in the examples below, add it to your current shell's path:
+With the shell installer, which installs only the `parcela` binary into `~/.local/bin`:
 
 ```sh
-export PATH="$PWD/target/release:$PATH"
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
 ```
 
-This does not replace an installed binary or upgrade running services. Backends are never installed by an ordinary Parcela command.
+Release builds target macOS (Apple silicon and Intel) and Linux (x86_64 and arm64, glibc). Each archive includes `LICENSE`, `COPYRIGHT` and `THIRD_PARTY_NOTICES.txt`. With the shell installer, install Caddy 2.x and Process Compose 1.x yourself. Parcela also needs `lsof` and `ps`.
+
+From source, with Rust 1.89 or newer and a C toolchain for bundled SQLite:
+
+```sh
+cargo install --git https://github.com/davafons/parcela --locked
+```
+
+Neither installer starts a proxy, binds a port, or trusts a CA. Backends are never installed by an ordinary Parcela command.
 
 ### Set up the HTTPS front door
 

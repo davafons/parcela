@@ -3,11 +3,20 @@ members = ["cargo:."]
 
 [dist]
 cargo-dist-version = "0.33.0"
-ci = []
-installers = []
-targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
-source-tarball = false
+ci = "github"
+installers = ["shell", "homebrew"]
+tap = "davafons/homebrew-tap"
+formula = "parcela"
+publish-jobs = ["homebrew"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+install-path = "~/.local/bin"
+install-updater = false
+github-build-setup = "../release-notices.yml"
 auto-includes = false
-include = ["LICENSE", "COPYRIGHT", "docs/source-build.md", "target/release-source/THIRD_PARTY_NOTICES.txt"]
+include = ["LICENSE", "COPYRIGHT", "target/notices/THIRD_PARTY_NOTICES.txt"]
 checksum = "sha256"
 unix-archive = ".tar.gz"
+
+[dist.dependencies.homebrew]
+caddy = { stage = ["run"] }
+"f1bonacc1/tap/process-compose" = { stage = ["run"] }
