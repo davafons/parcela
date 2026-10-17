@@ -1,36 +1,75 @@
-# Rust control plane and managed backends
+# Architecture
 
-Parcela owns identity, context and integration, not a proxy stack or a second supervisor. There is no retained Go implementation. Caddy and Process Compose are external maintained executables.
+Parcela is a Rust CLI that coordinates two maintained programs. It does not implement a proxy or a process supervisor.
 
-| Owner | Responsibility |
+| Component | Owns |
 |---|---|
-| Rust | Schema, registry, roles/labels, endpoint intent, locks, literal argv, task results and route updates |
-| Caddy | HTTP/TLS, certificates, HTTP protocol handling, streaming and upgrades |
-| Process Compose | Native graph, scheduling, workers, control API, logs and graceful shutdown |
-| Project | Commands, framework integration, preparation/data baseline, resource paths and external-effect policy |
+| Parcela (Rust) | Configuration, environment identity, the registry, port and hostname reservations, lifecycle |
+| Caddy | HTTPS, certificates and routing, in a dedicated instance with its own config, storage and admin socket |
+| Process Compose | The process graph: commands, workers, dependencies, logs and shutdown |
+| The project | Commands, data, preparation and anything with external effects |
 
-## Crate boundaries
+## Modules
 
-`config` validates organizer fields and retains native graph data. `registry` serializes durable identity and session and endpoint-set intent, with generation/nonce fencing. `context` describes registered/planned metadata without allocating resources or certifying live health. `private` owns private files/kernel locks. `process` retains foreground child handles/groups and verifies listener PID ancestry. `http` is a bounded control/readiness client, never a proxy. `router` generates and updates the dedicated Caddy configuration. `control` provides bounded generation-bound messages to the live owner. `lifecycle` handles CLI-side stop/detach/status. `discovery` queries read-only VCS inventory. `runtime` supplies context and monitors the environment's routed endpoint set plus native workers. `main` dispatches CLI/JSON and propagates results.
+- `config` parses `parcela.yaml`, expands the short form and keeps `process_compose` data as-is.
+- `registry` is the SQLite store of projects, environments, sessions and reservations.
+- `startup` and `runtime` register a checkout, lease ports, launch Process Compose and wait for readiness.
+- `owner`, `control` and `lifecycle` run the per-environment owner process and the stop, restart and recover requests sent to it.
+- `router`, `proxy` and `frontdoor` generate Caddy config, run the background proxy and pick its listen port.
+- `process` and `http` check listener ownership and readiness. `http` is a client, never a proxy.
+- `discovery` reads jj and Git checkout inventory without changing it.
+- `private` and `sockets` own private files, kernel locks and Unix socket paths.
+- `src/cli` parses arguments and renders text or JSON.
 
-## Ownership
+## What `parcela up` does
 
-Adoption is explicit; a preview never implicitly becomes primary. Branches/bookmarks are not identities. Missing source and uncertain runtime state do not authorize deletion. Inspection does not create absent state. Private user-owned paths are operational boundaries, not isolation against malicious same-user code.
+1. Find the nearest `parcela.yaml` and validate it.
+2. Register the checkout on first use. The main checkout gets the project URL. A linked jj workspace or Git worktree gets its own name.
+3. Reserve every service hostname, then lease a loopback port from 20000–29999 for each service and named port. Leases are one transaction.
+4. Start the proxy if it is not running.
+5. Write the Process Compose graph with the resolved environment and start an owner process that holds `owner.lock` and serves `ctl.sock`.
+6. Wait until every HTTP service listens on its port, the listener belongs to the graph, and the readiness path answers 2xx.
+7. Publish Caddy routes for the whole group. With `--detach`, return once the owner reports ready.
 
-A bound port probe plus durable lease is not an atomic listener handoff. Before publishing, the runtime verifies that every listener on the allocated port binds loopback (`127.0.0.1`, `::1`) or a wildcard (`0.0.0.0`, `::`, `*`), belongs to its live retained child/descendants, and passes HTTP readiness. Wildcard binds are accepted without a warning. Readiness and the Caddy upstream dial `127.0.0.1` when an IPv4 listener exists and `::1` otherwise. All declared HTTP endpoints must pass readiness before the group routes open. A changed listener identity withdraws the group and repeats readiness. `status` probes HTTP health on demand; the runtime does not continuously poll it after establishment. Crash recovery from stored PIDs is unsupported.
+`down` sends a stop request to that owner. The owner withdraws routes, stops the graph and marks the run stopped. `restart` checks the replacement first and then starts a new generation.
 
-## Dedicated routing
+## State layout
 
-Caddy uses isolated config/storage and a private Unix admin socket, separate from any user's Caddy. Updates serialize complete configs and verify the current ownership marker. Ready sessions route only under their router token. Registered unavailable names retain exact unavailable routes and TLS subjects; unknown hosts cannot fall through to another environment. Certificates are internal; automatic trust installation is disabled.
+The state directory is `--state-dir`, then `PARCELA_STATE_DIR`, then `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`. It is mode 700.
 
-The default front door is HTTPS on unprivileged port 1443 with port-qualified URLs; `up` starts the proxy as a detached daemon when none runs, and tests choose explicit high ports. The standard-port profile explicitly separates unprivileged internal 8080/8443 from public 80/443; it preserves canonical URLs and checks the public port-80 marker before application startup. The macOS setup helper is separately authorized, checks existing rules/listeners, and installs only its own guarded forwarding anchor/boot job and specified CA trust. Caddy and application commands stay unprivileged. Host setup evidence and unverified reboot/browser behavior are tracked in [implementation status](implementation.md).
+```text
+<state>/
+├── registry.sqlite3
+├── proxy/                 caddy.json, frontdoor.json, proxy.log, data/ (CA and certificates)
+└── environments/<uuid>/   context.json, owner.json, process-compose.json, log/, data/, tmp/, cache/
+```
 
-## Supervision and teardown
+Control, Process Compose and Caddy admin sockets live in `/tmp/parcela-<uid>/<hash>`, where the hash comes from the state path. Unix socket paths are limited to about 100 bytes.
 
-Native Process Compose data is exported without organizer schema reinterpretation, with resolved context and explicit private Unix-socket mode. Each worktree environment owns one graph, one generation and an explicit set of service endpoints. Native process entries supply commands, working directories and process-local port bindings. Projects can include non-routed workers. Its own scheduler/control API remains authoritative for service state. Each application owner retains its foreground child handle and a private generation-bound `ctl.sock`. `up --detach` launches an independent Parcela owner, verifies its live readiness and direct-child identity, then releases the caller. Process Compose still owns scheduling and worker recovery. An explicitly installed launch agent may host the foreground front-door command.
+## Safety rules
 
-On normal application teardown, core marks stopping, revokes routes, signals the retained child/group, then marks stopped. Failed revocation reports failure and retains the lease. Unknown existing sockets or interrupted leases fail closed; no implicit deletion, takeover or persisted-PID kill. When the owner and every recorded process birth identity are gone, lifecycle commands mark the run stopped and remove only its inode-matching sockets. Children must stay supervised and honor shutdown: detached/daemonized descendants are not certified.
+- Listen on loopback only. Never take over a busy port. Report its holder instead.
+- Never signal a PID read from disk. Stop and recover need a live owner or matching process-birth evidence.
+- Never trust a CA, change forwarding or install software, except through `parcela trust`.
+- Never delete source or data. `rm` forgets a registration and keeps the runtime directory.
+- Read-only commands never register a checkout or start anything.
+- Keep framework and data policy in `parcela.yaml`, not in core.
 
-Standalone `run` preserves literal argv and has no automatic restart policy. Project tasks are optional finite argv with explicit timeouts/results. `up` does not prepare, reset or import data. The Shirabe bridge belongs to that app, not Rust: it authorizes hosts, supplies canonical HTTPS URLs, scopes cookies and chooses primary versus preview paths/secrets.
+## Run the checks
 
-Backend acquisition/upgrade packaging, robust crash reconciliation, interactive attach, service-specific restart, sharing and broader release acceptance remain future work. Older owners without the private control protocol are not adopted or stopped implicitly. Ordinary commands never install software, request privilege, trust a CA or take over listeners.
+```sh
+scripts/check
+```
+
+This runs `cargo fmt --check`, Clippy with `-D warnings`, `cargo test`, the Python tests and a config check of `examples/generic`.
+
+The live suites start real Caddy and Process Compose with a disposable state directory, explicit high ports and a test CA. They never change system trust:
+
+```sh
+scripts/check-live --caddy "$(which caddy)" --process-compose "$(which process-compose)"
+scripts/check-recovery --caddy "$(which caddy)" --compose "$(which process-compose)" --output /tmp/recovery.json
+scripts/check-ports
+scripts/check-service-sets
+```
+
+Documentation checks are in [docs/documentation.md](documentation.md).
