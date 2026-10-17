@@ -115,7 +115,22 @@ pub enum Command {
     },
     /// Stop through the live owner and preserve source/data. Never signal stored PIDs.
     #[command(visible_alias = "stop")]
-    Down,
+    Down {
+        /// Stop every running environment of this project.
+        #[arg(long, conflicts_with = "workspace")]
+        all: bool,
+        /// Stop every running environment of every project.
+        #[arg(long, conflicts_with_all = ["workspace", "all"])]
+        all_projects: bool,
+    },
+    /// List every registered environment across projects.
+    Ls,
+    /// Forget a stopped environment and release its hostnames. Source and data stay on disk.
+    Rm {
+        /// Forget every stopped environment whose checkout directory no longer exists.
+        #[arg(long, conflicts_with = "workspace")]
+        prune: bool,
+    },
     /// Recover control of a proven surviving native graph without replaying commands.
     Recover {
         #[arg(long)]

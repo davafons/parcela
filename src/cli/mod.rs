@@ -2,6 +2,7 @@ mod args;
 mod commands;
 mod doctor;
 mod init;
+mod inventory;
 mod output;
 mod render;
 

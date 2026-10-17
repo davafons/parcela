@@ -14,7 +14,7 @@ use parcela::{
 };
 use std::path::{Path, PathBuf};
 
-fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
+pub(super) fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
     let path = if let Some(path) = explicit {
         path
     } else if let Some(path) = std::env::var_os("PARCELA_STATE_DIR") {
@@ -33,12 +33,12 @@ fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
     );
     Ok(path)
 }
-fn project(path: &Path) -> Result<(PathBuf, Manifest)> {
+pub(super) fn project(path: &Path) -> Result<(PathBuf, Manifest)> {
     let source = locate(path)?;
     let manifest = Manifest::load(&source.join("parcela.yaml"))?;
     Ok((source, manifest))
 }
-fn target_workspace(
+pub(super) fn target_workspace(
     registry: &Registry,
     path: &Path,
     id: Option<uuid::Uuid>,
@@ -444,7 +444,32 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             }
             Ok(0)
         }
-        Command::Down => {
+        Command::Down {
+            all: true,
+            all_projects,
+        }
+        | Command::Down {
+            all_projects: all_projects @ true,
+            ..
+        } => {
+            let state = state_dir(cli.state_dir)?;
+            let project = if all_projects {
+                None
+            } else {
+                Some(project(&cli.path)?.1.project.id)
+            };
+            super::inventory::down_all(&state, project.as_deref(), out)
+        }
+        Command::Ls => {
+            inventory(&state_dir(cli.state_dir)?, None, out)?;
+            Ok(0)
+        }
+        Command::Rm { prune } => {
+            let state = state_dir(cli.state_dir)?;
+            super::inventory::remove(&state, &cli.path, cli.workspace, prune, out)?;
+            Ok(0)
+        }
+        Command::Down { .. } => {
             let state = state_dir(cli.state_dir)?;
             let registry = Registry::open(&state, false)?.context(
                 "no registered environment; start the selected checkout with parcela up",

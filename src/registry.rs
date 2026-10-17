@@ -296,6 +296,55 @@ impl Registry {
         Ok(workspace)
     }
 
+    /// Forget a stopped environment's registration and release its hostnames and ports.
+    /// Source and runtime data stay on disk; only registry rows are removed.
+    pub fn forget(&mut self, environment: &str) -> Result<Workspace> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let workspace = transaction
+            .query_row(
+                &format!("SELECT {COLUMNS} FROM workspaces WHERE id = ?1"),
+                [environment],
+                read_workspace,
+            )
+            .optional()?
+            .context("unknown environment; list environments with parcela ls")?;
+        let status: Option<String> = transaction
+            .query_row(
+                "SELECT status FROM sessions WHERE environment_id=?1",
+                [environment],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(status) = status.filter(|status| status != "stopped") {
+            let name = match workspace.role {
+                Role::Primary => &workspace.project_id,
+                Role::Preview => &workspace.label,
+            };
+            bail!("{name} is {status}; stop it with parcela down before removing it");
+        }
+        transaction.execute(
+            "DELETE FROM active_ports WHERE environment_id=?1",
+            [environment],
+        )?;
+        transaction.execute(
+            "DELETE FROM workspace_hosts WHERE environment_id=?1",
+            [environment],
+        )?;
+        transaction.execute(
+            "DELETE FROM sessions WHERE environment_id=?1",
+            [environment],
+        )?;
+        transaction.execute("DELETE FROM workspaces WHERE id=?1", [environment])?;
+        transaction.execute(
+            "DELETE FROM projects WHERE id=?1 AND NOT EXISTS (SELECT 1 FROM workspaces WHERE project_id=?1)",
+            [&workspace.project_id],
+        )?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
     pub fn list(&self, project: Option<&str>) -> Result<Vec<Workspace>> {
         let mut statement = self.connection.prepare(&format!("SELECT {COLUMNS} FROM workspaces WHERE (?1 IS NULL OR project_id = ?1) ORDER BY project_id, role, label"))?;
         Ok(statement
