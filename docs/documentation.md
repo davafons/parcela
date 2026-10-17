@@ -1,6 +1,6 @@
 # Build and publish the documentation site
 
-The public site follows the task-first documentation pattern from `lostcoords/yuke`. Astro Starlight supplies navigation, responsive layouts, theme selection and Pagefind search. The docs-only Node package pins Starlight 0.42.6 and Astro 7.3.8. It is separate from Parcela's runtime prerequisites.
+The public site uses VitePress 1.6.4 for navigation, responsive layouts, theme selection and local search. The sidebar separates learning, task guides and reference. The docs-only Node package is separate from Parcela's runtime prerequisites.
 
 ## Edit the public sources
 
@@ -10,9 +10,9 @@ The public site follows the task-first documentation pattern from `lostcoords/yu
 - Update `.agents/skills/parcela/SKILL.md` for the canonical operating instructions. The CLI embeds this file.
 - Update `examples/docs-demo/` for the downloadable first-environment example.
 
-`content.mjs` generates Starlight content and download assets from those canonical sources. It maps repository-relative Markdown links to public routes, including the task guide for transfer commands. The authored Markdown remains readable on GitHub. Do not create a second copy of a canonical reference for the website.
+`content.mjs` generates VitePress content and download assets from those canonical sources. It maps repository-relative Markdown links to public routes, including the task guide for transfer commands. The authored Markdown remains readable on GitHub. Generated directory-index pages retain the existing trailing-slash URLs. GitHub-style heading slugs preserve linked section anchors. Do not create a second copy of a canonical reference for the website.
 
-The build refuses undeclared files in the public directory, public-source symlinks outside that root and canonical sources outside the repository. Only the page table and download table enter the build. Starlight supplies the rendering assets; the build does not copy the whole repository.
+The build refuses undeclared files in the public directory, public-source symlinks outside that root and canonical sources outside the repository. Only the page table and download table enter the build. Public pages use plain Markdown. Raw HTML rendering is disabled, and source includes, snippet imports and script blocks are refused. VitePress supplies the rendering assets; the build does not copy the whole repository.
 
 ## Install the build tools
 
@@ -22,7 +22,7 @@ Use Node 22.19 or newer and Python 3.12 or newer. From the repository root:
 npm ci --prefix docs/website
 ```
 
-The package lock pins transitive dependencies. `node_modules`, Astro caches, generated content and `target/docs` are ignored build output. The command does not install Node, replace system packages or install Parcela's backends.
+The package lock pins transitive dependencies. A scoped override uses Vite 6.4.3 instead of VitePress 1.6.4's Vite 5 dependency to avoid known development-server advisories. Keep that override under the real build and search checks when updating the toolchain. `node_modules`, generated content, VitePress caches and `target/docs` are ignored build output. The command does not install Node, replace system packages or install Parcela's backends.
 
 ## Build and check
 
@@ -33,7 +33,7 @@ python3 scripts/check_docs.py --output target/docs-check.json
 
 The first command writes `target/docs` with `/parcela/` as its hosting base. The default canonical origin is `https://example.invalid`; set `DOCS_SITE` to the intended HTTPS origin for a publication build. Use `DOCS_BASE=/` for root hosting or a slash-delimited project path such as `/parcela/`. These variables configure output, not a deployment.
 
-The checker builds separate temporary sites at `/`, `/parcela/` and `/docs/`. It checks actual HTML links, anchors, assets, canonical downloads and Pagefind records for every public page. It also verifies public-source refusal and serves all three builds through ephemeral loopback listeners. Every recorded listener must close before the check passes. The checker uses Python's standard library and the installed docs package.
+The checker builds separate temporary sites at `/`, `/parcela/` and `/docs/`. It checks actual HTML links, anchors, assets, canonical downloads and actual MiniSearch records for every public page. It loads the bundled index with MiniSearch and checks representative agent, checkpoint and frontend queries. It also verifies public-source refusal and serves all three builds through ephemeral loopback listeners. Every recorded listener must close before the check passes. The checker uses Python's standard library and the installed docs package.
 
 For a private root-hosted preview, choose an available explicit test port:
 
@@ -41,6 +41,8 @@ For a private root-hosted preview, choose an available explicit test port:
 DOCS_BASE=/ npm run build --prefix docs/website
 python3 -m http.server "$DOCS_TEST_PORT" --bind 127.0.0.1 --directory target/docs
 ```
+
+The dev command also binds to loopback. Restart it after editing canonical sources because generation happens when the configuration loads.
 
 Open that local URL yourself. This command does not start a browser, change focus or expose a LAN interface. Artifact and HTTP checks do not prove responsive layout, theme interaction or search interaction in a browser.
 
@@ -67,7 +69,7 @@ Use authenticated Wrangler access to the selected account. The docs package pins
 npm run deploy --prefix docs/website -- --dry-run
 ```
 
-The command builds a new artifact directory under `target/docs-deployment-*`. It sets the canonical origin to `https://parcela.davafons.com` and the base to `/docs/`. Only generated public site output enters the upload. The wrapper redirects `/` to `/docs/` and supplies a real 404 page. Each build uses a new directory, so removed pages cannot survive as stale deployment assets.
+The command builds a new artifact directory under `target/docs-deployment-*`. It sets the canonical origin to `https://parcela.davafons.com` and the base to `/docs/`. Only generated public site output enters the upload. The wrapper redirects `/` to `/docs/` and supplies a real 404 page. The VitePress build retains its rendered not-found content in the HTML, rather than requiring JavaScript to display the error. Bundled VitePress and Inter notices are available in `assets/third-party-notices.txt`. Each build uses a new directory, so removed pages cannot survive as stale deployment assets.
 
 After reviewing the public artifact and obtaining deployment authorization:
 
