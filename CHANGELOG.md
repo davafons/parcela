@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-10-18
+
+A smaller CLI and a faster proxy.
 
 ### Changed
 
@@ -14,11 +16,7 @@
 ### Fixed
 
 - Two simultaneous first `parcela up` runs no longer fail with "unsupported registry schema 0".
-
-### Removed
-
-- `scripts/setup_macos.py` and the Shirabe acceptance harness.
-- `scripts/check-recovery`, `check-ports`, `check-service-sets` and the docs drivers. `scripts/check-live [suite...]` runs every live suite, and `npm run check --prefix docs/website` checks the docs site.
+- The proxy refreshes routes in about 85 ms with five running environments, down from about 1.2 s, so routes no longer come close to their 3-second expiry under load.
 
 ## 0.1.0 - 2026-10-17
 
