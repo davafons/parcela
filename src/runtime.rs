@@ -4,7 +4,7 @@ use crate::{
     http,
     lifecycle::current_session,
     private::{self, Lock},
-    process::{OwnedChild, Signals, exit_code, listener_identity, version},
+    process::{Listeners, OwnedChild, Signals, exit_code, version},
     registry::{Endpoint, Registry, Session, SessionStatus, Workspace},
     router::{self, Router},
 };
@@ -777,12 +777,13 @@ fn monitor(
                     return Ok(0);
                 }
             }
+            let listeners = Listeners::inspect(endpoints.iter().map(|e| e.backend_port))?;
             let observed = endpoints
                 .iter()
                 .map(|endpoint| {
                     Ok((
                         endpoint.service.clone(),
-                        listener_identity(endpoint.backend_port, supervisor.identity().pid)?,
+                        listeners.owned(endpoint.backend_port, supervisor.identity().pid)?,
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?;
@@ -799,12 +800,16 @@ fn monitor(
             let healthy = endpoints.iter().all(|endpoint| {
                 !observed[&endpoint.service].is_empty()
                     && (ready
-                        || http::readiness(
-                            endpoint.backend_port,
-                            &endpoint.hostname,
-                            &record.manifest.services[&endpoint.service].readiness_path,
-                        )
-                        .unwrap_or(false))
+                        || listeners
+                            .address(endpoint.backend_port)
+                            .and_then(|address| {
+                                http::readiness(
+                                    address,
+                                    &endpoint.hostname,
+                                    &record.manifest.services[&endpoint.service].readiness_path,
+                                )
+                            })
+                            .unwrap_or(false))
             });
             listener = observed;
             if healthy != ready {
@@ -1157,15 +1162,21 @@ fn live_status(
     let current = current_session(registry, session)?;
     let mut endpoints = BTreeMap::new();
     let mut listeners = Vec::new();
-    for endpoint in session.endpoints(&manifest.default_service) {
-        let pids = listener_identity(endpoint.backend_port, child)?;
+    let all = session.endpoints(&manifest.default_service);
+    let snapshot = Listeners::inspect(all.iter().map(|endpoint| endpoint.backend_port))?;
+    for endpoint in all {
+        let pids = snapshot.owned(endpoint.backend_port, child)?;
         let http_ready = !pids.is_empty()
-            && http::readiness(
-                endpoint.backend_port,
-                &endpoint.hostname,
-                &manifest.services[&endpoint.service].readiness_path,
-            )
-            .unwrap_or(false);
+            && snapshot
+                .address(endpoint.backend_port)
+                .and_then(|address| {
+                    http::readiness(
+                        address,
+                        &endpoint.hostname,
+                        &manifest.services[&endpoint.service].readiness_path,
+                    )
+                })
+                .unwrap_or(false);
         listeners.extend(&pids);
         endpoints.insert(
             endpoint.service.clone(),

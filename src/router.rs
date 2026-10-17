@@ -3,7 +3,7 @@ use crate::{
     http,
     private::{self, Lock},
     process::{OwnedChild, Signals, exit_code, version},
-    registry::{Registry, SessionStatus},
+    registry::{Endpoint, Registry, Session, SessionStatus},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -94,8 +94,9 @@ pub fn sync(registry: &Registry, router: &Router) -> Result<()> {
     let state = registry.state_path();
     let _lock = Lock::wait(&proxy_dir(state).join("updates.lock"))?;
     verify(state, router)?;
-    renew_leases(registry, router)?;
-    let config = configuration(registry, router)?;
+    let routes = routes(registry, router)?;
+    renew_leases(registry, router, &routes)?;
+    let config = render(registry, router, &routes)?;
     let cached: Result<Value> = private::read_json(&proxy_dir(state).join("loaded.json"));
     if cached.is_ok_and(|cached| cached == config) {
         return Ok(());
@@ -124,17 +125,13 @@ pub fn sync(registry: &Registry, router: &Router) -> Result<()> {
     }
     Ok(())
 }
-fn lease_directory(state: &Path, router: &Router, session: &crate::registry::Session) -> PathBuf {
+fn lease_directory(state: &Path, router: &Router, session: &Session) -> PathBuf {
     proxy_dir(state)
         .join("leases")
         .join(&router.token)
         .join(&session.token)
 }
-pub fn route_published(
-    registry: &Registry,
-    router: &Router,
-    session: &crate::registry::Session,
-) -> bool {
+pub fn route_published(registry: &Registry, router: &Router, session: &Session) -> bool {
     let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
         return false;
     };
@@ -142,7 +139,56 @@ pub fn route_published(
         lease_directory(registry.state_path(), router, session).join(now.as_secs().to_string());
     std::fs::read(file).is_ok_and(|bytes| bytes == session.token.as_bytes())
 }
-fn renew_leases(registry: &Registry, router: &Router) -> Result<()> {
+/// A ready session this proxy may route: its live owner still holds the lock and every endpoint
+/// listens inside the recorded supervisor tree. `dials` pairs each endpoint with its address.
+struct Route {
+    session: Session,
+    dials: Vec<(Endpoint, std::net::SocketAddr)>,
+}
+/// Every routable session, checked once per update with one listener snapshot.
+fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
+    let mut candidates = Vec::new();
+    for session in registry.sessions()? {
+        if session.status != SessionStatus::Ready || session.router_token != router.token {
+            continue;
+        }
+        let path = registry
+            .state_path()
+            .join("environments")
+            .join(&session.environment_id);
+        if let Ok(record) = crate::owner::Record::read(&path, &session)
+            && record.owner_holds(&path)
+        {
+            let endpoints = session.endpoints(&record.manifest.default_service);
+            candidates.push((session, record.supervisor.pid, endpoints));
+        }
+    }
+    let listeners = crate::process::Listeners::inspect(
+        candidates
+            .iter()
+            .flat_map(|(_, _, endpoints)| endpoints.iter().map(|endpoint| endpoint.backend_port)),
+    )?;
+    let mut routes = Vec::new();
+    for (session, supervisor, endpoints) in candidates {
+        let owned = endpoints.iter().all(|endpoint| {
+            listeners
+                .owned(endpoint.backend_port, supervisor)
+                .is_ok_and(|pids| !pids.is_empty())
+        });
+        if owned {
+            let dials = endpoints
+                .into_iter()
+                .map(|endpoint| {
+                    let address = listeners.address(endpoint.backend_port)?;
+                    Ok((endpoint, address))
+                })
+                .collect::<Result<_>>()?;
+            routes.push(Route { session, dials });
+        }
+    }
+    Ok(routes)
+}
+fn renew_leases(registry: &Registry, router: &Router, routes: &[Route]) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
@@ -150,14 +196,10 @@ fn renew_leases(registry: &Registry, router: &Router) -> Result<()> {
         if session.router_token != router.token {
             continue;
         }
-        let path = registry
-            .state_path()
-            .join("environments")
-            .join(&session.environment_id);
         let directory = lease_directory(registry.state_path(), router, &session);
-        let active = session.status == SessionStatus::Ready
-            && crate::owner::Record::read(&path, &session)
-                .is_ok_and(|record| record.routable(&path));
+        let active = routes
+            .iter()
+            .any(|route| route.session.token == session.token);
         if active {
             private::directory(&directory)?;
             for tick in now..now + LEASE_MS / 1000 {
@@ -192,9 +234,11 @@ fn renew_leases(registry: &Registry, router: &Router) -> Result<()> {
     Ok(())
 }
 pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
+    render(registry, router, &routes(registry, router)?)
+}
+fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value> {
     let state = registry.state_path();
     let workspaces = registry.list(None)?;
-    let sessions = registry.sessions()?;
     let mut routes = Vec::new();
     let mut redirects = Vec::new();
     let mut hosts = std::collections::BTreeSet::new();
@@ -208,23 +252,13 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
                 .context("invalid owned hostname")?,
         )?;
     }
-    for session in sessions
-        .iter()
-        .filter(|s| s.status == SessionStatus::Ready && s.router_token == router.token)
-    {
-        let path = state.join("environments").join(&session.environment_id);
-        let Ok(record) = crate::owner::Record::read(&path, session) else {
-            continue;
-        };
-        if !record.routable(&path) {
-            continue;
-        }
+    for Route { session, dials } in ready {
         let workspace = workspaces
             .iter()
             .find(|workspace| workspace.id == session.environment_id)
             .context("session source missing from registry")?;
         let reserved = registry.hosts(&workspace.id)?;
-        for endpoint in session.endpoints(&record.manifest.default_service) {
+        for (endpoint, address) in dials {
             ensure!(
                 reserved.values().any(|host| host == &endpoint.hostname),
                 "unreserved service route refused"
@@ -234,7 +268,7 @@ pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
                 "proxy loop rejected"
             );
             routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
-                "handler":"reverse_proxy", "upstreams":[{"dial":crate::process::backend_address(endpoint.backend_port)?.to_string()}],
+                "handler":"reverse_proxy", "upstreams":[{"dial":address.to_string()}],
                 "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
             }], "terminal": true}));
             redirects.push(json!({"match":[{"host":[endpoint.hostname]}], "handle":[{"handler":"static_response", "status_code":308,

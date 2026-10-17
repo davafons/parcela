@@ -99,11 +99,16 @@ impl Record {
         }
         Ok(())
     }
-    pub fn routable(&self, path: &Path) -> bool {
+    /// A running generation whose live owner still holds the ownership lock.
+    pub fn owner_holds(&self, path: &Path) -> bool {
         self.phase == Phase::Running
             && self.owner.alive()
             && self.supervisor.alive()
             && self.lock.locked(&path.join("owner.lock")).unwrap_or(false)
+    }
+    /// `owner_holds`, and every endpoint listens inside the recorded supervisor tree.
+    pub fn routable(&self, path: &Path) -> bool {
+        self.owner_holds(path)
             && self
                 .session
                 .endpoints(&self.manifest.default_service)

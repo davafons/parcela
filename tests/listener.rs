@@ -1,4 +1,7 @@
-use parcela::{http, process::listener_identity};
+use parcela::{
+    http,
+    process::{Listeners, listener_identity},
+};
 use std::{
     io::{Read, Write},
     net::{Ipv6Addr, TcpListener},
@@ -59,6 +62,10 @@ fn readiness_reaches_an_ipv6_only_backend() {
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
             .unwrap();
     });
-    assert!(http::readiness(READINESS_PORT, "demo.localhost", "/up").unwrap());
+    let address = Listeners::inspect([READINESS_PORT])
+        .unwrap()
+        .address(READINESS_PORT)
+        .unwrap();
+    assert!(http::readiness(address, "demo.localhost", "/up").unwrap());
     server.join().unwrap();
 }
