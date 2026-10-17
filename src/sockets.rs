@@ -1,4 +1,4 @@
-//! Unix socket paths are capped near 104 bytes, so sockets live in a short private directory keyed
+//! Unix socket paths are capped near 104 bytes, so sockets live in `/tmp/parcela-<uid>/<hash>`, keyed
 //! by the canonical state directory instead of under the state directory itself.
 use crate::private;
 use anyhow::{Context, Result, ensure};
@@ -7,15 +7,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const PATH_LIMIT: usize = 100;
-
 pub struct Environment {
     pub control: PathBuf,
     pub compose: PathBuf,
 }
 
 pub fn proxy_admin(state: &Path) -> Result<PathBuf> {
-    checked(directory(state)?.join("proxy-admin.sock"))
+    Ok(directory(state)?.join("proxy-admin.sock"))
 }
 
 /// `runtime` is the registry's `<state>/environments/<environment-id>` directory.
@@ -35,8 +33,8 @@ pub fn environment(runtime: &Path) -> Result<Environment> {
         .context("environment runtime path has no state directory")?;
     let directory = directory(state)?;
     Ok(Environment {
-        control: checked(directory.join(format!("{prefix}-ctl.sock")))?,
-        compose: checked(directory.join(format!("{prefix}-pc.sock")))?,
+        control: directory.join(format!("{prefix}-ctl.sock")),
+        compose: directory.join(format!("{prefix}-pc.sock")),
     })
 }
 
@@ -69,26 +67,9 @@ fn directory(state: &Path) -> Result<PathBuf> {
         .with_context(|| format!("resolve state directory {}", state.display()))?;
     let hash = format!("{:016x}", fnv1a(state.as_os_str().as_bytes()));
     let hash = &hash[..8];
-    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)
-        && runtime.is_absolute()
-        && private::existing_directory(&runtime).is_ok()
-    {
-        return Ok(runtime.join(format!("parcela-{hash}")));
-    }
     // SAFETY: getuid has no pointers or failure case.
     let uid = unsafe { libc::getuid() };
     Ok(PathBuf::from(format!("/tmp/parcela-{uid}")).join(hash))
-}
-
-fn checked(path: PathBuf) -> Result<PathBuf> {
-    let length = path.as_os_str().len();
-    ensure!(
-        length < PATH_LIMIT,
-        "Unix socket path is {length} bytes; the limit is {} bytes: {}",
-        PATH_LIMIT - 1,
-        path.display()
-    );
-    Ok(path)
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
