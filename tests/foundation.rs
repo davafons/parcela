@@ -13,7 +13,7 @@ use std::{
 };
 use tempfile::TempDir;
 
-const MANIFEST: &str = "version: 1\nproject: {id: demo-id, name: demo}\ndefault_service: web\nservices: {web: {}, api: {}}\ntasks: {test: {argv: [python3, -m, unittest], timeout_seconds: 60}}\nprocess_compose: {version: '0.5', processes: {web: {command: echo hi, custom_native_key: kept}}}\n";
+const MANIFEST: &str = "version: 1\nproject: {id: demo-id, name: demo}\ndefault_service: web\nservices: {web: {}, api: {}}\ntasks: {test: {argv: [python3, -m, unittest], timeout_seconds: 60}}\nprocess_compose: {version: '0.5', processes: {web: {command: echo hi, custom_native_key: kept}, api: {command: echo api}}}\n";
 fn manifest() -> Manifest {
     serde_saphyr::from_str(MANIFEST).unwrap()
 }

@@ -473,6 +473,25 @@ impl Manifest {
         Ok(())
     }
 
+    /// What `up` needs beyond schema validity: a process to start for every HTTP service.
+    pub fn check_startable(&self) -> Result<()> {
+        let processes = self
+            .process_compose
+            .as_ref()
+            .context("nothing to start; add a command for the web service, like `web: bin/dev`, or a process_compose.processes map")?
+            .get("processes")
+            .and_then(Value::as_object)
+            .filter(|processes| !processes.is_empty())
+            .context("process_compose has no processes; add one named after each service")?;
+        for service in self.services.keys() {
+            ensure!(
+                processes.contains_key(service),
+                "service {service} has no process to start; add process_compose.processes.{service} with its command"
+            );
+        }
+        Ok(())
+    }
+
     pub fn service_hosts(&self, base: &str) -> Result<BTreeMap<String, String>> {
         let base = base
             .strip_suffix(".localhost")

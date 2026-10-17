@@ -89,6 +89,7 @@ fn inspect(cli: Cli, out: Output) -> Result<()> {
             command: ConfigCommand::Check,
         } => {
             let (source, manifest) = project(&cli.path)?;
+            manifest.check_startable()?;
             let result = serde_json::json!({"valid": true, "project_id": manifest.project.id, "manifest": source.join("parcela.yaml"),
                 "backend_graph_validated": false, "schema_version": 1});
             out.emit(&result, |style| render::config(&result, style))
