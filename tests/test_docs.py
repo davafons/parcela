@@ -1,9 +1,23 @@
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scripts.check_docs import Page, check_theme_colors, contrast_ratio, inspect_site, target_file, validate_search_records
+from scripts.check_docs import WEBSITE, Page, check_theme_colors, contrast_ratio, inspect_site, target_file, validate_search_records
+
+
+class DocumentationSources(unittest.TestCase):
+    def test_nested_snippets_and_vue_expressions_are_refused(self):
+        program = "import {validateMarkdownSource} from './content.mjs'; validateMarkdownSource(process.argv[1], 'fixture.md');"
+        for payload in ['> <<< /private/sentinel.txt', '- <<< /private/sentinel.txt',
+                        '> - <<< /private/sentinel.txt', '{{ 7 * 7 }}',
+                        "{{ ''.constructor.constructor('return process')() }}"]:
+            with self.subTest(payload=payload):
+                result = subprocess.run(['node', '--input-type=module', '-e', program, '--', payload],
+                                        cwd=WEBSITE, capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Public Markdown cannot load extra sources', result.stderr)
 
 
 class DocumentationLinks(unittest.TestCase):

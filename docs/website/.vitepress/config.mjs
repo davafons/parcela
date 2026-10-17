@@ -33,7 +33,16 @@ export default defineConfig({
     if (page !== '404.md') return html;
     return html.replace('<div id="app"></div>', `<div id="app">${content}</div>`);
   },
-  markdown: { html: false, anchor: { slugify: slug } },
+  markdown: {
+    html: false,
+    attrs: { disable: true },
+    anchor: { slugify: slug },
+    config(markdown) {
+      markdown.block.ruler.disable('snippet');
+      const render = markdown.renderer.render.bind(markdown.renderer);
+      markdown.renderer.render = (...args) => `<div v-pre>\n${render(...args)}\n</div>`;
+    },
+  },
   themeConfig: {
     logo: '/assets/logo.svg',
     outline: [2, 3],

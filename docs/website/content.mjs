@@ -25,7 +25,7 @@ export const groups = [
   ] },
 ];
 
-const downloads = {
+export const downloads = {
   'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
   'logo.svg': 'logo.svg',
   'third-party-notices.txt': 'docs/website/THIRD_PARTY_NOTICES.txt',
@@ -55,8 +55,8 @@ export function validatePublicSources(directory) {
 }
 
 export function validateMarkdownSource(markdown, source) {
-  if (/<!--\s*@include:|^\s*<<<|<script(?:\s|>)/mi.test(markdown)) {
-    throw new Error(`Public Markdown cannot load extra sources: ${source}`);
+  if (/<!--\s*@include:|<<<|<script(?:\s|>)|\{\{/i.test(markdown)) {
+    throw new Error(`Public Markdown cannot load extra sources or execute templates: ${source}`);
   }
 }
 

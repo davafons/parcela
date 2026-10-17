@@ -286,6 +286,51 @@ validateMarkdownSource(process.argv[1], 'fixture.md');
             raise ValueError('public Markdown source-loading refusal failed')
 
 
+def check_source_build_refusals(directory):
+    repository = directory / 'boundary-fixture'
+    website = repository / 'docs/website'
+    shutil.copytree(WEBSITE, website, ignore=shutil.ignore_patterns('node_modules', '.generated'))
+    (website / 'node_modules').symlink_to(WEBSITE / 'node_modules', target_is_directory=True)
+    program = "import {groups, downloads} from './content.mjs'; console.log(JSON.stringify([...groups.flatMap(g => g.pages.map(p => p[2])), ...Object.values(downloads)]));"
+    files = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', program], cwd=WEBSITE, text=True))
+    for name in files:
+        destination = repository / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, destination)
+    sentinel = directory / 'private-sentinel.txt'
+    sentinel.write_text('PARCELA_UNDECLARED_BUILD_SENTINEL_759143')
+    page = repository / 'docs/site/index.md'
+    original = page.read_text()
+    expression = "''.constructor.constructor('return process')().getBuiltinModule('fs').readFileSync(" + json.dumps(str(sentinel)) + ", 'utf8')"
+    payloads = {
+        'blockquote-snippet': f'> <<< {sentinel}',
+        'list-snippet': f'- <<< {sentinel}',
+        'nested-snippet': f'> - <<< {sentinel}',
+        'vue-expression': '{{ 7 * 7 }}',
+        'vue-file-read': '{{ ' + expression + ' }}',
+    }
+    for name, payload in payloads.items():
+        page.write_text(original + '\n\n' + payload + '\n')
+        result = subprocess.run(['npm', 'run', 'build'], cwd=website, capture_output=True, text=True, timeout=120,
+                                env={**os.environ, 'DOCS_BASE': '/docs/', 'DOCS_OUTPUT': str(directory / name)})
+        (directory / f'{name}.log').write_text(result.stdout + result.stderr)
+        if result.returncode == 0 or 'Public Markdown cannot load extra sources' not in result.stderr:
+            raise ValueError(f'actual build did not refuse {name}; see {directory / (name + ".log")}')
+    page.write_text(original + '\n\n\\{\\{ ' + expression + ' \\}\\}\n')
+    output = directory / 'escaped-vue-expression'
+    result = subprocess.run(['npm', 'run', 'build'], cwd=website, capture_output=True, text=True, timeout=120,
+                            env={**os.environ, 'DOCS_BASE': '/docs/', 'DOCS_OUTPUT': str(output)})
+    (directory / 'escaped-vue-expression.log').write_text(result.stdout + result.stderr)
+    if result.returncode != 0:
+        raise ValueError('escaped Vue expression did not build as literal Markdown')
+    if 'constructor' not in (output / 'index.html').read_text():
+        raise ValueError('escaped Vue expression was omitted instead of rendered as literal Markdown')
+    for path in output.rglob('*'):
+        if path.is_file() and sentinel.read_bytes() in path.read_bytes():
+            raise ValueError(f'escaped Vue expression executed during rendering: {path}')
+    return {'refused_builds': len(payloads), 'inert_expression_builds': 1}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path)
@@ -293,6 +338,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='parcela-docs-') as directory:
         directory = Path(directory).resolve()
         check_public_sources(directory)
+        source_builds = check_source_build_refusals(directory)
         results = []
         for base, name in [('/', 'root'), ('/parcela/', 'parcela'), ('/docs/', 'docs')]:
             site = directory / name
@@ -301,7 +347,8 @@ def main():
             pages, resources = inspect_site(site, base)
             results.append(check_http(site, pages, resources, base))
         report = {'complete': True, 'hosting': results, 'internal_docs_excluded': True,
-                  'undeclared_and_external_sources_refused': True, 'canonical_downloads': True,
+                  'undeclared_and_external_sources_refused': True, 'source_boundary_builds': source_builds,
+                  'canonical_downloads': True,
                   'search_index_pages': check_search(site, base), 'declared_theme_contrast': check_theme_colors(),
                   'browser_visual_check': False}
         if args.output:
