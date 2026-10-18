@@ -116,12 +116,30 @@ fn print_new_log_lines(log: &Path, start: u64, count: usize) {
     }
     eprintln!("parcela: last lines of {}:", log.display());
     for line in &lines[lines.len().saturating_sub(count)..] {
-        let line: String = line
+        let line: String = without_title(line)
             .chars()
             .filter(|c| !c.is_control() || *c == '\t')
             .collect();
         eprintln!("  {line}");
     }
+}
+
+/// Drops the terminal-title sequences (`ESC ] ... BEL`) Process Compose writes before its output.
+fn without_title(line: &str) -> String {
+    let mut rest = line;
+    let mut text = String::new();
+    while let Some(start) = rest.find("\x1b]") {
+        text.push_str(&rest[..start]);
+        let tail = &rest[start..];
+        let end = tail
+            .find('\x07')
+            .map(|end| end + 1)
+            .or_else(|| tail.find("\x1b\\").map(|end| end + 2))
+            .unwrap_or(tail.len());
+        rest = &tail[end..];
+    }
+    text.push_str(rest);
+    text
 }
 pub fn run(mut cli: Cli) -> Result<i32> {
     let out = Output::detect(cli.json);
@@ -473,4 +491,16 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     .inspect_err(|_| print_new_log_lines(&log, offset, 20))?;
     out.emit(&result, |style| render::started(&result, style))?;
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn terminal_titles_are_dropped_from_log_lines() {
+        assert_eq!(
+            super::without_title("\x1b]0;process-compose: mb/hooks\x07[setup\t] broken"),
+            "[setup\t] broken"
+        );
+        assert_eq!(super::without_title("plain \x1b]2;t\x1b\\line"), "plain line");
+    }
 }
