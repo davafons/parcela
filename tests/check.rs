@@ -30,63 +30,40 @@ fn doctor_config(path: &Path) -> (bool, String) {
 }
 
 #[test]
-fn up_and_doctor_report_the_same_error_for_a_service_without_a_process() {
-    let head = "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}, api: {}}\n";
-    for (graph, expected) in [
+fn up_and_doctor_report_the_same_configuration_error() {
+    let head = "version: 1\nproject: app\nservices:\n";
+    for (services, expected) in [
         (
-            "",
-            "nothing to start; add a command for the web service, like `web: bin/dev`, or a process_compose.processes map",
+            "  web: {command: bin/web}\n",
+            "invalid {path}/parcela.yaml: one service needs http without a subdomain, like `http: {healthcheck: /}`; it gets the environment's URL",
         ),
         (
-            "process_compose: {version: '0.5'}\n",
-            "process_compose has no processes; add one named after each service",
-        ),
-        (
-            "process_compose: {processes: {}}\n",
-            "process_compose has no processes; add one named after each service",
-        ),
-        (
-            "process_compose: {processes: {web: {command: bin/web}, worker: {command: bin/jobs}}}\n",
-            "service api has no process to start; add process_compose.processes.api with its command",
+            "  web: {command: bin/web, http: {healthcheck: /}, depends_on: [db]}\n",
+            "invalid {path}/parcela.yaml: service web depends on db, which is not a service",
         ),
     ] {
         let t = TempDir::new().unwrap();
         let path = t.path().canonicalize().unwrap();
-        fs::write(path.join("parcela.yaml"), format!("{head}{graph}")).unwrap();
+        fs::write(path.join("parcela.yaml"), format!("{head}{services}")).unwrap();
+        let expected = expected.replace("{path}", &path.display().to_string());
         let up = parcela(
             &path,
             &["up", "--process-compose", "/nonexistent/process-compose"],
         );
-        assert_eq!(up.status.code(), Some(1), "{graph}");
+        assert_eq!(up.status.code(), Some(1), "{services}");
         assert_eq!(
             String::from_utf8(up.stderr).unwrap(),
             format!("parcela: {expected}\n"),
-            "{graph}"
+            "{services}"
         );
-        assert_eq!(
-            doctor_config(&path),
-            (false, expected.to_owned()),
-            "{graph}"
-        );
-        assert!(!path.join("state").exists(), "{graph}");
+        assert_eq!(doctor_config(&path), (false, expected), "{services}");
+        assert!(!path.join("state").exists(), "{services}");
     }
 }
 
 #[test]
-fn a_single_service_may_name_its_process_differently() {
-    let t = TempDir::new().unwrap();
-    let path = t.path().canonicalize().unwrap();
-    fs::write(
-        path.join("parcela.yaml"),
-        "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {processes: {server: {command: bin/web}}}\n",
-    )
-    .unwrap();
-    assert!(doctor_config(&path).0);
-}
-
-#[test]
 fn every_bundled_example_passes_the_doctor_config_check() {
-    for example in ["generic", "docs-demo"] {
+    for example in ["docs-demo", "rails-postgres"] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("examples")
             .join(example);

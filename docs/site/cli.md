@@ -53,7 +53,7 @@ ready
 parcela init [--name NAME] [--command CMD]
 ```
 
-Writes a one-line `parcela.yaml` in the current directory. It guesses the web command from `package.json`, a Rails app or Django, and serves the directory with Python otherwise. `--command` sets the command. `--name` sets the project name. `init` never overwrites an existing file.
+Writes a minimal `parcela.yaml` in the current directory. It guesses the web command from `package.json`, a Rails app or Django, and serves the directory with Python otherwise. `--command` sets the command. `--name` sets the project name. `init` never overwrites an existing file.
 
 ```text
 $ parcela init
@@ -67,13 +67,14 @@ Next: parcela up
 ### parcela up
 
 ```text
-parcela up [--detach] [--name NAME | --primary] [--backend-port N]
+parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N]
 ```
 
-Starts every service and worker in `parcela.yaml` and waits until each service answers. It registers the checkout the first time, and starts the proxy if it is not running. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
+Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
 
 - Without `--detach`, `up` stays in the foreground and prints the processes' output. Ctrl-C stops everything.
 - `--detach` returns once the services are ready and leaves them running.
+- `--setup` runs `hooks.setup` again, as on a new environment.
 - `--name NAME` names this checkout on its first `up`. `--primary` gives a linked checkout the project URL.
 - `--backend-port N` sets the default service's port. Other ports are picked for you.
 

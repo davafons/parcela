@@ -1,18 +1,18 @@
 # Getting started with Parcela
 
-This guide takes you from nothing to a small app with three processes, running at named HTTPS URLs, with a second copy of it running next to the first.
+This guide takes you from nothing to a small app with a database, running at named HTTPS URLs, with a second copy of it running next to the first.
 
 ## What you'll build
 
 You'll build a project called `hello` with:
 
 - a static page at `https://hello.localhost:1443`,
-- a JSON API at `https://api-hello.localhost:1443`,
+- a JSON API at `https://api-hello.localhost:1443` that reads from a SQLite database,
 - a background worker that prints a line every five seconds.
 
-Then you'll create a Git worktree called `signup` and run the same app from it at `https://signup-hello.localhost:1443`, while the first copy keeps running.
+Then you'll create a Git worktree called `signup`. One `parcela up` there creates its own database and runs the whole app at `https://signup-hello.localhost:1443`, while the first copy keeps running.
 
-The finished files are [parcela.yaml](https://github.com/davafons/parcela/blob/main/examples/docs-demo/parcela.yaml), [index.html](https://github.com/davafons/parcela/blob/main/examples/docs-demo/index.html), [api.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/api.py) and [worker.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/worker.py).
+The finished files are [parcela.yaml](https://github.com/davafons/parcela/blob/main/examples/docs-demo/parcela.yaml), [index.html](https://github.com/davafons/parcela/blob/main/examples/docs-demo/index.html), [db.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/db.py), [api.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/api.py) and [worker.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/worker.py).
 
 ## Assumptions
 
@@ -77,13 +77,24 @@ Next: parcela up
 `init` looks for `package.json`, a Rails app or Django to guess your dev server. This directory has none of those, so it serves the directory with Python. Open `parcela.yaml`:
 
 ```yaml
-# Parcela runs each service at its own HTTPS URL. Reference: https://github.com/davafons/parcela/blob/main/docs/configuration.md
-# Services must listen on 127.0.0.1:$PORT.
-# No dev server detected; this serves the directory, replace it with yours
-web: python3 -m http.server $PORT --bind 127.0.0.1
+# Reference: https://parcela.davafons.com/docs/configuration/
+version: 1
+project: hello
+
+services:
+  web:
+    # No dev server detected; this serves the directory, replace it with yours
+    command: python3 -m http.server $PORT --bind 127.0.0.1
+    http:
+      healthcheck: /
+
+# Commands that prepare a new environment, such as installing packages or creating a database:
+# hooks:
+#   setup:
+#     command: bin/setup
 ```
 
-That one line is a service called `web` and the command that starts it. Parcela picks a free port and passes it in `$PORT`. The project is named after the directory, `hello`.
+`web` is a service. `command` starts it, and Parcela passes it a free port in `$PORT`. `http` gives it a URL, and `up` waits until `GET /` answers before opening it. The project is named after the directory.
 
 ## Start it
 
@@ -162,19 +173,41 @@ hello primary  ready
 
 `primary` is the name of this environment. The main checkout of a project is `primary` unless you name it.
 
-## Add an API
+## Add an API with a database
 
-Create `api.py`. It answers every request with JSON that includes its own URL:
+Create `db.py`. `setup` creates a table with one message, and `list` prints the messages:
+
+```python
+import os
+import sqlite3
+import sys
+
+database = sqlite3.connect(os.environ["DATABASE_PATH"])
+
+if sys.argv[1] == "setup":
+    database.execute("CREATE TABLE IF NOT EXISTS messages (text TEXT)")
+    database.execute("INSERT INTO messages VALUES (?)", (f"hello from {os.environ['PARCELA_ENVIRONMENT_NAME']}",))
+    database.commit()
+    print("database ready")
+else:
+    for (text,) in database.execute("SELECT text FROM messages"):
+        print(text)
+```
+
+Create `api.py`. It answers every request with the message and its own URL:
 
 ```python
 import json
 import os
+import sqlite3
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
 class Hello(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = {"message": "hello from the API", "url": os.environ["PARCELA_SERVICE_API_URL"]}
+        database = sqlite3.connect(os.environ["DATABASE_PATH"])
+        (message,) = database.execute("SELECT text FROM messages LIMIT 1").fetchone()
+        body = {"message": message, "url": os.environ["PARCELA_SERVICE_API_URL"]}
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -184,14 +217,36 @@ class Hello(BaseHTTPRequestHandler):
 HTTPServer(("127.0.0.1", int(os.environ["PORT"])), Hello).serve_forever()
 ```
 
-Add it to `parcela.yaml` as a second service. You can delete the comment lines:
+Replace `parcela.yaml` with:
 
 ```yaml
-web: python3 -m http.server $PORT --bind 127.0.0.1
-api: python3 api.py
+version: 1
+project: hello
+
+env:
+  DATABASE_PATH: ${PARCELA_DATA_DIR}/hello.sqlite3
+
+services:
+  web:
+    command: python3 -m http.server $PORT --bind 127.0.0.1
+    http:
+      healthcheck: /
+  api:
+    command: python3 api.py
+    http:
+      subdomain: api
+      healthcheck: /
+
+hooks:
+  setup:
+    command: python3 db.py setup
 ```
 
-Every service gets its own `PORT` and its own hostname. The `api` service is served at `api-` plus the environment's hostname.
+Three things are new:
+
+- `env` gives every command a `DATABASE_PATH` inside `PARCELA_DATA_DIR`, a directory that belongs to this environment alone.
+- `api` is a second HTTP service. Its `subdomain` puts it at `api-` plus the environment's hostname.
+- `hooks.setup` runs once, the first time an environment starts. It creates the database before any service starts.
 
 A new service needs a new hostname, so stop the environment and start it again:
 
@@ -215,14 +270,24 @@ curl https://api-hello.localhost:1443
 ```
 
 ```text
-{"message": "hello from the API", "url": "https://api-hello.localhost:1443"}
+{"message": "hello from primary", "url": "https://api-hello.localhost:1443"}
 ```
 
-The API read its URL from `PARCELA_SERVICE_API_URL`. Parcela sets a variable like this for every service, so your services can find each other. The [configuration reference](../configuration.md#environment-variables-parcela-sets) lists them all.
+`primary` is this environment's name, from `PARCELA_ENVIRONMENT_NAME`. The API read its URL from `PARCELA_SERVICE_API_URL`. Parcela sets variables like these for every service, so your services can find each other. The [configuration reference](../configuration.md#environment-variables-parcela-sets) lists them all.
 
-## Add a worker
+See what the setup printed:
 
-A worker is a process with no port and no URL, like a job queue. Create `worker.py`:
+```sh
+parcela logs setup
+```
+
+```text
+database ready
+```
+
+## Add a worker and a task
+
+A worker is a service without `http`: no port and no URL, like a job queue. Create `worker.py`:
 
 ```python
 import time
@@ -234,80 +299,49 @@ while True:
     time.sleep(5)
 ```
 
-Add it under `workers`:
+Add it under `services`, and add a task that lists the messages:
 
 ```yaml
-web: python3 -m http.server $PORT --bind 127.0.0.1
-api: python3 api.py
-workers:
-  ticker: python3 worker.py
-```
+services:
+  # web and api as before
+  ticker:
+    command: python3 worker.py
 
-This time no hostname changes, so a restart is enough. `restart` stops everything and starts it again from the current `parcela.yaml`:
-
-```sh
-parcela restart --detach
-```
-
-Wait a few seconds and read the worker's output:
-
-```sh
-parcela logs ticker --tail 3
-```
-
-```text
-tick 1
-tick 2
-tick 3
-```
-
-## Give each checkout its own database port
-
-Real apps also need ports that are not web servers: a database, Redis or a dev-server websocket. Two checkouts must not share them. List them under `ports` and Parcela leases one for each name:
-
-```yaml
-web: python3 -m http.server $PORT --bind 127.0.0.1
-api: python3 api.py
-workers:
-  ticker: python3 worker.py
-ports: [db]
-environment:
-  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/hello
 tasks:
-  db-url:
-    argv: [sh, -c, 'echo "$DATABASE_URL"']
+  messages:
+    command: python3 db.py list
 ```
 
-The `db` port arrives as `PARCELA_PORT_DB`. The `environment` block builds a `DATABASE_URL` from it for every process. The `db-url` task is a small command you can run with the environment's variables. In a real project you would start Postgres as a worker on `${PARCELA_PORT_DB}`.
+No hostname changes this time, so a restart is enough. `restart` stops everything and starts it again from the current `parcela.yaml`. Setup already ran, so it does not run again:
 
 ```sh
 parcela restart --detach
-parcela status
 ```
 
-```text
-hello primary  ready
-  https://hello.localhost:1443
-  SERVICE  HTTP   URL
-  api      ready  https://api-hello.localhost:1443
-  web      ready  https://hello.localhost:1443
-  PROCESS  STATE    PID
-  api      running  53311
-  ticker   running  53308
-  web      running  53318
-  db        21565  PARCELA_PORT_DB
-  path /Users/you/code/hello
-```
+Wait a few seconds and read the output of every service:
 
 ```sh
-parcela task db-url
+parcela logs --tail 2
 ```
 
 ```text
-postgres://127.0.0.1:21565/hello
+api    | 127.0.0.1 - - [18/Oct/2026 19:50:15] "GET / HTTP/1.1" 200 -
+api    | 127.0.0.1 - - [18/Oct/2026 19:50:16] "GET / HTTP/1.1" 200 -
+ticker | tick 1
+ticker | tick 2
+web    | 127.0.0.1 - - [18/Oct/2026 19:50:15] "GET / HTTP/1.1" 200 -
+web    | 127.0.0.1 - - [18/Oct/2026 19:50:16] "GET / HTTP/1.1" 200 -
 ```
 
-The port stays the same across restarts as long as it is free.
+A task runs a command with the environment's variables:
+
+```sh
+parcela task messages
+```
+
+```text
+hello from primary
+```
 
 ## Run a second checkout in parallel
 
@@ -320,10 +354,10 @@ git worktree add ../signup
 
 ```text
 Preparing worktree (new branch 'signup')
-HEAD is now at 658dadc hello app
+HEAD is now at 4b513a4 hello app
 ```
 
-With jj, run `jj workspace add ../signup` instead. Start the app from the new checkout:
+With jj, run `jj workspace add ../signup` instead. Start the app from the new checkout. This is a new environment, so `setup` runs and creates its own database:
 
 ```sh
 cd ../signup
@@ -339,16 +373,14 @@ parcela up --detach
   parcela down    stop it
 ```
 
-The worktree belongs to the same project, `hello`, and gets its own name, `signup`. Its services, ports and logs are separate from the main checkout's:
+The worktree belongs to the same project, `hello`, and gets its own name, `signup`. Its services, ports, logs and database are separate from the main checkout's:
 
 ```sh
 curl https://api-signup-hello.localhost:1443
-parcela task db-url
 ```
 
 ```text
-{"message": "hello from the API", "url": "https://api-signup-hello.localhost:1443"}
-postgres://127.0.0.1:28477/hello
+{"message": "hello from signup", "url": "https://api-signup-hello.localhost:1443"}
 ```
 
 See both environments:

@@ -72,6 +72,9 @@ pub enum Command {
         /// Return once the services are ready and keep them running in the background.
         #[arg(long)]
         detach: bool,
+        /// Run hooks.setup again, as on a new environment.
+        #[arg(long)]
+        setup: bool,
         /// Port for the default service. Other services get free ports.
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
@@ -99,6 +102,9 @@ pub enum Command {
         /// Return once the services are ready and keep them running in the background.
         #[arg(long)]
         detach: bool,
+        /// Run hooks.setup again, as on a new environment.
+        #[arg(long)]
+        setup: bool,
         /// Port for the default service. Other services get free ports.
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,

@@ -1,0 +1,42 @@
+# A Rails app with its own PostgreSQL server per environment.
+version: 1
+project: shop
+
+env:
+  DATABASE_URL: postgres://postgres@127.0.0.1:${PARCELA_PORT_DB}/shop_development
+  PGHOST: 127.0.0.1
+  PGPORT: ${PARCELA_PORT_DB}
+
+ports: [db]
+
+services:
+  db:
+    command: >-
+      test -d "$PARCELA_DATA_DIR/postgres" || initdb -D "$PARCELA_DATA_DIR/postgres" -U postgres --auth=trust;
+      exec postgres -D "$PARCELA_DATA_DIR/postgres" -p "$PARCELA_PORT_DB" -c listen_addresses=127.0.0.1 -k ''
+    healthcheck: pg_isready -h 127.0.0.1 -p "$PARCELA_PORT_DB"
+  web:
+    command: bin/rails server -p $PORT -b 127.0.0.1
+    http:
+      healthcheck: /up
+    depends_on: [db]
+  jobs:
+    command: bin/jobs
+    depends_on: [db]
+
+hooks:
+  setup:
+    command: >-
+      cp -n "$PARCELA_PRIMARY_DIR/.env" .env 2>/dev/null;
+      bundle install &&
+      bin/rails db:prepare
+    depends_on: [db]
+  prestart:
+    command: bin/rails db:migrate
+    depends_on: [db]
+
+tasks:
+  console:
+    command: bin/rails console
+  test:
+    command: bin/rails test

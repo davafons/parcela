@@ -30,9 +30,17 @@ A service never answered on its port. Check that its command:
 
 - listens on `$PORT`, not a fixed port,
 - binds `127.0.0.1`,
-- answers `GET /` with a 2xx status, or set `readiness_path` to a path that does.
+- answers its `http.healthcheck` path with a 2xx status.
 
 Read the log file named in the message for the service's own error.
+
+## A hook failed
+
+```text
+parcela: hooks.setup failed with exit code 1; its output is above
+```
+
+The setup or prestart command exited nonzero, so no other service started and the environment stopped. Its output is printed above the error, prefixed with `[setup]`, and the whole run is in the `owner.log` file the error names. Fix the cause and run `parcela up` again. A setup that failed runs again on the next `up`. `parcela up --setup` reruns one that already succeeded.
 
 ## The URL answers 503
 

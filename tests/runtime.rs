@@ -13,7 +13,7 @@ fn fixture() -> (TempDir, Registry, Manifest, parcela::registry::Workspace) {
     let temp = TempDir::new().unwrap();
     let source = temp.path().join("source");
     fs::create_dir(&source).unwrap();
-    let manifest: Manifest = serde_saphyr::from_str("version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {readiness_path: /up}}\nenvironment: {DATA_DIR: '${PARCELA_RUNTIME_DIR}/data'}\n").unwrap();
+    let manifest: Manifest = Manifest::parse("version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /up}}}\nenv: {DATA_DIR: '${PARCELA_RUNTIME_DIR}/data'}\n").unwrap();
     let mut registry = Registry::open(&temp.path().join("state"), true)
         .unwrap()
         .unwrap();
@@ -537,9 +537,9 @@ fn task_runtime_has_only_generic_dirs_and_strips_only_supervisor_controls() {
     let temp = TempDir::new().unwrap();
     let source = temp.path().join("source");
     fs::create_dir(&source).unwrap();
-    let yaml = "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\ntasks:\n  probe:\n    argv: [sh, -c, 'cd \"$PARCELA_RUNTIME_DIR\" && ls -p && find tmp -mindepth 1 && echo \"${PORTLESS_PROBE-unset} ${PC_PROBE-unset} ${PARCELA_PROBE-unset}\"']\n    timeout_seconds: 10\n";
+    let yaml = "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\ntasks:\n  probe:\n    command: 'cd \"$PARCELA_RUNTIME_DIR\" && ls -p && find tmp -mindepth 1 && echo \"${PORTLESS_PROBE-unset} ${PC_PROBE-unset} ${PARCELA_PROBE-unset}\"'\n    timeout_seconds: 10\n";
     fs::write(source.join("parcela.yaml"), yaml).unwrap();
-    let manifest: Manifest = serde_saphyr::from_str(yaml).unwrap();
+    let manifest: Manifest = Manifest::parse(yaml).unwrap();
     let state = temp.path().join("state");
     Registry::open(&state, true)
         .unwrap()

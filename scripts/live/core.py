@@ -8,18 +8,14 @@ import subprocess
 from live.common import BINARY, SERVICE, Live, wait_for
 
 MANIFEST = f'''version: 1
-project: {{id: live, name: live}}
-default_service: web
-services: {{web: {{readiness_path: /ready}}}}
-process_compose:
-  version: '0.5'
-  processes:
-    web:
-      command: python3 {SERVICE}
-      availability:
-        restart: 'no'
-    worker:
-      command: python3 -c 'import time; print("cli-worker-ready", flush=True); time.sleep(600)'
+project: live
+services:
+  web:
+    command: python3 {SERVICE}
+    http:
+      healthcheck: /ready
+  worker:
+    command: python3 -c 'import time; print("cli-worker-ready", flush=True); time.sleep(600)'
 '''
 WEBSOCKET = 'Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
 

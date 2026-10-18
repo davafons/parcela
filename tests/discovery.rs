@@ -10,7 +10,8 @@ use std::{
 };
 use tempfile::TempDir;
 
-const MANIFEST: &str = "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {processes: {web: {command: bin/web}}}\n";
+const MANIFEST: &str =
+    "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n";
 fn output(command: &mut Command) -> Output {
     let result = command.output().unwrap();
     assert!(

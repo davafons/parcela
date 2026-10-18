@@ -92,7 +92,7 @@ fn config(path: &Path) -> Check {
         Err(error) => return Check::fail("config", format!("{error:#}"), "parcela init"),
     };
     let file = source.join("parcela.yaml");
-    match Manifest::load(&file).and_then(|manifest| manifest.check_startable().map(|()| manifest)) {
+    match Manifest::load(&file) {
         Ok(manifest) => Check::pass(
             "config",
             format!("{} (project {})", file.display(), manifest.project.name),

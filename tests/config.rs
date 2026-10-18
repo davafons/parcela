@@ -1,16 +1,220 @@
-use parcela::config::Manifest;
+use parcela::{config::Manifest, registry::Endpoint, runtime::compose_graph};
 use serde_json::json;
-use std::{fs, path::Path, process::Command};
+use std::{collections::BTreeMap, fs, path::Path, process::Command};
 use tempfile::TempDir;
 
-fn load(directory: &Path, text: &str) -> anyhow::Result<Manifest> {
-    fs::create_dir_all(directory).unwrap();
-    fs::write(directory.join("parcela.yaml"), text).unwrap();
-    Manifest::load(&directory.join("parcela.yaml"))
+const SHOP: &str = "\
+version: 1
+project: shop
+env:
+  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/shop
+ports: [db]
+services:
+  db:
+    command: postgres -D \"$PARCELA_DATA_DIR/postgres\" -p \"$PARCELA_PORT_DB\"
+    healthcheck: pg_isready -h 127.0.0.1 -p \"$PARCELA_PORT_DB\"
+  web:
+    command: bin/rails server -p $PORT
+    http:
+      healthcheck: /up
+    depends_on: [db]
+  api:
+    command: node api.js
+    working_dir: api
+    env:
+      API_NAME: api-${PARCELA_ENVIRONMENT_NAME}
+    http:
+      subdomain: api
+      healthcheck: /health
+  jobs:
+    command: bin/jobs
+    depends_on: [db]
+hooks:
+  setup:
+    command: bin/rails db:setup
+    depends_on: [db]
+  prestart:
+    command: bin/rails db:migrate
+    depends_on: [db]
+tasks:
+  test:
+    command: bin/rails test
+    timeout_seconds: 600
+x-notes: anything
+";
+
+fn error(text: &str) -> String {
+    format!("{:#}", Manifest::parse(text).unwrap_err())
 }
-fn error(directory: &Path, text: &str) -> String {
-    load(directory, text).unwrap_err().root_cause().to_string()
+
+#[test]
+fn a_file_with_every_field_becomes_the_runtime_shape() {
+    let manifest = Manifest::parse(SHOP).unwrap();
+    let value = serde_json::to_value(&manifest).unwrap();
+    assert_eq!(value["project"], json!({"id": "shop", "name": "shop"}));
+    assert_eq!(value["default_service"], "web");
+    assert_eq!(
+        value["services"],
+        json!({
+            "api": {"subdomain": "api", "readiness_path": "/health"},
+            "web": {"subdomain": null, "readiness_path": "/up"},
+        })
+    );
+    assert_eq!(
+        value["processes"]["db"]["healthcheck"],
+        "pg_isready -h 127.0.0.1 -p \"$PARCELA_PORT_DB\""
+    );
+    assert_eq!(value["processes"]["api"]["working_dir"], "api");
+    assert_eq!(value["hooks"]["setup"]["depends_on"], json!(["db"]));
+    assert_eq!(value["tasks"]["test"]["command"], "bin/rails test");
+    assert_eq!(value["ports"], json!(["db"]));
 }
+
+#[test]
+fn hooks_run_after_their_dependencies_and_before_everything_else() {
+    let manifest = Manifest::parse(SHOP).unwrap();
+    let endpoints = [("web", 21000), ("api", 21001)].map(|(service, port)| Endpoint {
+        service: service.into(),
+        hostname: format!("{service}.localhost"),
+        backend_port: port,
+        public_url: format!("https://{service}.localhost:1443"),
+    });
+    let env = BTreeMap::from([("PARCELA_ENVIRONMENT_NAME".to_owned(), "signup".to_owned())]);
+    let graph = compose_graph(&manifest, &endpoints, &env, Path::new("/state/env"), true).unwrap();
+    let processes = &graph["processes"];
+    assert_eq!(graph["disable_env_expansion"], true);
+    assert_eq!(
+        processes["setup"],
+        json!({"command": "(\nbin/rails db:setup\n)\nstatus=$?\nprintf %s \"$status\" > '/state/env/hooks/setup.exit'\nexit \"$status\"",
+            "availability": {"restart": "no"},
+            "depends_on": {"db": {"condition": "process_healthy"}}})
+    );
+    assert_eq!(
+        processes["prestart"]["depends_on"],
+        json!({"db": {"condition": "process_healthy"}, "setup": {"condition": "process_completed_successfully"}})
+    );
+    assert_eq!(processes["db"]["depends_on"], json!({}));
+    assert_eq!(
+        processes["web"]["depends_on"],
+        json!({"db": {"condition": "process_healthy"}, "prestart": {"condition": "process_completed_successfully"}})
+    );
+    assert_eq!(processes["web"]["environment"], json!(["PORT=21000"]));
+    assert_eq!(
+        processes["web"]["readiness_probe"]["http_get"],
+        json!({"host": "127.0.0.1", "scheme": "http", "port": 21000, "path": "/up"})
+    );
+    assert_eq!(
+        processes["api"]["environment"],
+        json!(["PORT=21001", "API_NAME=api-signup"])
+    );
+    assert_eq!(processes["api"]["working_dir"], "api");
+
+    let graph = compose_graph(&manifest, &endpoints, &env, Path::new("/state/env"), false).unwrap();
+    assert!(graph["processes"].get("setup").is_none());
+    assert_eq!(
+        graph["processes"]["prestart"]["depends_on"],
+        json!({"db": {"condition": "process_healthy"}})
+    );
+}
+
+#[test]
+fn every_rule_has_one_error() {
+    let minimal =
+        "version: 1\nproject: app\nservices:\n  web: {command: bin/web, http: {healthcheck: /}}\n";
+    Manifest::parse(minimal).unwrap();
+    for (text, expected) in [
+        (
+            "project: app\nservices: {}\n".to_owned(),
+            "add `version: 1` at the top of parcela.yaml",
+        ),
+        (
+            minimal.replace("version: 1", "version: 2"),
+            "unsupported version 2; this Parcela reads version 1",
+        ),
+        (
+            minimal.replace("project: app\n", ""),
+            "missing field `project`",
+        ),
+        (
+            minimal.replace(
+                "http: {healthcheck: /}",
+                "http: {subdomain: www, healthcheck: /}",
+            ),
+            "one service needs http without a subdomain, like `http: {healthcheck: /}`; it gets the environment's URL",
+        ),
+        (
+            format!("{minimal}  admin: {{command: bin/admin, http: {{healthcheck: /}}}}\n"),
+            "only one http service can leave out subdomain; it gets the environment's own URL",
+        ),
+        (
+            minimal.replace(
+                "http: {healthcheck: /}",
+                "http: {healthcheck: /}, healthcheck: 'true'",
+            ),
+            "service web has http, so its readiness is http.healthcheck; remove healthcheck",
+        ),
+        (
+            minimal.replace("command: bin/web,", "command: bin/web, depends_on: [db],"),
+            "service web depends on db, which is not a service",
+        ),
+        (
+            format!(
+                "{minimal}  jobs: {{command: bin/jobs, depends_on: [worker]}}\n  worker: {{command: bin/worker, depends_on: [jobs]}}\n"
+            ),
+            "depends_on forms a cycle: jobs -> worker -> jobs",
+        ),
+        (
+            format!("{minimal}hooks:\n  setup: {{command: bin/setup, depends_on: [db]}}\n"),
+            "hooks.setup depends on db, which is not a service",
+        ),
+        (
+            format!("{minimal}  setup: {{command: bin/setup}}\n"),
+            "setup is reserved for hooks.setup; rename the service",
+        ),
+        (
+            format!("{minimal}env: {{PORT: '1'}}\n"),
+            "invalid env: PORT is set by Parcela",
+        ),
+        (
+            minimal.replace("healthcheck: /", "healthcheck: up"),
+            "service web: http.healthcheck must be a path like /up",
+        ),
+    ] {
+        let message = error(&text);
+        assert!(message.contains(expected), "{text}\n{message}");
+    }
+    assert!(error(&format!("{minimal}workers: {{}}\n")).contains("unknown field `workers`"));
+    assert!(
+        error(&minimal.replace("command: bin/web,", "cmd: bin/web,"))
+            .contains("unknown field `cmd`")
+    );
+}
+
+#[test]
+fn named_ports_reject_invalid_names() {
+    let head =
+        "version: 1\nproject: app\nservices: {web: {command: bin/dev, http: {healthcheck: /}}}\n";
+    assert_eq!(
+        Manifest::parse(&format!("{head}ports: [db, vite-hmr]\n"))
+            .unwrap()
+            .ports,
+        ["db", "vite-hmr"]
+    );
+    assert_eq!(
+        parcela::config::port_variable("vite-hmr"),
+        "PARCELA_PORT_VITE_HMR"
+    );
+    for (ports, message) in [
+        ("[Db]", "DNS label"),
+        ("[db_1]", "DNS label"),
+        ("[db, db]", "duplicate port name: db"),
+        ("db", "invalid type"),
+    ] {
+        let message_text = error(&format!("{head}ports: {ports}\n"));
+        assert!(message_text.contains(message), "{ports}: {message_text}");
+    }
+}
+
 fn run(path: &Path, program: &str, args: &[&str]) {
     let output = Command::new(program)
         .current_dir(path)
@@ -25,105 +229,7 @@ fn run(path: &Path, program: &str, args: &[&str]) {
 }
 
 #[test]
-fn one_line_manifest_becomes_a_web_service_named_after_the_checkout() {
-    let t = TempDir::new().unwrap();
-    let manifest = load(
-        &t.path().join("My Notes"),
-        "web: npm run dev -- --port $PORT --host 127.0.0.1\n",
-    )
-    .unwrap();
-    assert_eq!(
-        serde_json::to_value(&manifest).unwrap(),
-        json!({
-            "version": 1,
-            "project": {"id": "my-notes", "name": "my-notes"},
-            "default_service": "web",
-            "services": {"web": {"subdomain": null, "readiness_path": "/"}},
-            "tasks": {},
-            "process_compose": {"version": "0.5", "processes": {
-                "web": {"command": "npm run dev -- --port $PORT --host 127.0.0.1"}
-            }},
-            "environment": {},
-            "inherit_environment": true,
-            "shutdown_timeout_seconds": 300
-        })
-    );
-}
-
-#[test]
-fn each_short_form_service_gets_its_own_port_and_workers_get_no_route() {
-    let t = TempDir::new().unwrap();
-    let manifest = load(
-        &t.path().join("shop"),
-        "project: {name: store}\nservices:\n  web: bin/rails server -p $PORT\n  admin-api: {command: 'node api.js --port ${PORT} $PORTAL', subdomain: api, readiness_path: /up}\nworkers:\n  jobs: bin/jobs\n",
-    )
-    .unwrap();
-    let value = serde_json::to_value(&manifest).unwrap();
-    assert_eq!(value["project"], json!({"id": "store", "name": "store"}));
-    assert_eq!(
-        value["services"],
-        json!({"admin-api": {"subdomain": "api", "readiness_path": "/up"}, "web": {"subdomain": null, "readiness_path": "/"}})
-    );
-    assert_eq!(
-        value["process_compose"]["processes"],
-        json!({
-            "web": {"command": "bin/rails server -p $PORT"},
-            "admin-api": {
-                "command": "node api.js --port ${PARCELA_SERVICE_ADMIN_API_PORT} $PORTAL",
-                "environment": ["PORT=${PARCELA_SERVICE_ADMIN_API_PORT}"]
-            },
-            "jobs": {"command": "bin/jobs"}
-        })
-    );
-}
-
-#[test]
-fn full_form_is_unchanged_and_ambiguous_forms_are_refused() {
-    let t = TempDir::new().unwrap();
-    let full = "version: 1\nproject: {id: a.b, name: demo}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {version: '0.5', processes: {web: {command: x}}}\n";
-    let manifest = load(&t.path().join("full"), full).unwrap();
-    assert_eq!(manifest.project.id, "a.b");
-    assert_eq!(
-        manifest.process_compose,
-        Some(json!({"version": "0.5", "processes": {"web": {"command": "x"}}}))
-    );
-    let dir = t.path().join("bad");
-    for (text, expected) in [
-        (
-            "web: x\nservices: {api: bin/api}\n",
-            "declare services either at the top level (`web: bin/dev`) or under `services:`, not both",
-        ),
-        (
-            "web: x\nprocess_compose: {processes: {}}\n",
-            "the short form generates process_compose from service commands; remove process_compose or use the full form for every service",
-        ),
-        (
-            "defualt_service: web\nweb: x\n",
-            "unknown field \"defualt_service\"; did you mean \"default_service\"?",
-        ),
-        (
-            "worker: bin/jobs\n",
-            "unknown field \"worker\"; did you mean \"workers\"?",
-        ),
-        (
-            "api: a\nadmin: b\n",
-            "several services and none is named web; set default_service to the one that gets the base URL",
-        ),
-        (
-            "web: {port: 3}\n",
-            "unknown field \"web\"; a top-level service is a command string, like `web: bin/dev`",
-        ),
-        (
-            "web: x\nworkers: {web: bin/jobs}\n",
-            "worker web has the same name as a service",
-        ),
-    ] {
-        assert_eq!(error(&dir, text), expected, "{text}");
-    }
-}
-
-#[test]
-fn linked_checkouts_share_the_main_checkout_project_name() {
+fn linked_checkouts_suggest_the_main_checkout_project_name() {
     let t = TempDir::new().unwrap();
     let main = t.path().join("Main-Repo");
     fs::create_dir(&main).unwrap();
@@ -161,38 +267,7 @@ fn linked_checkouts_share_the_main_checkout_project_name() {
         ("git-main", "git-main"),
         ("linked-git", "git-main"),
     ] {
-        let manifest = load(&t.path().join(directory), "web: x\n").unwrap();
-        assert_eq!(manifest.project.name, expected, "{directory}");
+        let name = parcela::config::inferred_project_name(&t.path().join(directory)).unwrap();
+        assert_eq!(name, expected, "{directory}");
     }
-}
-
-#[test]
-fn named_ports_parse_in_both_forms_and_reject_invalid_names() {
-    let t = TempDir::new().unwrap();
-    let short = load(
-        &t.path().join("short"),
-        "web: bin/dev\nports: [db, vite-hmr]\n",
-    )
-    .unwrap();
-    assert_eq!(short.ports, ["db", "vite-hmr"]);
-    assert!(short.services.contains_key("web") && !short.services.contains_key("ports"));
-    let full = load(
-        &t.path().join("full"),
-        "version: 1\nproject: app\ndefault_service: web\nservices: {web: {}}\nports: [redis]\nprocess_compose: {processes: {web: {command: bin/dev}}}\n",
-    )
-    .unwrap();
-    assert_eq!(full.ports, ["redis"]);
-    assert_eq!(
-        parcela::config::port_variable("vite-hmr"),
-        "PARCELA_PORT_VITE_HMR"
-    );
-    for (yaml, message) in [
-        ("web: bin/dev\nports: [Db]\n", "DNS label"),
-        ("web: bin/dev\nports: [db_1]\n", "DNS label"),
-        ("web: bin/dev\nports: [db, db]\n", "duplicate port name: db"),
-    ] {
-        let error = error(&t.path().join("bad"), yaml);
-        assert!(error.contains(message), "{yaml}: {error}");
-    }
-    assert!(load(&t.path().join("scalar"), "web: bin/dev\nports: db\n").is_err());
 }

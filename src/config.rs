@@ -1,32 +1,29 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
 
+/// The validated project configuration, as the runtime uses it. `parcela.yaml` is parsed from
+/// [`File`] into this shape, which is also saved with each run.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
-    pub version: u32,
     pub project: Project,
+    /// The HTTP service served at the environment's own URL.
     pub default_service: String,
+    /// Routed HTTP services, keyed like `processes`.
     pub services: BTreeMap<String, Service>,
-    #[serde(default)]
+    /// Every long-running process, HTTP or not.
+    pub processes: BTreeMap<String, Process>,
+    pub hooks: Hooks,
     pub tasks: BTreeMap<String, Task>,
     /// Non-HTTP ports leased per run and exported as `PARCELA_PORT_<NAME>`; never routed or probed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ports: Vec<String>,
-    /// Native graph passed through to Process Compose without organizer schema reinterpretation.
-    #[serde(default)]
-    pub process_compose: Option<Value>,
-    #[serde(default)]
     pub environment: BTreeMap<String, String>,
-    #[serde(default = "yes")]
-    pub inherit_environment: bool,
-    #[serde(default = "shutdown_timeout")]
     pub shutdown_timeout_seconds: u64,
 }
 
@@ -41,27 +38,98 @@ pub struct Project {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Service {
-    /// Optional flat hostname prefix for non-default services.
+    /// Hostname prefix; `None` only for the default service.
     pub subdomain: Option<String>,
-    #[serde(default = "root_path")]
     pub readiness_path: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct Process {
+    pub command: String,
+    pub working_dir: Option<String>,
+    pub env: BTreeMap<String, String>,
+    pub depends_on: Vec<String>,
+    /// A shell command that exits 0 once a non-HTTP service is ready.
+    pub healthcheck: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    /// Runs on the first `up` of a new environment.
+    pub setup: Option<Hook>,
+    /// Runs on every `up`, after `setup`.
+    pub prestart: Option<Hook>,
+}
+
+/// Hook names in run order. They also name the hook's process, so no service may use them.
+pub const HOOKS: [&str; 2] = ["setup", "prestart"];
+
+impl Hooks {
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, &Hook)> {
+        HOOKS
+            .into_iter()
+            .zip([&self.setup, &self.prestart])
+            .filter_map(|(name, hook)| hook.as_ref().map(|hook| (name, hook)))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hook {
+    pub command: String,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
-    pub argv: Vec<String>,
+    pub command: String,
     pub timeout_seconds: Option<u64>,
 }
 
-fn shutdown_timeout() -> u64 {
-    300
+/// The only `parcela.yaml` format version this build reads.
+pub const VERSION: u32 = 1;
+const SHUTDOWN_TIMEOUT_SECONDS: u64 = 300;
+
+/// `parcela.yaml` as written. Every field has one spelling and one shape.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct File {
+    #[serde(rename = "version")]
+    _version: u32,
+    project: String,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    ports: Vec<String>,
+    services: BTreeMap<String, FileService>,
+    #[serde(default)]
+    hooks: Hooks,
+    #[serde(default)]
+    tasks: BTreeMap<String, Task>,
 }
-fn yes() -> bool {
-    true
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileService {
+    command: String,
+    http: Option<Http>,
+    healthcheck: Option<String>,
+    #[serde(default)]
+    depends_on: Vec<String>,
+    working_dir: Option<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
 }
-fn root_path() -> String {
-    "/".into()
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Http {
+    subdomain: Option<String>,
+    healthcheck: String,
 }
 
 pub fn dns_label(value: &str) -> Result<()> {
@@ -92,86 +160,6 @@ pub fn port_variable(name: &str) -> String {
     )
 }
 
-const FIELDS: &[&str] = &[
-    "version",
-    "project",
-    "default_service",
-    "services",
-    "workers",
-    "tasks",
-    "ports",
-    "process_compose",
-    "environment",
-    "inherit_environment",
-    "shutdown_timeout_seconds",
-];
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ShortService {
-    command: String,
-    subdomain: Option<String>,
-    readiness_path: Option<String>,
-}
-impl ShortService {
-    fn command(command: String) -> Self {
-        Self {
-            command,
-            subdomain: None,
-            readiness_path: None,
-        }
-    }
-}
-
-/// A top-level key one or two edits from a field name is a typo, not a service.
-fn similar_field(key: &str) -> Option<&'static str> {
-    fn distance(a: &str, b: &str) -> usize {
-        let b: Vec<char> = b.chars().collect();
-        let mut row: Vec<usize> = (0..=b.len()).collect();
-        for (i, ca) in a.chars().enumerate() {
-            let mut previous = row[0];
-            row[0] = i + 1;
-            for (j, cb) in b.iter().enumerate() {
-                let current = row[j + 1];
-                row[j + 1] = (previous + usize::from(ca != *cb))
-                    .min(row[j] + 1)
-                    .min(current + 1);
-                previous = current;
-            }
-        }
-        row[b.len()]
-    }
-    FIELDS
-        .iter()
-        .copied()
-        .find(|field| distance(key, field) <= 2)
-}
-
-/// Replace `$PORT` and `${PORT}` (not `$PORTAL`) with another variable reference.
-fn replace_port(command: &str, variable: &str) -> String {
-    let mut result = String::new();
-    let mut rest = command;
-    while let Some(index) = rest.find('$') {
-        result.push_str(&rest[..index]);
-        let tail = &rest[index..];
-        if let Some(after) = tail.strip_prefix("${PORT}") {
-            result.push_str(variable);
-            rest = after;
-        } else if let Some(after) = tail
-            .strip_prefix("$PORT")
-            .filter(|after| !after.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
-        {
-            result.push_str(variable);
-            rest = after;
-        } else {
-            result.push('$');
-            rest = &tail[1..];
-        }
-    }
-    result.push_str(rest);
-    result
-}
-
 /// Lowercase ASCII words joined by single hyphens, cut to one DNS label.
 pub fn sanitize_label(name: &str) -> Option<String> {
     let label = name
@@ -195,7 +183,7 @@ pub fn sanitize_label(name: &str) -> Option<String> {
 }
 
 /// The project is named after the main checkout, so every jj workspace and Git worktree agrees.
-fn inferred_project_name(source: &Path) -> Result<String> {
+pub fn inferred_project_name(source: &Path) -> Result<String> {
     let source = source.canonicalize()?;
     let root = main_checkout(&source).unwrap_or(source);
     let name = root
@@ -207,7 +195,7 @@ fn inferred_project_name(source: &Path) -> Result<String> {
     })
 }
 
-fn main_checkout(source: &Path) -> Option<PathBuf> {
+pub fn main_checkout(source: &Path) -> Option<PathBuf> {
     let root = source
         .ancestors()
         .find(|path| path.join(".jj").is_dir() || path.join(".git").exists())?;
@@ -241,191 +229,94 @@ fn main_checkout(source: &Path) -> Option<PathBuf> {
 impl Manifest {
     pub fn load(path: &Path) -> Result<Self> {
         let text = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let source = path.parent().context("manifest has no directory")?;
-        Self::parse(&text, source).with_context(|| format!("invalid {}", path.display()))
+        Self::parse(&text).with_context(|| format!("invalid {}", path.display()))
     }
 
-    /// Parse and validate manifest text as if it were `source/parcela.yaml`.
-    pub fn parse(text: &str, source: &Path) -> Result<Self> {
+    /// Parse and validate `parcela.yaml` text.
+    pub fn parse(text: &str) -> Result<Self> {
         let document: Value = serde_saphyr::from_str(text)?;
-        let manifest = Self::from_document(document, source)?;
+        let Value::Object(mut fields) = document else {
+            bail!("parcela.yaml must be a mapping that starts with `version: {VERSION}`");
+        };
+        match fields.get("version") {
+            Some(version) if version.as_u64() == Some(VERSION.into()) => {}
+            Some(version) => {
+                bail!("unsupported version {version}; this Parcela reads version {VERSION}")
+            }
+            None => bail!(
+                "add `version: {VERSION}` at the top of parcela.yaml; files from Parcela 0.2 and earlier also need the format at https://parcela.davafons.com/docs/configuration/"
+            ),
+        }
+        // `x-` keys are free for YAML anchors and other tools, as in Docker Compose.
+        fields.retain(|key, _| !key.starts_with("x-"));
+        let file: File = serde_json::from_value(Value::Object(fields))?;
+        let manifest = Self::from_file(file)?;
         manifest.validate()?;
         Ok(manifest)
     }
 
-    /// Normalize either manifest form into the full schema. The short form names
-    /// services by command and lets conventions fill the rest:
-    /// `web: bin/dev` becomes an HTTP service and a Process Compose process.
-    pub fn from_document(document: Value, source: &Path) -> Result<Self> {
-        let Value::Object(mut fields) = document else {
-            bail!("parcela.yaml must be a mapping, for example `web: npm run dev`");
-        };
-        let mut commands = BTreeMap::new();
-        for key in fields.keys().cloned().collect::<Vec<_>>() {
-            if FIELDS.contains(&key.as_str()) {
-                continue;
-            }
-            if let Some(known) = similar_field(&key) {
-                bail!("unknown field {key:?}; did you mean {known:?}?");
-            }
-            match fields.remove(&key) {
-                Some(Value::String(command)) => {
-                    commands.insert(key, ShortService::command(command));
+    fn from_file(file: File) -> Result<Self> {
+        dns_label(&file.project).context("project must be a DNS label, like `shop`")?;
+        let mut services = BTreeMap::new();
+        let mut processes = BTreeMap::new();
+        let mut default_service = None;
+        for (name, service) in file.services {
+            if let Some(http) = service.http {
+                ensure!(
+                    service.healthcheck.is_none(),
+                    "service {name} has http, so its readiness is http.healthcheck; remove healthcheck"
+                );
+                if http.subdomain.is_none() {
+                    ensure!(
+                        default_service.replace(name.clone()).is_none(),
+                        "only one http service can leave out subdomain; it gets the environment's own URL"
+                    );
                 }
-                _ => bail!(
-                    "unknown field {key:?}; a top-level service is a command string, like `{key}: bin/dev`"
-                ),
+                services.insert(
+                    name.clone(),
+                    Service {
+                        subdomain: http.subdomain,
+                        readiness_path: http.healthcheck,
+                    },
+                );
             }
-        }
-        fields.entry("version").or_insert(Value::from(1));
-        let project = match fields.remove("project") {
-            None => {
-                let name = inferred_project_name(source)?;
-                json!({"id": name, "name": name})
-            }
-            Some(Value::String(name)) => {
-                let name = sanitize_label(&name).context("project needs a DNS-safe name")?;
-                json!({"id": name, "name": name})
-            }
-            Some(Value::Object(mut project)) => {
-                let name = match project.get("name") {
-                    Some(name) => name.clone(),
-                    None => Value::from(inferred_project_name(source)?),
-                };
-                project.entry("id").or_insert_with(|| name.clone());
-                project.entry("name").or_insert(name);
-                Value::Object(project)
-            }
-            Some(other) => other,
-        };
-        fields.insert("project".into(), project);
-
-        let declared = fields.get("services").and_then(Value::as_object);
-        let short_services = declared.is_some_and(|services| {
-            services
-                .values()
-                .any(|service| service.is_string() || service.get("command").is_some())
-        });
-        if !commands.is_empty() && fields.contains_key("services") {
-            bail!(
-                "declare services either at the top level (`web: bin/dev`) or under `services:`, not both"
+            processes.insert(
+                name,
+                Process {
+                    command: service.command,
+                    working_dir: service.working_dir,
+                    env: service.env,
+                    depends_on: service.depends_on,
+                    healthcheck: service.healthcheck,
+                },
             );
         }
-        if commands.is_empty() && !short_services && !fields.contains_key("workers") {
-            return serde_json::from_value(Value::Object(fields)).map_err(Into::into);
-        }
-        if let Some(Value::Object(services)) = fields.remove("services") {
-            for (name, service) in services {
-                let service: ShortService = match service {
-                    Value::String(command) => ShortService::command(command),
-                    other => serde_json::from_value(other).with_context(|| {
-                        format!(
-                            "service {name} needs a command, like `{name}: bin/dev`; full-form services belong with process_compose"
-                        )
-                    })?,
-                };
-                commands.insert(name, service);
-            }
-        }
-        ensure!(
-            !fields.contains_key("process_compose"),
-            "the short form generates process_compose from service commands; remove process_compose or use the full form for every service"
-        );
-        ensure!(
-            !commands.is_empty(),
-            "declare at least one HTTP service, like `web: bin/dev`"
-        );
-        let workers: BTreeMap<String, String> = match fields.remove("workers") {
-            Some(workers) => serde_json::from_value(workers)
-                .context("workers maps a name to a command, like `jobs: bin/jobs`")?,
-            None => BTreeMap::new(),
-        };
-        let default_service = match fields.get("default_service").and_then(Value::as_str) {
-            Some(name) => name.to_owned(),
-            None if commands.contains_key("web") => "web".to_owned(),
-            None if commands.len() == 1 => commands.keys().next().cloned().unwrap_or_default(),
-            None => bail!(
-                "several services and none is named web; set default_service to the one that gets the base URL"
-            ),
-        };
-        fields.insert(
-            "default_service".into(),
-            Value::from(default_service.clone()),
-        );
-        let mut services = serde_json::Map::new();
-        let mut processes = serde_json::Map::new();
-        for (name, service) in commands {
-            dns_label(&name)?;
-            let mut process = serde_json::Map::new();
-            if name == default_service {
-                process.insert("command".into(), Value::from(service.command));
-            } else {
-                // Process Compose expands ${PORT} from the shared environment when it loads the
-                // graph, so a non-default service must name its own port variable instead.
-                let own = format!(
-                    "${{PARCELA_SERVICE_{}_PORT}}",
-                    name.to_ascii_uppercase().replace('-', "_")
-                );
-                process.insert(
-                    "command".into(),
-                    Value::from(replace_port(&service.command, &own)),
-                );
-                process.insert("environment".into(), json!([format!("PORT={own}")]));
-            }
-            processes.insert(name.clone(), Value::Object(process));
-            let mut entry = serde_json::Map::new();
-            if let Some(subdomain) = service.subdomain {
-                entry.insert("subdomain".into(), Value::from(subdomain));
-            }
-            if let Some(path) = service.readiness_path {
-                entry.insert("readiness_path".into(), Value::from(path));
-            }
-            services.insert(name, Value::Object(entry));
-        }
-        for (name, command) in workers {
-            dns_label(&name)?;
-            ensure!(
-                !processes.contains_key(&name),
-                "worker {name} has the same name as a service"
-            );
-            processes.insert(name, json!({"command": command}));
-        }
-        fields.insert("services".into(), Value::Object(services));
-        fields.insert(
-            "process_compose".into(),
-            json!({"version": "0.5", "processes": processes}),
-        );
-        serde_json::from_value(Value::Object(fields)).map_err(Into::into)
+        Ok(Self {
+            project: Project {
+                id: file.project.clone(),
+                name: file.project,
+            },
+            default_service: default_service.context(
+                "one service needs http without a subdomain, like `http: {healthcheck: /}`; it gets the environment's URL",
+            )?,
+            services,
+            processes,
+            hooks: file.hooks,
+            tasks: file.tasks,
+            ports: file.ports,
+            environment: file.env,
+            shutdown_timeout_seconds: SHUTDOWN_TIMEOUT_SECONDS,
+        })
     }
 
     pub fn validate(&self) -> Result<()> {
-        ensure!(
-            self.version == 1,
-            "unsupported manifest version {}; expected 1",
-            self.version
-        );
-        ensure!(
-            !self.project.id.is_empty()
-                && self.project.id.len() <= 128
-                && self
-                    .project
-                    .id
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b)),
-            "project.id must be 1–128 ASCII letters, digits, hyphens, underscores or dots"
-        );
-        ensure!(
-            (1..=86400).contains(&self.shutdown_timeout_seconds),
-            "shutdown_timeout_seconds must be between 1 and 86400"
-        );
         dns_label(&self.project.name)?;
         ensure!(
             self.services.contains_key(&self.default_service),
-            "default_service must refer to a declared service"
+            "default service must be an http service"
         );
         let mut names = std::collections::BTreeSet::new();
         for (name, service) in &self.services {
-            dns_label(name)?;
             ensure!(
                 service.readiness_path.starts_with('/')
                     && service.readiness_path.is_ascii()
@@ -433,21 +324,48 @@ impl Manifest {
                         .readiness_path
                         .bytes()
                         .any(|b| b <= b' ' || b == 127),
-                "invalid readiness_path for {name}"
+                "service {name}: http.healthcheck must be a path like /up"
             );
-            if name == &self.default_service {
-                ensure!(
-                    service.subdomain.is_none(),
-                    "default service uses the environment base; do not set its subdomain"
-                );
-            } else {
-                let subdomain = service.subdomain.as_deref().unwrap_or(name);
-                dns_label(subdomain)?;
+            if let Some(subdomain) = &service.subdomain {
+                dns_label(subdomain)
+                    .with_context(|| format!("service {name}: invalid http.subdomain"))?;
                 ensure!(
                     names.insert(subdomain),
-                    "duplicate service subdomain: {subdomain}"
+                    "two services use the subdomain {subdomain}"
                 );
             }
+        }
+        for (name, process) in &self.processes {
+            dns_label(name).with_context(|| format!("invalid service name {name:?}"))?;
+            ensure!(
+                !HOOKS.contains(&name.as_str()),
+                "{name} is reserved for hooks.{name}; rename the service"
+            );
+            ensure!(
+                !process.command.trim().is_empty() && !process.command.contains('\0'),
+                "service {name} needs a command"
+            );
+            if let Some(dir) = &process.working_dir {
+                ensure!(
+                    Path::new(dir).is_relative(),
+                    "service {name}: working_dir must be relative to parcela.yaml"
+                );
+            }
+            check_environment(&process.env)
+                .with_context(|| format!("service {name}: invalid env"))?;
+            self.check_dependencies(&format!("service {name}"), &process.depends_on)?;
+            ensure!(
+                !process.depends_on.contains(name),
+                "service {name} depends on itself"
+            );
+        }
+        self.check_cycles()?;
+        for (name, hook) in self.hooks.iter() {
+            ensure!(
+                !hook.command.trim().is_empty() && !hook.command.contains('\0'),
+                "hooks.{name} needs a command"
+            );
+            self.check_dependencies(&format!("hooks.{name}"), &hook.depends_on)?;
         }
         let mut ports = std::collections::BTreeSet::new();
         for name in &self.ports {
@@ -455,63 +373,73 @@ impl Manifest {
             ensure!(ports.insert(name), "duplicate port name: {name}");
         }
         for (name, task) in &self.tasks {
-            dns_label(name)?;
+            dns_label(name).with_context(|| format!("invalid task name {name:?}"))?;
             ensure!(
-                !task.argv.is_empty() && !task.argv[0].is_empty(),
-                "task {name} needs a nonempty executable in argv"
-            );
-            ensure!(
-                task.argv.iter().all(|a| !a.contains('\0')),
-                "task {name} argv contains NUL"
+                !task.command.trim().is_empty() && !task.command.contains('\0'),
+                "task {name} needs a command"
             );
             ensure!(
                 task.timeout_seconds != Some(0),
                 "task {name} timeout must be positive"
             );
         }
-        for (key, value) in &self.environment {
+        check_environment(&self.environment).context("invalid env")
+    }
+
+    fn check_dependencies(&self, owner: &str, depends_on: &[String]) -> Result<()> {
+        for dependency in depends_on {
             ensure!(
-                !key.is_empty()
-                    && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    && !key.as_bytes()[0].is_ascii_digit(),
-                "invalid environment key: {key}"
-            );
-            ensure!(
-                !key.starts_with("PARCELA_") && key != "PORT" && key != "HOST",
-                "reserved context key: {key}"
-            );
-            ensure!(
-                !value.contains('\0'),
-                "environment value contains NUL: {key}"
-            );
-        }
-        if let Some(graph) = &self.process_compose {
-            ensure!(
-                graph.is_object(),
-                "process_compose must be a native graph mapping"
+                self.processes.contains_key(dependency),
+                "{owner} depends on {dependency}, which is not a service"
             );
         }
         Ok(())
     }
 
-    /// What `up` needs beyond schema validity: a process to start for every HTTP service.
-    /// A single-service graph may name its one process differently.
-    pub fn check_startable(&self) -> Result<()> {
-        let processes = self
-            .process_compose
-            .as_ref()
-            .context("nothing to start; add a command for the web service, like `web: bin/dev`, or a process_compose.processes map")?
-            .get("processes")
-            .and_then(Value::as_object)
-            .filter(|processes| !processes.is_empty())
-            .context("process_compose has no processes; add one named after each service")?;
-        for service in self.services.keys() {
+    fn check_cycles(&self) -> Result<()> {
+        fn visit<'a>(
+            manifest: &'a Manifest,
+            name: &'a str,
+            path: &mut Vec<&'a str>,
+            done: &mut std::collections::BTreeSet<&'a str>,
+        ) -> Result<()> {
+            if done.contains(name) {
+                return Ok(());
+            }
             ensure!(
-                self.services.len() == 1 || processes.contains_key(service),
-                "service {service} has no process to start; add process_compose.processes.{service} with its command"
+                !path.contains(&name),
+                "depends_on forms a cycle: {} -> {name}",
+                path.join(" -> ")
             );
+            path.push(name);
+            for dependency in &manifest.processes[name].depends_on {
+                visit(manifest, dependency, path, done)?;
+            }
+            path.pop();
+            done.insert(name);
+            Ok(())
+        }
+        let mut done = std::collections::BTreeSet::new();
+        for name in self.processes.keys() {
+            visit(self, name, &mut Vec::new(), &mut done)?;
         }
         Ok(())
+    }
+
+    /// The services a hook waits for, with everything they depend on.
+    pub fn hook_dependencies(&self) -> std::collections::BTreeSet<&str> {
+        let mut pending: Vec<&str> = self
+            .hooks
+            .iter()
+            .flat_map(|(_, hook)| hook.depends_on.iter().map(String::as_str))
+            .collect();
+        let mut closure = std::collections::BTreeSet::new();
+        while let Some(name) = pending.pop() {
+            if closure.insert(name) {
+                pending.extend(self.processes[name].depends_on.iter().map(String::as_str));
+            }
+        }
+        closure
     }
 
     pub fn service_hosts(&self, base: &str) -> Result<BTreeMap<String, String>> {
@@ -543,6 +471,23 @@ impl Manifest {
         dns_label(&base)?;
         Ok(format!("{base}.localhost"))
     }
+}
+
+fn check_environment(environment: &BTreeMap<String, String>) -> Result<()> {
+    for (key, value) in environment {
+        ensure!(
+            !key.is_empty()
+                && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                && !key.as_bytes()[0].is_ascii_digit(),
+            "invalid variable name: {key}"
+        );
+        ensure!(
+            !key.starts_with("PARCELA_") && key != "PORT" && key != "HOST",
+            "{key} is set by Parcela"
+        );
+        ensure!(!value.contains('\0'), "{key} contains NUL");
+    }
+    Ok(())
 }
 
 /// Resolve a checkout from the nearest manifest, not from a branch/bookmark.

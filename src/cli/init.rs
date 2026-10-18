@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use parcela::{config::Manifest, frontdoor::FrontDoor};
 use std::{fs, io::Write, path::Path};
 
-const DOCS: &str = "https://github.com/davafons/parcela/blob/main/docs/configuration.md";
+const DOCS: &str = "https://parcela.davafons.com/docs/configuration/";
 
 /// A guessed dev server command and the evidence it came from.
 struct Suggestion {
@@ -96,19 +96,24 @@ pub fn run(
         },
         None => suggest(&directory),
     };
-    let mut text = format!(
-        "# Parcela runs each service at its own HTTPS URL. Reference: {DOCS}\n# Services must listen on 127.0.0.1:$PORT.\n"
-    );
-    if let Some(name) = name {
-        let name = parcela::config::sanitize_label(name)
-            .context("--name needs letters or digits for a DNS-safe project name")?;
-        text.push_str(&format!("project: {name}\n"));
-    }
+    let project = match name {
+        Some(name) => parcela::config::sanitize_label(name)
+            .context("--name needs letters or digits for a DNS-safe project name")?,
+        None => parcela::config::inferred_project_name(&directory)?,
+    };
+    let mut text =
+        format!("# Reference: {DOCS}\nversion: 1\nproject: {project}\n\nservices:\n  web:\n");
     if let Some(reason) = suggestion.reason {
-        text.push_str(&format!("# {reason}\n"));
+        text.push_str(&format!("    # {reason}\n"));
     }
-    text.push_str(&format!("web: {}\n", scalar(&suggestion.command)));
-    let manifest = Manifest::parse(&text, &directory).context(
+    text.push_str(&format!(
+        "    command: {}\n    http:\n      healthcheck: /\n",
+        scalar(&suggestion.command)
+    ));
+    text.push_str(
+        "\n# Commands that prepare a new environment, such as installing packages or creating a database:\n# hooks:\n#   setup:\n#     command: bin/setup\n",
+    );
+    let manifest = Manifest::parse(&text).context(
         "the generated parcela.yaml would be invalid; choose another --name or --command",
     )?;
     let url = front_door.url(&manifest.hostname(true, "primary")?);

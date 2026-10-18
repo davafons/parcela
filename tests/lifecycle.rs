@@ -27,8 +27,8 @@ fn fixture() -> (
     let temp = TempDir::new_in("/tmp").unwrap();
     let source = temp.path().join("source");
     fs::create_dir(&source).unwrap();
-    let manifest: Manifest = serde_saphyr::from_str(
-        "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+    let manifest: Manifest = Manifest::parse(
+        "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
     )
     .unwrap();
     let mut registry = Registry::open(&temp.path().join("state"), true)
@@ -243,8 +243,8 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         supervisor: identity.clone(),
         processes: vec![identity],
         native: None,
-        manifest: serde_saphyr::from_str(
-            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        manifest: Manifest::parse(
+            "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
         .unwrap(),
         diagnostic: None,
@@ -314,8 +314,8 @@ fn contending_stop(replace_session: bool) {
         supervisor: identity.clone(),
         processes: vec![identity],
         native: None,
-        manifest: serde_saphyr::from_str(
-            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        manifest: Manifest::parse(
+            "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
         .unwrap(),
         diagnostic: None,
@@ -399,8 +399,8 @@ fn waiting_stop(replace_control: bool) {
         supervisor: identity.clone(),
         processes: vec![identity],
         native: None,
-        manifest: serde_saphyr::from_str(
-            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        manifest: Manifest::parse(
+            "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
         .unwrap(),
         diagnostic: None,
@@ -575,8 +575,8 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
             token: private::Identity::read(&path.join("pc.token")).unwrap(),
             socket: Some(private::Identity::read(&sockets.compose).unwrap()),
         }),
-        manifest: serde_saphyr::from_str(
-            "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+        manifest: Manifest::parse(
+            "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
         .unwrap(),
         diagnostic: None,

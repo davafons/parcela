@@ -66,7 +66,7 @@ impl Fixture {
         fs::create_dir_all(&path).unwrap();
         fs::write(
             path.join("parcela.yaml"),
-            format!("project: {project}\nweb: bin/web\napi: bin/api\n"),
+            format!("version: 1\nproject: {project}\nservices:\n  web: {{command: bin/web, http: {{healthcheck: /}}}}\n  api: {{command: bin/api, http: {{subdomain: api, healthcheck: /}}}}\n"),
         )
         .unwrap();
         let manifest = Manifest::load(&path.join("parcela.yaml")).unwrap();
@@ -158,7 +158,7 @@ fn rm_forgets_a_stopped_environment_releases_its_hosts_and_keeps_files() {
     assert_eq!(f.ids(), [running_id]);
     assert_eq!(
         fs::read_to_string(review.join("parcela.yaml")).unwrap(),
-        "project: notes\nweb: bin/web\napi: bin/api\n"
+        "version: 1\nproject: notes\nservices:\n  web: {command: bin/web, http: {healthcheck: /}}\n  api: {command: bin/api, http: {subdomain: api, healthcheck: /}}\n"
     );
     // The released hostname can be reserved again by another checkout.
     let (_, again) = f.checkout("notes", "elsewhere", Role::Preview, "review");

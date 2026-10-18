@@ -2,9 +2,25 @@
 
 ## Unreleased
 
+`parcela.yaml` has a new format, version 1. Files written for 0.2 or earlier need rewriting, and `parcela doctor` links to the new format. The [configuration reference](docs/configuration.md) shows the new format.
+
+### Added
+
+- `hooks.setup` runs once in each new environment and `hooks.prestart` on every `up`, after the services they `depends_on` and before every other service. A failed hook stops `up`. `up --setup` and `restart --setup` run setup again.
+- Services take `depends_on`, `working_dir`, `env` and, without `http`, a `healthcheck` command. Dependencies wait for readiness.
+- `PARCELA_DATA_DIR`, `PARCELA_ENVIRONMENT_NAME` and `PARCELA_PRIMARY_DIR`.
+- Top-level `x-` keys are ignored, for YAML anchors.
+- `examples/rails-postgres`, and a tutorial app with a SQLite database per environment.
+
 ### Changed
 
-- `parcela logs` without a service prints every service and worker, each line prefixed with its name.
+- One format: `version` and `project` are required, and every service is a mapping under `services` with a `command`. HTTP services declare `http: {healthcheck, subdomain}`; the one without `subdomain` gets the environment's URL.
+- Tasks take a shell `command` instead of `argv`. Arguments after `--` are appended.
+- `parcela logs` without a service prints every service, worker and hook, each line prefixed with its name.
+
+### Removed
+
+- The top-level short form (`web: bin/dev`), `workers`, `default_service`, `environment` (now `env`), `inherit_environment`, `shutdown_timeout_seconds` and the `process_compose` pass-through.
 
 ### Fixed
 

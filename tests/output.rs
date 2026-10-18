@@ -11,7 +11,8 @@ use tempfile::TempDir;
 
 mod common;
 
-const MANIFEST: &str = "version: 1\nproject: {id: output-test, name: demo}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {version: '0.5', processes: {web: {command: echo unused}}}\n";
+const MANIFEST: &str =
+    "version: 1\nproject: demo\nservices: {web: {command: echo unused, http: {healthcheck: /}}}\n";
 
 fn command(path: &Path, state: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_parcela"));
@@ -81,7 +82,7 @@ fn a_terminal_gets_aligned_text() {
     assert_eq!(
         terminal(&path, &state, &["ls"]),
         format!(
-            "PROJECT      NAME     STATE        URL                          PATH\noutput-test  primary  not started  https://demo.localhost:1443  {}\n",
+            "PROJECT  NAME     STATE        URL                          PATH\ndemo     primary  not started  https://demo.localhost:1443  {}\n",
             path.display()
         )
     );
@@ -94,7 +95,7 @@ fn a_terminal_gets_aligned_text() {
     assert_eq!(
         terminal(&path, &state, &["status", "--all"]),
         format!(
-            "PROJECT      NAME     STATE    URL                          PATH\noutput-test  primary  stopped  https://demo.localhost:1443  {}\n",
+            "PROJECT  NAME     STATE    URL                          PATH\ndemo     primary  stopped  https://demo.localhost:1443  {}\n",
             path.display()
         )
     );
@@ -106,6 +107,6 @@ fn a_terminal_gets_aligned_text() {
     );
     assert_eq!(
         terminal(&path, &state, &["down"]),
-        "✓ output-test was already stopped\n"
+        "✓ demo was already stopped\n"
     );
 }

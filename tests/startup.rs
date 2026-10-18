@@ -6,7 +6,8 @@ use std::{
 };
 use tempfile::TempDir;
 
-const MANIFEST: &str = "version: 1\nproject: {id: startup-test, name: demo}\ndefault_service: web\nservices: {web: {}}\nprocess_compose: {version: '0.5', processes: {web: {command: echo unused}}}\n";
+const MANIFEST: &str =
+    "version: 1\nproject: demo\nservices: {web: {command: echo unused, http: {healthcheck: /}}}\n";
 
 fn source(path: &Path) {
     fs::create_dir_all(path).unwrap();

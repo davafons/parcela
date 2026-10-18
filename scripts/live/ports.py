@@ -4,16 +4,22 @@ import socket
 
 from live.common import FIXTURES, SERVICE, Live, wait_for
 
-MANIFEST = f'''project: ports-demo
-web: python3 {SERVICE} web
-workers:
-  db: python3 {FIXTURES / 'port_listener.py'} ${{PARCELA_PORT_DB}}
+MANIFEST = f'''version: 1
+project: ports-demo
+services:
+  web:
+    command: python3 {SERVICE} web
+    http:
+      healthcheck: /
+  db:
+    command: python3 {FIXTURES / 'port_listener.py'} $PARCELA_PORT_DB
 ports: [db, vite-hmr]
-environment:
+env:
   DATABASE_URL: postgres://127.0.0.1:${{PARCELA_PORT_DB}}/app
 tasks:
   ports:
-    argv: [python3, -c, 'import json,os;print(json.dumps({{k: v for k, v in os.environ.items() if k.startswith("PARCELA_PORT_")}}))']
+    command: >-
+      python3 -c 'import json,os;print(json.dumps({{k: v for k, v in os.environ.items() if k.startswith("PARCELA_PORT_")}}))'
     timeout_seconds: 10
 '''
 

@@ -60,6 +60,23 @@ pub fn environment(
             "PARCELA_RUNTIME_DIR".into(),
             runtime.to_str().context("non-UTF-8 runtime path")?.into(),
         ),
+        (
+            "PARCELA_DATA_DIR".into(),
+            runtime
+                .join("data")
+                .to_str()
+                .context("non-UTF-8 runtime path")?
+                .into(),
+        ),
+        ("PARCELA_ENVIRONMENT_NAME".into(), workspace.label.clone()),
+        (
+            "PARCELA_PRIMARY_DIR".into(),
+            crate::config::main_checkout(&workspace.source)
+                .unwrap_or_else(|| workspace.source.clone())
+                .to_str()
+                .context("non-UTF-8 checkout path")?
+                .into(),
+        ),
         ("PARCELA_URL".into(), url.into()),
         ("PARCELA_HOSTNAME".into(), workspace.hostname.clone()),
         ("HOST".into(), "127.0.0.1".into()),
@@ -93,33 +110,25 @@ pub fn environment(
         context.insert(crate::config::port_variable(name), port.to_string());
     }
     for (key, value) in &manifest.environment {
-        let mut resolved = value.clone();
-        for (name, value) in &context {
-            resolved = resolved.replace(&format!("${{{name}}}"), value);
-        }
-        ensure!(
-            !resolved.contains("${"),
-            "unresolved environment placeholder in {key}"
-        );
+        let resolved = resolve(key, value, &context)?;
         context.insert(key.clone(), resolved);
     }
     Ok(context)
 }
-pub(crate) fn command_env(
-    command: &mut Command,
-    manifest: &Manifest,
-    context: &BTreeMap<String, String>,
-) {
-    if !manifest.inherit_environment {
-        let path = std::env::var_os("PATH");
-        command.env_clear();
-        if let Some(path) = path {
-            command.env("PATH", path);
-        }
-        if let Some(home) = std::env::var_os("HOME") {
-            command.env("HOME", home);
-        }
+
+/// Insert `${NAME}` placeholders from `context`; an unknown placeholder is an error.
+fn resolve(key: &str, value: &str, context: &BTreeMap<String, String>) -> Result<String> {
+    let mut resolved = value.to_owned();
+    for (name, value) in context {
+        resolved = resolved.replace(&format!("${{{name}}}"), value);
     }
+    ensure!(
+        !resolved.contains("${"),
+        "unresolved placeholder in env {key}"
+    );
+    Ok(resolved)
+}
+pub(crate) fn command_env(command: &mut Command, context: &BTreeMap<String, String>) {
     // Avoid loading another supervisor's or another environment's controls.
     for (key, _) in std::env::vars_os() {
         if key.to_string_lossy().starts_with("PC_") || key.to_string_lossy().starts_with("PARCELA_")
@@ -180,7 +189,7 @@ pub fn run(
     let launched = (|| -> Result<_> {
         let mut workspace = registry.current(&workspace.source, manifest)?;
         workspace.generation = session.generation;
-        let env = session_environment(manifest, &workspace, &path, &session)?;
+        let mut env = session_environment(manifest, &workspace, &path, &session)?;
         let sockets = crate::sockets::environment(&path)?;
         private::write_json(
             &path.join("context.json"),
@@ -195,9 +204,23 @@ pub fn run(
             }
             Launch::Compose(binary) => {
                 // Re-checked at launch: scripts/live/recovery.py gates this call to crash before the graph starts.
-                let graph = compose_graph(manifest, binary)?;
+                check_process_compose(binary)?;
+                let hooks = path.join(HOOKS_DIR);
+                if hooks.exists() {
+                    std::fs::remove_dir_all(&hooks)?;
+                }
+                private::directory(&hooks)?;
+                let graph = compose_graph(
+                    manifest,
+                    &session.endpoints(&manifest.default_service),
+                    &env,
+                    &path,
+                    setup_pending(manifest, &path),
+                )?;
                 let graph_path = path.join("process-compose.json");
-                private::write_json(&graph_path, graph)?;
+                private::write_json(&graph_path, &graph)?;
+                // Each HTTP service gets its own PORT in the graph; others get none.
+                env.remove("PORT");
                 crate::sockets::prepare(&sockets.compose)?;
                 ensure!(
                     !sockets.compose.exists(),
@@ -228,7 +251,7 @@ pub fn run(
             }
         };
         command.current_dir(&workspace.source);
-        command_env(&mut command, manifest, &env);
+        command_env(&mut command, &env);
         let signals = Signals::new()?;
         let control = control::Server::bind(&path)?;
         // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
@@ -258,6 +281,7 @@ pub fn run(
             return Err(error);
         }
     };
+    let setup = matches!(launch, Launch::Compose(_)) && setup_pending(manifest, &path);
     let supervisor = Supervisor::retained(child, matches!(launch, Launch::Compose(_)))?;
     let native = match launch {
         Launch::Compose(binary) => Some(crate::owner::Native {
@@ -291,21 +315,126 @@ pub fn run(
         supervisor,
         control,
         signals,
+        setup,
     }
     .monitor(timeout)
 }
 
-/// The native graph, once `binary` reports a supported Process Compose version.
-fn compose_graph<'m>(manifest: &'m Manifest, binary: &str) -> Result<&'m serde_json::Value> {
+/// Whether this run still owes the environment its one-time `hooks.setup`.
+fn setup_pending(manifest: &Manifest, runtime: &std::path::Path) -> bool {
+    manifest.hooks.setup.is_some() && !runtime.join(SETUP_DONE).exists()
+}
+
+/// Written once `hooks.setup` has run and every service answered. `up --setup` removes it.
+pub const SETUP_DONE: &str = "setup-complete";
+/// Each hook writes `<name>.exit` here when it finishes.
+const HOOKS_DIR: &str = "hooks";
+
+/// The first hook that exited nonzero in this run, as an error to show.
+fn hook_failure(manifest: &Manifest, runtime: &std::path::Path) -> Option<String> {
+    manifest.hooks.iter().find_map(|(name, _)| {
+        let code =
+            std::fs::read_to_string(runtime.join(HOOKS_DIR).join(format!("{name}.exit"))).ok()?;
+        (code != "0")
+            .then(|| format!("hooks.{name} failed with exit code {code}; its output is above"))
+    })
+}
+
+fn check_process_compose(binary: &str) -> Result<()> {
     let backend = version(binary, "version")?;
     ensure!(
         backend.contains("v1."),
         "unsupported Process Compose version: {backend}"
     );
-    manifest
-        .process_compose
-        .as_ref()
-        .context("up requires process_compose native graph")
+    Ok(())
+}
+
+/// The Process Compose graph for one run. Commands reach the shell unexpanded, so `$PORT` is
+/// each HTTP service's own variable. Hooks run after the services they depend on, and every
+/// other service waits for the last hook.
+pub fn compose_graph(
+    manifest: &Manifest,
+    endpoints: &[Endpoint],
+    env: &BTreeMap<String, String>,
+    runtime: &std::path::Path,
+    setup: bool,
+) -> Result<serde_json::Value> {
+    let condition = |name: &str| {
+        let ready =
+            manifest.services.contains_key(name) || manifest.processes[name].healthcheck.is_some();
+        json!({"condition": if ready { "process_healthy" } else { "process_started" }})
+    };
+    let mut processes = serde_json::Map::new();
+    let mut last_hook = None;
+    for (name, hook) in manifest.hooks.iter() {
+        if name == "setup" && !setup {
+            continue;
+        }
+        let mut depends_on: serde_json::Map<_, _> = hook
+            .depends_on
+            .iter()
+            .map(|dependency| (dependency.clone(), condition(dependency)))
+            .collect();
+        if let Some(previous) = last_hook.replace(name) {
+            depends_on.insert(
+                previous.into(),
+                json!({"condition": "process_completed_successfully"}),
+            );
+        }
+        // The exit code outlives Process Compose, which exits once nothing is left to run.
+        let exit = runtime.join(HOOKS_DIR).join(format!("{name}.exit"));
+        let exit = exit
+            .to_str()
+            .context("non-UTF-8 runtime path")?
+            .replace('\'', "'\\''");
+        let command = format!(
+            "(\n{}\n)\nstatus=$?\nprintf %s \"$status\" > '{exit}'\nexit \"$status\"",
+            hook.command
+        );
+        processes.insert(
+            name.into(),
+            json!({"command": command, "availability": {"restart": "no"}, "depends_on": depends_on}),
+        );
+    }
+    let before_hooks = manifest.hook_dependencies();
+    for (name, process) in &manifest.processes {
+        let mut environment = Vec::new();
+        let mut entry = serde_json::Map::new();
+        if let Some(endpoint) = endpoints.iter().find(|endpoint| &endpoint.service == name) {
+            environment.push(format!("PORT={}", endpoint.backend_port));
+            entry.insert(
+                "readiness_probe".into(),
+                json!({"http_get": {"host": "127.0.0.1", "scheme": "http", "port": endpoint.backend_port, "path": manifest.services[name].readiness_path}, "period_seconds": 1, "failure_threshold": 100000}),
+            );
+        } else if let Some(healthcheck) = &process.healthcheck {
+            entry.insert(
+                "readiness_probe".into(),
+                json!({"exec": {"command": healthcheck}, "period_seconds": 1, "timeout_seconds": 10, "failure_threshold": 100000}),
+            );
+        }
+        for (key, value) in &process.env {
+            environment.push(format!("{key}={}", resolve(key, value, env)?));
+        }
+        let mut depends_on: serde_json::Map<_, _> = process
+            .depends_on
+            .iter()
+            .map(|dependency| (dependency.clone(), condition(dependency)))
+            .collect();
+        if let Some(hook) = last_hook.filter(|_| !before_hooks.contains(name.as_str())) {
+            depends_on.insert(
+                hook.into(),
+                json!({"condition": "process_completed_successfully"}),
+            );
+        }
+        entry.insert("command".into(), json!(process.command));
+        entry.insert("environment".into(), json!(environment));
+        entry.insert("depends_on".into(), json!(depends_on));
+        if let Some(dir) = &process.working_dir {
+            entry.insert("working_dir".into(), json!(dir));
+        }
+        processes.insert(name.clone(), serde_json::Value::Object(entry));
+    }
+    Ok(json!({"version": "0.5", "disable_env_expansion": true, "processes": processes}))
 }
 
 pub fn resolve_binary(binary: &str, source: &std::path::Path) -> Result<PathBuf> {
@@ -410,7 +539,7 @@ pub fn preflight(
         .iter()
         .find(|endpoint| endpoint.service == manifest.default_service)
         .context("default endpoint missing")?;
-    let env = environment(
+    let mut env = environment(
         manifest,
         &resolved,
         &path,
@@ -421,24 +550,22 @@ pub fn preflight(
     )?;
     if let Launch::Compose(binary) = launch {
         let binary = resolve_binary(binary, &workspace.source)?;
-        let graph = compose_graph(manifest, binary.to_str().context("non-UTF-8 backend path")?)?;
-        manifest.check_startable()?;
-        ensure!(
-            graph
-                .get("processes")
-                .and_then(|v| v.as_object())
-                .is_some_and(|processes| processes
-                    .values()
-                    .all(|p| p.get("is_daemon") != Some(&json!(true)))),
-            "native graph must contain supervised, non-daemon processes"
-        );
+        check_process_compose(binary.to_str().context("non-UTF-8 backend path")?)?;
+        let graph = compose_graph(
+            manifest,
+            &endpoints,
+            &env,
+            &path,
+            setup_pending(manifest, &path),
+        )?;
+        env.remove("PORT");
         crate::sockets::environment(&path)?;
         use std::os::unix::fs::PermissionsExt;
         let scratch = tempfile::Builder::new()
             .prefix("pc-preflight-")
             .permissions(std::fs::Permissions::from_mode(0o700))
             .tempdir()?;
-        private::write_json(&scratch.path().join("graph.json"), graph)?;
+        private::write_json(&scratch.path().join("graph.json"), &graph)?;
         let mut command = Command::new(&binary);
         command
             .arg("--config")
@@ -453,7 +580,7 @@ pub fn preflight(
             .current_dir(&workspace.source)
             .arg("--log-file")
             .arg(scratch.path().join("native.log"));
-        command_env(&mut command, manifest, &env);
+        command_env(&mut command, &env);
         let output = crate::process::capture(&mut command, Duration::from_secs(5), 512000)?;
         ensure!(
             output.status.success(),
@@ -559,6 +686,8 @@ struct Owner<'a> {
     supervisor: Supervisor,
     control: control::Server,
     signals: Signals,
+    /// Whether this generation runs `hooks.setup`, so readiness marks it done.
+    setup: bool,
 }
 impl Owner<'_> {
     /// Supervise until a stop request, a signal, the supervisor's exit or a failure, then stop
@@ -586,11 +715,15 @@ impl Owner<'_> {
         let mut ready = false;
         let mut listener = BTreeMap::new();
         let mut published = None;
+        let mut hooks_checked = Instant::now();
         loop {
             if *requested_stop {
                 return Ok(0);
             }
             if let Some(code) = self.supervisor.poll()? {
+                if let Some(failure) = hook_failure(&self.record.manifest, self.path) {
+                    anyhow::bail!(failure);
+                }
                 ensure!(
                     self.record.native.is_none() || code == 0,
                     "native supervisor exited unexpectedly ({code}); graph quiescence is unknown"
@@ -667,6 +800,9 @@ impl Owner<'_> {
                         &self.path.join("last-successful.json"),
                         &self.record.manifest,
                     )?;
+                    if self.setup {
+                        private::write_bytes(&self.path.join(SETUP_DONE), b"")?;
+                    }
                 }
             }
             if let Ok(router) = router::current(self.registry.state_path())
@@ -687,12 +823,61 @@ impl Owner<'_> {
                     );
                 }
             }
+            if !ready
+                && self.record.manifest.hooks.iter().next().is_some()
+                && hooks_checked.elapsed() >= Duration::from_secs(1)
+            {
+                hooks_checked = Instant::now();
+                if self.hooks_running()? {
+                    deadline = Instant::now() + Duration::from_secs(timeout);
+                }
+            }
             ensure!(
                 ready || Instant::now() < deadline,
                 "application readiness timed out; see child diagnostics"
             );
             thread::sleep(Duration::from_millis(200));
         }
+    }
+
+    /// Whether a hook is still running. A hook that failed ends the run, since nothing after it starts.
+    fn hooks_running(&self) -> Result<bool> {
+        if let Some(failure) = hook_failure(&self.record.manifest, self.path) {
+            anyhow::bail!(failure);
+        }
+        let native = self
+            .record
+            .native
+            .as_ref()
+            .context("hooks require Process Compose")?;
+        let env = session_environment(
+            &self.record.manifest,
+            self.workspace,
+            self.path,
+            &self.record.session,
+        )?;
+        let list = compose_read(&native.binary, self.path, &Action::Services, &env)?;
+        let hooks: Vec<_> = list["services"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|process| {
+                let name = process["name"].as_str().unwrap_or_default();
+                self.record
+                    .manifest
+                    .hooks
+                    .iter()
+                    .any(|(hook, _)| hook == name)
+            })
+            .collect();
+        if let Some(process) = hooks.iter().find(|process| process["status"] == "Skipped") {
+            anyhow::bail!(
+                "hooks.{} did not run because a service it depends on stopped",
+                process["name"].as_str().unwrap_or_default()
+            );
+        }
+        let running = hooks.iter().any(|process| process["status"] != "Completed");
+        Ok(running)
     }
 
     /// One control request while the generation runs.
@@ -722,13 +907,7 @@ impl Owner<'_> {
                     self.path,
                     &self.record.session,
                 )?;
-                compose_read(
-                    &native.binary,
-                    self.path,
-                    action,
-                    &self.record.manifest,
-                    &env,
-                )
+                compose_read(&native.binary, self.path, action, &env)
             }
         }
     }
@@ -901,6 +1080,7 @@ pub fn recover(
         supervisor,
         control,
         signals: Signals::new()?,
+        setup: false,
     }
     .monitor(60)?;
     Ok(
@@ -980,12 +1160,15 @@ pub fn task(
             &BTreeMap::new(),
         )?
     };
-    let mut command = Command::new(&task.argv[0]);
+    // Extra arguments follow the command, like `parcela task test -- spec/models`.
+    let mut command = Command::new("/bin/sh");
     command
-        .args(&task.argv[1..])
+        .arg("-c")
+        .arg(format!("{} \"$@\"", task.command))
+        .arg(name)
         .args(args)
         .current_dir(&workspace.source);
-    command_env(&mut command, manifest, &env);
+    command_env(&mut command, &env);
     let signals = Signals::new()?;
     let mut child = OwnedChild::spawn(&mut command)?;
     let deadline = task
@@ -1095,7 +1278,6 @@ fn compose_read(
     binary: &str,
     runtime: &std::path::Path,
     action: &Action,
-    manifest: &Manifest,
     env: &BTreeMap<String, String>,
 ) -> Result<serde_json::Value> {
     let run = |args: &[&str]| -> Result<Vec<u8>> {
@@ -1109,7 +1291,7 @@ fn compose_read(
             .arg(runtime.join("log/control.log"))
             .arg("--read-only")
             .args(args);
-        command_env(&mut command, manifest, env);
+        command_env(&mut command, env);
         let output = crate::process::capture(&mut command, Duration::from_secs(3), 512000)?;
         ensure!(
             output.status.success(),
@@ -1129,34 +1311,54 @@ fn compose_read(
                 *tail > 0 && *tail <= 10000,
                 "log tail must be between 1 and 10000"
             );
-            let processes = manifest
-                .process_compose
-                .as_ref()
-                .and_then(|graph| graph.get("processes"))
-                .and_then(|processes| processes.as_object())
-                .context("environment has no processes")?;
+            // Read from the running graph, which holds a hook only on the runs that execute it.
+            let listed: serde_json::Value =
+                serde_json::from_slice(&run(&["process", "list", "--output", "json"])?)?;
+            let mut running: Vec<String> = listed
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|process| process["name"].as_str().map(str::to_owned))
+                .collect();
+            running.sort();
             let names: Vec<&str> = match service {
                 Some(service) => {
-                    ensure!(processes.contains_key(service), "unknown service {service}");
+                    ensure!(
+                        running.contains(service),
+                        "unknown service {service}; this run has {}",
+                        running.join(", ")
+                    );
                     vec![service]
                 }
-                None => processes.keys().map(String::as_str).collect(),
+                None => running.iter().map(String::as_str).collect(),
             };
             let width = names.iter().map(|name| name.len()).max().unwrap_or(0);
+            let tail = tail.to_string();
+            // Each call takes about a second, so they run side by side within the control timeout.
+            let outputs = std::thread::scope(|scope| {
+                let calls: Vec<_> = names
+                    .iter()
+                    .map(|name| {
+                        let run = &run;
+                        let tail = &tail;
+                        scope.spawn(move || -> Result<String> {
+                            ensure!(
+                                !name.starts_with('-') && !name.contains([',', '\n', '\r', '\0']),
+                                "invalid service name"
+                            );
+                            Ok(String::from_utf8(run(&[
+                                "process", "logs", "--tail", tail, "--", name,
+                            ])?)?)
+                        })
+                    })
+                    .collect();
+                calls
+                    .into_iter()
+                    .map(|call| call.join().expect("log reader panicked"))
+                    .collect::<Result<Vec<_>>>()
+            })?;
             let mut logs = String::new();
-            for name in &names {
-                ensure!(
-                    !name.starts_with('-') && !name.contains([',', '\n', '\r', '\0']),
-                    "invalid service name"
-                );
-                let output = String::from_utf8(run(&[
-                    "process",
-                    "logs",
-                    "--tail",
-                    &tail.to_string(),
-                    "--",
-                    name,
-                ])?)?;
+            for (name, output) in names.iter().zip(outputs) {
                 if service.is_some() {
                     logs.push_str(&output);
                     continue;

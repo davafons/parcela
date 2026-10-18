@@ -91,7 +91,11 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
     );
     assert!(!state.exists());
 
-    fs::write(path.join("parcela.yaml"), "web: bin/dev\n").unwrap();
+    fs::write(
+        path.join("parcela.yaml"),
+        "version: 1\nproject: app\nservices: {web: {command: bin/dev, http: {healthcheck: /}}}\n",
+    )
+    .unwrap();
     fs::create_dir(&state).unwrap();
     fs::set_permissions(&state, fs::Permissions::from_mode(0o755)).unwrap();
     let (_, report) = doctor(&path, &state, port);

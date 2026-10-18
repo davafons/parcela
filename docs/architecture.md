@@ -6,12 +6,12 @@ Parcela is a Rust CLI that coordinates two maintained programs. It does not impl
 |---|---|
 | Parcela (Rust) | Configuration, environment identity, the registry, port and hostname reservations, lifecycle |
 | Caddy | HTTPS, certificates and routing, in a dedicated instance with its own config, storage and admin socket |
-| Process Compose | The process graph: commands, workers, dependencies, logs and shutdown |
+| Process Compose | The process graph: commands, start order, readiness, logs and shutdown |
 | The project | Commands, data, preparation and anything with external effects |
 
 ## Modules
 
-- `config` parses `parcela.yaml`, expands the short form and keeps `process_compose` data as-is.
+- `config` parses and validates `parcela.yaml` (format version 1) into the runtime `Manifest`. Unknown keys are errors, except top-level `x-` keys.
 - `registry` is the SQLite store of projects, environments, sessions and reservations.
 - `startup` and `runtime` register a checkout, launch Process Compose and wait for readiness. `ports` leases the backend ports.
 - `owner`, `control` and `lifecycle` run the per-environment owner process and the stop, restart and recover requests sent to it.
@@ -27,7 +27,7 @@ Parcela is a Rust CLI that coordinates two maintained programs. It does not impl
 2. Register the checkout on first use. The main checkout gets the project URL. A linked jj workspace or Git worktree gets its own name.
 3. Reserve every service hostname, then lease a loopback port from 20000–29999 for each service and named port. Leases are one transaction.
 4. Start the proxy if it is not running.
-5. Write the Process Compose graph with the resolved environment and start an owner process that holds `owner.lock` and serves `ctl.sock`.
+5. Generate the Process Compose graph from the manifest: each HTTP service gets its port and an HTTP readiness probe, hooks become one-shot processes after their dependencies, and every other service waits for the last hook. `setup` is in the graph only until it has succeeded once. Then start an owner process that holds `owner.lock` and serves `ctl.sock`.
 6. Wait until every HTTP service listens on its port, the listener belongs to the graph, and the readiness path answers 2xx.
 7. Publish Caddy routes for the whole group. With `--detach`, return once the owner reports ready.
 

@@ -12,40 +12,40 @@ import subprocess
 from live.common import BINARY, SERVICE, Live, wait_for
 
 MANIFEST = f'''version: 1
-project: {{id: service-sets, name: sets}}
-default_service: frontend
+project: sets
 services:
-  frontend: {{readiness_path: /ready}}
-  backend: {{subdomain: api, readiness_path: /ready}}
+  frontend:
+    command: python3 {SERVICE} frontend
+    working_dir: frontend
+    http:
+      healthcheck: /ready
+  backend:
+    command: python3 {SERVICE} backend
+    working_dir: backend
+    http:
+      subdomain: api
+      healthcheck: /ready
+  worker:
+    command: python3 -c 'import time; print("service-set-worker", flush=True); time.sleep(600)'
 tasks:
   probe:
-    argv: [python3, -c, 'import json,sys;print(json.dumps(sys.argv[1:]))']
+    command: python3 -c 'import json,sys;print(json.dumps(sys.argv[1:]))'
     timeout_seconds: 5
-environment:
+env:
   API_ORIGIN: '${{PARCELA_SERVICE_BACKEND_URL}}'
-process_compose:
-  version: '0.5'
-  processes:
-    frontend:
-      working_dir: frontend
-      command: python3 {SERVICE} frontend
-    backend:
-      working_dir: backend
-      command: python3 {SERVICE} backend
-      environment:
-        - PORT=${{PARCELA_SERVICE_BACKEND_PORT}}
-    worker:
-      command: python3 -c 'import time; print("service-set-worker", flush=True); time.sleep(600)'
 '''
-LEGACY = f'''version: 1
-project: {{id: service-sets, name: sets}}
-default_service: web
-services: {{web: {{readiness_path: /ready}}}}
-process_compose:
-  version: '0.5'
-  processes:
-    server:
-      command: python3 {SERVICE}
+HOOKS = f'''version: 1
+project: sets
+services:
+  web:
+    command: python3 {SERVICE}
+    http:
+      healthcheck: /ready
+hooks:
+  setup:
+    command: printf x >> "$PARCELA_DATA_DIR/setup-runs" && echo seeded
+  prestart:
+    command: echo "migrated $(wc -c < "$PARCELA_DATA_DIR/setup-runs" | tr -d ' ')"
 '''
 BY_UUID = {'status', 'url', 'logs', 'restart', 'recover', 'down', 'task'}
 
@@ -196,11 +196,21 @@ def run(caddy, compose, **_):
         remember(final)
         assert final['status'] == 'stopped', final
         cases.append('partial-startup-failure-never-publishes-and-stops-group')
-        legacy = live.checkout('legacy', LEGACY)
-        workspaces[legacy] = live.register(legacy, 'preview', 'legacy')
-        single = json.loads(cli(legacy, 'up', '--detach', '--process-compose', compose).stdout)
-        live.ports.append(single['session']['backend_port'])
-        assert request('legacy-sets.localhost')['id'] == workspaces[legacy]['id']
-        assert json.loads(cli(legacy, 'status').stdout)['processes'][0]['name'] == 'server'
-        cases.append('legacy-single-service-allows-a-different-native-process-name')
+        hooks = live.checkout('hooks', HOOKS)
+        workspaces[hooks] = live.register(hooks, 'preview', 'hooks')
+        first = json.loads(cli(hooks, 'up', '--detach', '--process-compose', compose).stdout)
+        live.ports.append(first['session']['backend_port'])
+        runtime = live.state / 'environments' / workspaces[hooks]['id']
+        assert (runtime / 'data' / 'setup-runs').read_text() == 'x', 'setup ran once before the service'
+        assert (runtime / 'setup-complete').exists()
+        logs = cli(hooks, 'logs').stdout
+        assert 'setup    | seeded' in logs and 'prestart | migrated 1' in logs, logs
+        cli(hooks, 'restart', '--detach', '--process-compose', compose)
+        assert (runtime / 'data' / 'setup-runs').read_text() == 'x', 'restart skips setup'
+        assert cli(hooks, 'logs', 'prestart').stdout.strip().endswith('migrated 1')
+        assert cli(hooks, 'down').returncode == 0
+        (hooks / 'parcela.yaml').write_text(HOOKS.replace('echo seeded', 'echo broken; exit 7'))
+        failed = cli(hooks, 'up', '--detach', '--setup', '--process-compose', compose, check=False)
+        assert failed.returncode != 0 and 'hooks.setup failed with exit code 7; its output is above' in failed.stderr, failed.stderr
+        cases.append('setup-runs-once-prestart-every-up-and-a-failed-setup-stops-up')
         return {'https_port': live.https, 'cases': cases}

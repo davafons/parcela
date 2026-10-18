@@ -25,7 +25,7 @@ parcela --path "$CHECKOUT" status
 
 `ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. Run inside a project, it also returns `.unregistered`: that project's jj workspaces and Git worktrees that were never started, with `state` `not started` and the `url` `up` would give them. Listing them registers nothing. `status` requires a registered configured checkout and returns its `.workspace` identity, `.url` and live state. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Its `config` check reports the same validation error `up` would print. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
 
-If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a one-line short-form manifest with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
+If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a minimal version 1 `parcela.yaml` with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
 
 For a registered target, read its UUID from the response. Prefer that exact ID when issuing later operations from a different directory:
 
@@ -64,7 +64,7 @@ parcela --path "$CHECKOUT" url --service backend
 
 Use a declared service name instead of assuming every project has `backend`. `up --name review --detach` selects a preview name on first startup. `up` starts the whole native graph. `run -- ARGV` is a literal foreground command for a single HTTP service, not a substitute for a service-set graph. `--backend-port` selects the default service only. Do not assume a fixed backend port.
 
-Each run has one generation and nonce with a recorded endpoint set. All declared HTTP endpoints must have graph-owned loopback listeners and pass initial readiness before the group routes open. Non-HTTP workers belong in the native graph and need no route. Per-service working directories and PORT overrides belong in native Process Compose entries.
+Each run has one generation and nonce with a recorded endpoint set. All declared HTTP endpoints must have graph-owned loopback listeners and pass initial readiness before the group routes open. Services without `http` get no route. `working_dir`, `env` and `depends_on` are per-service fields in `parcela.yaml`.
 
 Inspect `status.state`, `status.live.endpoints` and `status.processes`, where each Process Compose service and worker has a `name`, lowercase `state` and `pid`. `live_health_verified` means the owner answered, not that every HTTP probe succeeded. Recorded `ready`, planned URLs and native `Running` states are not interchangeable with fresh HTTP health. Check the intended application path over its returned HTTPS origin when the task needs application proof. Never disable TLS verification to make a check pass.
 
@@ -105,7 +105,9 @@ Restart preflights the replacement and starts the whole graph in a new generatio
 
 `rm` forgets a stopped environment's registration and releases its hostnames; `rm --prune` does so for every stopped registration whose checkout is gone. Both keep source and runtime data, refuse running environments, and are only for explicit cleanup requests.
 
-Tasks are optional; ordinary project commands remain usable directly. Before `task NAME -- ARGS`, read that task's argv, timeout and effects in `parcela.yaml`. Run only the requested task with literal arguments. Startup does not imply permission for setup, migrations, resets, seeds, imports or code generation. Do not invent framework preparation commands.
+Tasks are optional; ordinary project commands remain usable directly. Before `task NAME -- ARGS`, read that task's command, timeout and effects in `parcela.yaml`. Run only the requested task with literal arguments.
+
+`up` runs the project's own `hooks.setup` on an environment's first start and `hooks.prestart` on every start, before the other services. Read both in `parcela.yaml` before the first `up` and tell the user what they will do, such as installing packages, creating a database or migrating. `up --setup` reruns setup; use it only when asked. A failed hook stops `up` and prints its output. Do not run preparation commands that `parcela.yaml` does not declare.
 
 The default service uses the environment base hostname. Other HTTP services use a flat prefix from `subdomain` or the service name. For a preview labeled `review` of `my-app`, typical names are `review-my-app.localhost` and `api-review-my-app.localhost`. Read actual reserved or recorded URLs instead of constructing them. Hostname reservations remain while stopped; changing service reservations requires a stopped environment and a new `up` with the existing identity.
 

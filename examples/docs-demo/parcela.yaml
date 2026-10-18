@@ -1,10 +1,26 @@
-web: python3 -m http.server $PORT --bind 127.0.0.1
-api: python3 api.py
-workers:
-  ticker: python3 worker.py
-ports: [db]
-environment:
-  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/hello
+version: 1
+project: hello
+
+env:
+  DATABASE_PATH: ${PARCELA_DATA_DIR}/hello.sqlite3
+
+services:
+  web:
+    command: python3 -m http.server $PORT --bind 127.0.0.1
+    http:
+      healthcheck: /
+  api:
+    command: python3 api.py
+    http:
+      subdomain: api
+      healthcheck: /
+  ticker:
+    command: python3 worker.py
+
+hooks:
+  setup:
+    command: python3 db.py setup
+
 tasks:
-  db-url:
-    argv: [sh, -c, 'echo "$DATABASE_URL"']
+  messages:
+    command: python3 db.py list

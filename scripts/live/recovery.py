@@ -77,11 +77,8 @@ class Fixture(Live):
         path = self.root / label
         path.mkdir()
         (path / 'service.py').write_text(SERVICE)
-        manifest = {'version': 1, 'project': {'id': 'reliability-review', 'name': 'review'}, 'default_service': 'web',
-                    'services': {'web': {'readiness_path': '/ready'}}, 'inherit_environment': False,
-                    'environment': {'STOP_DELAY': str(delay)},
-                    'process_compose': {'version': '0.5', 'processes': {'web': {'entrypoint': ['python3', str(path / 'service.py')],
-                       'availability': {'restart': 'no'}, 'shutdown': {'signal': 15, 'timeout_seconds': 15}}}}}
+        manifest = {'version': 1, 'project': 'review', 'env': {'STOP_DELAY': str(delay)},
+                    'services': {'web': {'command': f"python3 '{path / 'service.py'}'", 'http': {'healthcheck': '/ready'}}}}
         (path / 'parcela.yaml').write_text(json.dumps(manifest))
         identity = self.register(path, 'preview', label)['id']
         app = {'path': path, 'id': identity, 'host': f'{label}-review.localhost', 'runtime': self.state / 'environments' / identity,
@@ -95,7 +92,7 @@ class Fixture(Live):
         wait_for(lambda: self.probe(app)[0] == 200)
         return owner
     def start_pending(self, app):
-        app['manifest']['environment']['READINESS_GATED'] = 'yes'
+        app['manifest']['env']['READINESS_GATED'] = 'yes'
         (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
         owner = self.spawn(app['path'], 'up', '--process-compose', self.compose, '--backend-port', str(app['port']), '--readiness-timeout', '30')
         app['owner'] = owner
@@ -510,8 +507,6 @@ os.execv(''' + repr(f.compose) + ''', [''' + repr(f.compose) + ''', *sys.argv[1:
 
 def recover_racing_stop(f):
     app = f.app('mixed')
-    app['manifest']['shutdown_timeout_seconds'] = 4
-    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
     wrapper = f.gated_compose()
     f.start_proxy()
     owner = f.start(app, wrapper)

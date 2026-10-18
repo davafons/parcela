@@ -200,6 +200,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             backend_port,
             readiness_timeout,
             detach,
+            setup,
             launch_file,
         } => start(
             &state,
@@ -211,6 +212,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 backend_port,
                 readiness_timeout,
                 detach,
+                setup,
                 launch_file,
             },
             out,
@@ -220,6 +222,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             backend_port,
             readiness_timeout,
             detach,
+            setup,
             launch_file,
         } => start(
             &state,
@@ -231,6 +234,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 backend_port,
                 readiness_timeout,
                 detach,
+                setup,
                 launch_file,
             },
             out,
@@ -342,6 +346,7 @@ struct Start {
     backend_port: Option<u16>,
     readiness_timeout: u64,
     detach: bool,
+    setup: bool,
     /// Set only for the detached owner `up --detach` launches, pinning its source and manifest.
     launch_file: Option<PathBuf>,
 }
@@ -362,7 +367,6 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     } else {
         project(path)?
     };
-    manifest.check_startable()?;
     let (mut registry, workspace) = if start.restart || snapshot.is_some() {
         ensure!(
             start.request.name.is_none() && !start.request.primary,
@@ -413,6 +417,17 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     } else {
         None
     };
+    if start.setup {
+        let marker = registry
+            .runtime_path(&workspace)
+            .join(parcela::runtime::SETUP_DONE);
+        match std::fs::remove_file(&marker) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error).context("forget the finished setup");
+            }
+            _ => {}
+        }
+    }
     if start.restart || start.detach {
         parcela::runtime::preflight(
             &registry,

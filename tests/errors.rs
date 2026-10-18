@@ -40,7 +40,7 @@ fn registration_conflicts_name_the_holder_and_the_fix() {
     let t = TempDir::new().unwrap();
     let root = t.path().canonicalize().unwrap();
     let state = root.join("state");
-    let manifest = "project: demo\nweb: bin/web\napi: bin/api\n";
+    let manifest = "version: 1\nproject: demo\nservices:\n  web: {command: bin/web, http: {healthcheck: /}}\n  api: {command: bin/api, http: {subdomain: api, healthcheck: /}}\n";
     let first = checkout(&root, "first", manifest);
     let second = checkout(&root, "second", manifest);
     let third = checkout(&root, "third", manifest);
@@ -93,7 +93,11 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
         common::on_terminal(bare).1,
         "No parcela.yaml here. Create one with parcela init, then run parcela up.\nSee parcela --help for every command.\n"
     );
-    let app = checkout(&root, "app", "web: bin/web\n");
+    let app = checkout(
+        &root,
+        "app",
+        "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
+    );
     let bare = cli(&app, &state, &[]);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&bare.stdout).unwrap(),

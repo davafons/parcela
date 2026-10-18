@@ -8,7 +8,7 @@ import subprocess
 from live.common import ROOT, Live, wait_for
 
 SOURCE = ROOT / 'examples/docs-demo'
-INPUTS = ['parcela.yaml', 'index.html', 'api.py', 'worker.py']
+INPUTS = ['parcela.yaml', 'index.html', 'api.py', 'db.py', 'worker.py']
 
 
 def digests():
@@ -38,8 +38,8 @@ def run(caddy, compose, **_):
         git('commit', '-qm', 'hello app')
         git('worktree', 'add', '-q', str(signup))
         proxy = live.start_proxy()
-        sessions, database_urls = [], []
-        for path, base in [(primary, 'hello.localhost'), (signup, 'signup-hello.localhost')]:
+        sessions = []
+        for path, base, name in [(primary, 'hello.localhost', 'primary'), (signup, 'signup-hello.localhost', 'signup')]:
             sessions.append(remember(live.json(path, 'up', '--detach', '--process-compose', compose)))
             status = live.json(path, 'status')
             assert status['state'] == 'ready' and status['live_health_verified']
@@ -47,18 +47,16 @@ def run(caddy, compose, **_):
             assert live.cli(path, 'url').stdout.strip() == f'https://{base}:{live.https}'
             assert live.cli(path, 'url', '--service', 'api').stdout.strip() == f'https://api-{base}:{live.https}'
             assert b'Hello from Parcela' in live.request(base, path='/')
-            assert json.loads(live.request(f'api-{base}', path='/')) == {'message': 'hello from the API', 'url': f'https://api-{base}:{live.https}'}
-            assert {entry['name']: entry['state'] for entry in status['processes']} == {'web': 'running', 'api': 'running', 'ticker': 'running'}
+            assert json.loads(live.request(f'api-{base}', path='/')) == {'message': f'hello from {name}', 'url': f'https://api-{base}:{live.https}'}
+            assert {entry['name']: entry['state'] for entry in status['processes']} == {'web': 'running', 'api': 'running', 'ticker': 'running', 'setup': 'completed'}
             wait_for(lambda: 'tick 1' in live.cli(path, 'logs', 'ticker', '--tail', '10').stdout, [proxy])
-            database_url = live.cli(path, 'task', 'db-url').stdout.strip()
-            assert database_url.startswith('postgres://127.0.0.1:') and database_url.endswith('/hello')
-            database_urls.append(database_url)
-        assert len(set(database_urls)) == 2, database_urls
+            assert live.cli(path, 'task', 'messages').stdout == f'hello from {name}\n'
+            assert 'setup  | database ready' in live.cli(path, 'logs', '--tail', '5').stdout
         listed = live.json(primary, 'ls')['workspaces']
         assert {Path(entry['workspace']['source']).resolve() for entry in listed} >= {primary, signup}
         restarted = remember(live.json(primary, 'restart', '--detach', '--process-compose', compose))
         assert restarted['generation'] == sessions[0]['generation'] + 1 and restarted['token'] != sessions[0]['token']
-        assert live.cli(primary, 'task', 'db-url').stdout.strip() == database_urls[0]
+        assert live.cli(primary, 'task', 'messages').stdout == 'hello from primary\n', 'restart keeps the database and skips setup'
         live.cli(primary, 'down')
         assert live.json(primary, 'status')['state'] == 'stopped'
         live.request('hello.localhost', 503, path='/')
@@ -72,6 +70,6 @@ def run(caddy, compose, **_):
         assert {name: hashlib.sha256((primary / name).read_bytes()).hexdigest() for name in INPUTS} == before
     assert digests() == before, 'examples/docs-demo is unchanged'
     return {'verified': ['primary and Git worktree environments', 'named HTTPS web and API per checkout',
-                         'per-service URL variables', 'worker logs', 'distinct named ports per checkout',
-                         'generation restart keeps the named port', 'independent stop and route withdrawal',
+                         'per-service URL variables', 'worker logs', 'a SQLite database per checkout from hooks.setup',
+                         'restart keeps the data and skips setup', 'independent stop and route withdrawal',
                          'down --all, worktree removal and rm --prune', 'source retention']}

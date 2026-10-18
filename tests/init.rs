@@ -5,7 +5,13 @@ use std::{
 };
 use tempfile::TempDir;
 
-const HEADER: &str = "# Parcela runs each service at its own HTTPS URL. Reference: https://github.com/davafons/parcela/blob/main/docs/configuration.md\n# Services must listen on 127.0.0.1:$PORT.\n";
+/// The file `init` writes for `project`, with an optional comment above the command.
+fn expected(project: &str, comment: Option<&str>, command: &str) -> String {
+    let comment = comment.map_or(String::new(), |comment| format!("    # {comment}\n"));
+    format!(
+        "# Reference: https://parcela.davafons.com/docs/configuration/\nversion: 1\nproject: {project}\n\nservices:\n  web:\n{comment}    command: {command}\n    http:\n      healthcheck: /\n\n# Commands that prepare a new environment, such as installing packages or creating a database:\n# hooks:\n#   setup:\n#     command: bin/setup\n"
+    )
+}
 
 fn cli(path: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_parcela"))
@@ -64,8 +70,10 @@ fn init_writes_a_valid_one_line_manifest_named_after_the_directory() {
     );
     assert_eq!(
         fs::read_to_string(path.join("parcela.yaml")).unwrap(),
-        format!(
-            "{HEADER}# No dev server detected; this serves the directory, replace it with yours\nweb: python3 -m http.server $PORT --bind 127.0.0.1\n"
+        expected(
+            "notes-app",
+            Some("No dev server detected; this serves the directory, replace it with yours"),
+            "python3 -m http.server $PORT --bind 127.0.0.1"
         )
     );
 }
@@ -96,8 +104,10 @@ fn init_suggests_the_command_from_project_files() {
     fs::write(node.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
     assert_eq!(
         init(&node, &[]),
-        format!(
-            "{HEADER}# package.json has a dev script; check that it accepts these flags\nweb: npm run dev -- --port $PORT --host 127.0.0.1\n"
+        expected(
+            "node",
+            Some("package.json has a dev script; check that it accepts these flags"),
+            "npm run dev -- --port $PORT --host 127.0.0.1"
         )
     );
     let rails = directory(&t, "rails");
@@ -106,14 +116,16 @@ fn init_suggests_the_command_from_project_files() {
     fs::write(rails.join("bin/rails"), "").unwrap();
     assert_eq!(
         init(&rails, &["--name", "Shop Front"]),
-        format!(
-            "{HEADER}project: shop-front\n# Rails app detected\nweb: bin/rails server -p $PORT -b 127.0.0.1\n"
+        expected(
+            "shop-front",
+            Some("Rails app detected"),
+            "bin/rails server -p $PORT -b 127.0.0.1"
         )
     );
     let custom = directory(&t, "custom");
     assert_eq!(
         init(&custom, &["--command", "bin/dev: --port $PORT"]),
-        format!("{HEADER}web: 'bin/dev: --port $PORT'\n")
+        expected("custom", None, "'bin/dev: --port $PORT'")
     );
 }
 

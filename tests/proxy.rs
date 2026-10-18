@@ -321,7 +321,7 @@ fn parallel_ups_in_two_checkouts_start_one_proxy_and_both_urls_answer() {
     let proxy = Proxy::new();
     let root = proxy._t.path().canonicalize().unwrap();
     let port = free_port();
-    let manifest = "project: notes\nweb: python3 -m http.server $PORT --bind 127.0.0.1\n";
+    let manifest = "version: 1\nproject: notes\nservices: {web: {command: python3 -m http.server $PORT --bind 127.0.0.1, http: {healthcheck: /}}}\n";
     let primary = root.join("notes");
     let preview = root.join("notes-preview");
     for path in [&primary, &preview] {

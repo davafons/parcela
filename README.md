@@ -36,7 +36,7 @@ Parcela also needs [Caddy](https://caddyserver.com/docs/install) 2 and [Process 
 In your project:
 
 ```sh
-parcela init      # write a one-line parcela.yaml with your dev server command
+parcela init      # write a parcela.yaml with your dev server command
 parcela up        # start it at https://<project>.localhost:1443
 parcela trust     # once, so browsers accept the certificate
 ```
@@ -53,7 +53,7 @@ parcela up --detach
 # ✓ signup (shop) is running at https://signup-shop.localhost:1443
 ```
 
-Ports never collide. Named ports such as `ports: [db]` give each checkout its own database port. `parcela ls` lists every environment, `parcela down --all` stops them and `parcela rm --prune` forgets deleted checkouts. `parcela --skill` prints instructions for coding agents.
+Ports never collide. A `hooks.setup` command in `parcela.yaml` prepares each new worktree on its first `up`, for example by creating its own database. `parcela ls` lists every environment, `parcela down --all` stops them and `parcela rm --prune` forgets deleted checkouts. `parcela --skill` prints instructions for coding agents.
 
 Parcela does not copy or isolate your data, install dependencies or run migrations. Your `parcela.yaml` decides what starts.
 

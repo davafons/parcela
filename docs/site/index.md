@@ -26,16 +26,26 @@ Or with Homebrew: `brew install davafons/tap/parcela`.
 
 ### Describe your app
 
-`parcela init` writes a `parcela.yaml` for your dev server. Add a line for each process:
+`parcela init` writes a `parcela.yaml` for your dev server. Add your other processes and a setup command:
 
 ```yaml
-web: bin/rails server -p $PORT
-api: npm run api -- --port $PORT
-workers:
-  jobs: bin/jobs
+version: 1
+project: shop
+
+services:
+  web:
+    command: bin/rails server -p $PORT
+    http:
+      healthcheck: /up
+  jobs:
+    command: bin/jobs
+
+hooks:
+  setup:
+    command: bin/setup
 ```
 
-Each service gets a free port in `$PORT` and its own URL.
+Each HTTP service gets a free port in `$PORT` and its own URL. `hooks.setup` runs once in every new environment, so a fresh worktree installs its packages and creates its database on its own.
 
 ### Start it
 

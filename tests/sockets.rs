@@ -19,8 +19,8 @@ fn long_state(temp: &TempDir) -> (Registry, PathBuf, String) {
     assert!(state.as_os_str().len() > 150);
     let source = temp.path().join("source");
     fs::create_dir(&source).unwrap();
-    let manifest: Manifest = serde_saphyr::from_str(
-        "version: 1\nproject: {id: app, name: app}\ndefault_service: web\nservices: {web: {}}\n",
+    let manifest: Manifest = Manifest::parse(
+        "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
     )
     .unwrap();
     let mut registry = Registry::open(&state, true).unwrap().unwrap();

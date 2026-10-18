@@ -13,9 +13,9 @@ use std::{
 };
 use tempfile::TempDir;
 
-const MANIFEST: &str = "version: 1\nproject: {id: demo-id, name: demo}\ndefault_service: web\nservices: {web: {}, api: {}}\ntasks: {test: {argv: [python3, -m, unittest], timeout_seconds: 60}}\nprocess_compose: {version: '0.5', processes: {web: {command: echo hi, custom_native_key: kept}, api: {command: echo api}}}\n";
+const MANIFEST: &str = "version: 1\nproject: demo\nservices:\n  web: {command: echo hi, http: {healthcheck: /}}\n  api: {command: echo api, http: {subdomain: api, healthcheck: /}}\ntasks: {test: {command: python3 -m unittest, timeout_seconds: 60}}\n";
 fn manifest() -> Manifest {
-    serde_saphyr::from_str(MANIFEST).unwrap()
+    Manifest::parse(MANIFEST).unwrap()
 }
 fn checkout(root: &Path, name: &str) -> std::path::PathBuf {
     let path = root.join(name);
@@ -54,42 +54,43 @@ fn value(output: &Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 #[test]
-fn strict_schema_and_native_graph_preservation() {
-    let manifest = manifest();
-    manifest.validate().unwrap();
-    assert_eq!(
-        manifest.process_compose.unwrap()["processes"]["web"]["custom_native_key"],
-        "kept"
-    );
-    assert!(serde_saphyr::from_str::<Manifest>(&format!("{MANIFEST}typo: true\n")).is_err());
-    assert!(
-        serde_saphyr::from_str::<Manifest>(&MANIFEST.replace("web: {}", "web: {typo: true}"))
-            .is_err()
-    );
-    assert!(
-        serde_saphyr::from_str::<Manifest>(&MANIFEST.replace("timeout_seconds: 60", "typo: 60"))
-            .is_err()
-    );
-    assert!(serde_saphyr::from_str::<Manifest>(&format!("{MANIFEST}version: 2\n")).is_err());
+fn strict_schema_with_extension_keys() {
+    manifest();
+    Manifest::parse(&format!("{MANIFEST}x-shared: &shared {{a: 1}}\n")).unwrap();
+    for text in [
+        format!("{MANIFEST}typo: true\n"),
+        MANIFEST.replace(
+            "http: {healthcheck: /}",
+            "http: {healthcheck: /, typo: true}",
+        ),
+        MANIFEST.replace("timeout_seconds: 60", "typo: 60"),
+        MANIFEST.replace("version: 1", "version: 2"),
+        MANIFEST.replace("version: 1\n", ""),
+        MANIFEST.replace("project: demo\n", ""),
+    ] {
+        assert!(Manifest::parse(&text).is_err(), "{text}");
+    }
 }
 #[test]
 fn validation_rejects_bad_contracts() {
     for text in [
-        MANIFEST.replace("version: 1", "version: 2"),
-        MANIFEST.replace("default_service: web", "default_service: absent"),
-        MANIFEST.replace("name: demo", "name: ../escape"),
-        MANIFEST.replace("argv: [python3, -m, unittest]", "argv: []"),
+        MANIFEST.replace("subdomain: api, ", ""),
+        MANIFEST.replace("http: {healthcheck: /}", "healthcheck: true"),
+        MANIFEST.replace("project: demo", "project: ../escape"),
+        MANIFEST.replace("command: python3 -m unittest", "command: ''"),
         MANIFEST.replace("timeout_seconds: 60", "timeout_seconds: 0"),
-        MANIFEST.replace("web: {}", "web: {subdomain: www}"),
-        MANIFEST.replace("api: {}", "api: {}, jobs: {subdomain: api}"),
+        MANIFEST.replace("command: echo hi,", "command: echo hi, depends_on: [db],"),
+        MANIFEST
+            .replace("command: echo hi,", "command: echo hi, depends_on: [api],")
+            .replace(
+                "command: echo api,",
+                "command: echo api, depends_on: [web],",
+            ),
+        MANIFEST.replace("subdomain: api", "subdomain: API"),
+        format!("{MANIFEST}hooks: {{setup: {{command: bin/setup, depends_on: [db]}}}}\n"),
+        MANIFEST.replace("  api:", "  setup:"),
     ] {
-        assert!(
-            serde_saphyr::from_str::<Manifest>(&text)
-                .unwrap()
-                .validate()
-                .is_err(),
-            "{text}"
-        );
+        assert!(Manifest::parse(&text).is_err(), "{text}");
     }
     for label in ["", "Upper", "a.b", "-a", "a-", "../a", "á", &"a".repeat(64)] {
         assert!(dns_label(label).is_err());
@@ -195,7 +196,7 @@ fn only_one_primary_per_project_and_explicit_scoping() {
     other.project.id = "different".into();
     other.project.name = "other".into();
     registry.adopt(&other, &b, Role::Primary, "main").unwrap();
-    assert_eq!(registry.list(Some("demo-id")).unwrap().len(), 1);
+    assert_eq!(registry.list(Some("demo")).unwrap().len(), 1);
     assert_eq!(registry.list(None).unwrap().len(), 2);
 }
 #[test]

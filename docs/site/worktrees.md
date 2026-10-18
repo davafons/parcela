@@ -61,42 +61,24 @@ shop     primary  stopped  https://shop.localhost:1443          /Users/you/code/
 
 ## Keep data separate
 
-Parcela separates ports, URLs, processes and logs. It does not copy or separate your data. If two checkouts read the same `.env` and the same database, they share it.
+Parcela separates ports, URLs, processes and logs. Your data is separate only if `parcela.yaml` says so: two checkouts that read the same `.env` and the same database share it.
 
-Each environment has a private runtime directory in `PARCELA_RUNTIME_DIR`, with `data`, `tmp`, `cache` and `log` inside. Put per-checkout files there. For SQLite, point the database file at it, in whatever variable your app reads:
-
-```yaml
-environment:
-  DATABASE_PATH: ${PARCELA_RUNTIME_DIR}/data/app.sqlite3
-```
-
-For a server database, run one per checkout as a worker on a named port. This Postgres worker creates its data directory on first start:
+Give every environment its own database, and create it in `hooks.setup`, which runs on the first `up` of each new worktree:
 
 ```yaml
-web: python3 -m http.server $PORT --bind 127.0.0.1
-workers:
-  db: sh -c 'test -d "$PARCELA_RUNTIME_DIR/data/pg" || initdb -D "$PARCELA_RUNTIME_DIR/data/pg"; exec postgres -D "$PARCELA_RUNTIME_DIR/data/pg" -h 127.0.0.1 -p "$PARCELA_PORT_DB" -k /tmp'
-ports: [db]
-environment:
-  DATABASE_URL: postgres://127.0.0.1:${PARCELA_PORT_DB}/postgres
-tasks:
-  psql:
-    argv: [sh, -c, 'psql "$DATABASE_URL" "$@"', psql]
+env:
+  DATABASE_PATH: ${PARCELA_DATA_DIR}/app.sqlite3
+
+hooks:
+  setup:
+    command: cp -n "$PARCELA_PRIMARY_DIR/.env" .env; bin/rails db:prepare
+  prestart:
+    command: bin/rails db:migrate
 ```
 
-Each checkout now has its own cluster on its own port:
+`PARCELA_DATA_DIR` belongs to one environment. `PARCELA_PRIMARY_DIR` is the main checkout, where untracked files like `.env` live. With this, `parcela up` in a fresh worktree copies the secrets, creates and seeds the database, migrates it and starts the app.
 
-```sh
-parcela task psql -- -tAc 'show port'
-(cd ../search && parcela task psql -- -tAc 'show port')
-```
-
-```text
-26341
-22030
-```
-
-Seeding and migrations stay your project's job. Run them with your usual commands, or define them as tasks and run them with `parcela task`.
+For PostgreSQL or another server, run one per environment as a service, or name one database per environment on a shared server. [Databases](../configuration.md#databases) in the configuration reference shows both.
 
 ## Clean up
 
@@ -163,9 +145,11 @@ Look at how the project starts its dev servers, workers and databases today.
 Don't read .env files or credentials.
 
 Write a minimal parcela.yaml with the project's real commands. Every HTTP
-service must listen on 127.0.0.1:$PORT. Put databases and other ports under
-`ports:` and per-checkout files under $PARCELA_RUNTIME_DIR.
-Ask me before choosing how databases, uploads or queues are shared.
+service must listen on 127.0.0.1:$PORT. Give each environment its own data
+under $PARCELA_DATA_DIR, and put install, database creation and seeding in
+hooks.setup and migrations in hooks.prestart, so `parcela up` alone prepares
+a fresh worktree. Ask me before choosing how databases, uploads or queues
+are shared.
 
 Run `parcela doctor`. Don't start services, run migrations or install anything.
 Show me the diff and the commands to start it.

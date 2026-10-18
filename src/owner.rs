@@ -168,7 +168,7 @@ impl Record {
         resolved.generation = self.session.generation;
         let env =
             crate::runtime::session_environment(&self.manifest, &resolved, path, &self.session)?;
-        crate::runtime::command_env(&mut command, &self.manifest, &env);
+        crate::runtime::command_env(&mut command, &env);
         Ok(command)
     }
     pub fn authenticate(&self, path: &Path, workspace: &Workspace) -> Result<()> {
