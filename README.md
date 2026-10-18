@@ -29,7 +29,7 @@ Parcela gives each checkout of your project its own web server, API, workers, po
 curl -fsSL https://parcela.davafons.com/install.sh | sh
 ```
 
-Parcela also needs [Caddy](https://caddyserver.com/docs/install) 2 and [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1. Homebrew installs all three: `brew install davafons/tap/parcela`. Builds cover macOS and Linux; from source, run `cargo install --git https://github.com/davafons/parcela --locked`.
+It also installs [Caddy](https://caddyserver.com) and [Process Compose](https://f1bonacc1.github.io/process-compose/) into `~/.local/bin` when they are missing. With Homebrew: `brew install davafons/tap/parcela`. Builds cover macOS and Linux; from source, run `cargo install --git https://github.com/davafons/parcela --locked`.
 
 ## Quickstart
 

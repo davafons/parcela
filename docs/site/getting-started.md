@@ -57,7 +57,7 @@ You need macOS or Linux, Python 3 and Git. The example app is plain Python, so t
 curl -fsSL https://parcela.davafons.com/install.sh | sh
 ```
 
-Parcela serves HTTPS with [Caddy](https://caddyserver.com/docs/install) 2 and runs your processes with [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1. Install both from their sites, or use Homebrew, which installs all three at once:
+It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.com), which serves HTTPS, and [Process Compose](https://f1bonacc1.github.io/process-compose/), which runs your processes, unless they are already installed. With Homebrew instead:
 
 ```sh
 brew install davafons/tap/parcela

@@ -5,6 +5,7 @@
 ### Added
 
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
+- `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when they are missing, checking each download against its release checksums.
 - `parcela logs --follow` streams new lines from every process, or one.
 - A JSON Schema for `parcela.yaml` at `https://parcela.davafons.com/schema/v1.json`, generated from the parser. `parcela init` adds the line editors use to find it.
 
