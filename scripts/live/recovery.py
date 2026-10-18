@@ -242,12 +242,15 @@ def proxy_outage(f):
     time.sleep(1)
     assert all(owner.poll() is None for owner in owners), 'front-door loss must not stop unrelated application graphs'
     assert all(listening(app['port']) for app in apps)
-    f.start_proxy()
     for app, old in zip(apps, original):
         wait_for(lambda: f.probe(app)[0] == 200)
         assert f.session(app)['token'] == old['token']
         assert f.session(app)['generation'] == old['generation']
-    return {'application_owners_preserved': True, 'routes_recovered': 2, 'application_generations_preserved': True}
+    assert f.cli(f.root, 'proxy', 'stop').returncode == 0, 'the owners started the proxy again in the background'
+    time.sleep(3)
+    assert not listening(f.https), 'a deliberately stopped proxy stays stopped'
+    return {'application_owners_preserved': True, 'proxy_revived_by_owners': True, 'routes_recovered': 2,
+            'application_generations_preserved': True, 'deliberate_stop_respected': True}
 
 def lost_stop_reply(f):
     app = f.app('lost', delay=2)

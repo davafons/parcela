@@ -232,10 +232,10 @@ parcela proxy restart [--port N]
 parcela proxy status
 ```
 
-The proxy is one background Caddy that serves the URLs of every environment. `up` starts it when it is not running, so you rarely need these commands.
+The proxy is one background Caddy that serves the URLs of every environment. `up` starts it when it is not running, and if it dies while environments run, for example because Caddy crashed or was killed, they start it again within a few seconds. You rarely need these commands.
 
 - `start --port N` listens on port `N` and saves it for later starts. The default is 1443, or `PARCELA_HTTPS_PORT` when it is set and nothing is saved. Ports below 1024 are refused.
-- `stop` stops the proxy. Services keep running, but their URLs stop answering until it starts again.
+- `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`.
 - `restart` replaces the proxy. Run it after upgrading Parcela.
 - `status` shows the port, process IDs, version and log file. It exits 1 when the proxy is not running.
 

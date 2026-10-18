@@ -31,6 +31,8 @@ Parcela is a Rust CLI that coordinates two maintained programs. It does not impl
 6. Wait until every HTTP service listens on its port, the listener belongs to the graph, and the readiness path answers 2xx.
 7. Publish Caddy routes for the whole group. With `--detach`, return once the owner reports ready.
 
+The proxy is `parcela proxy run` in the background, supervising one Caddy and renewing every running environment's routes twice a second. Routes expire 3 seconds after the last renewal, so a dead proxy never serves stale routes. If it dies while environments run, each owner restarts it within about 2 seconds and republishes its routes, unless `parcela proxy stop` left a `proxy/stopped` marker. Nothing starts the proxy at login or after a reboot; the next `up` does.
+
 `down` sends a stop request to that owner. The owner withdraws routes, stops the graph and marks the run stopped. `restart` checks the replacement first and then starts a new generation.
 
 ## State layout

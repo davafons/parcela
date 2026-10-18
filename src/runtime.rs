@@ -730,6 +730,7 @@ impl Owner<'_> {
         let mut listener = BTreeMap::new();
         let mut published = None;
         let mut hooks_checked = Instant::now();
+        let mut proxy_checked = Instant::now();
         loop {
             if *requested_stop {
                 return Ok(0);
@@ -816,6 +817,19 @@ impl Owner<'_> {
                     )?;
                     if self.setup {
                         private::write_bytes(&self.path.join(SETUP_DONE), b"")?;
+                    }
+                }
+            }
+            // The routes come back by themselves once the new proxy runs: its token differs.
+            if proxy_checked.elapsed() >= Duration::from_secs(2) {
+                proxy_checked = Instant::now();
+                if router::current(self.registry.state_path()).is_err() {
+                    match crate::proxy::revive(self.registry.state_path()) {
+                        Ok(true) => eprintln!("parcela: the proxy had stopped; started it again"),
+                        Ok(false) => {}
+                        Err(error) => {
+                            eprintln!("parcela: the proxy is down and did not restart: {error:#}")
+                        }
                     }
                 }
             }

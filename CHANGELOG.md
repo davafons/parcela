@@ -11,6 +11,7 @@
 
 ### Changed
 
+- If the proxy dies while environments run, they start it again within a few seconds. `parcela proxy stop` still stops it for good.
 - `restart` picks up added, removed and renamed services; `down` and `up` are no longer needed for that.
 
 ### Fixed

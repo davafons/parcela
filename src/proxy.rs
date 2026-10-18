@@ -107,10 +107,42 @@ fn warn_version(router: &Router) {
 /// Start the proxy in the background and wait until Caddy answers on its admin socket.
 /// `explicit` means the person chose `front_door`, so a different running one is an error.
 pub fn start(state: &Path, caddy: &str, front_door: FrontDoor, explicit: bool) -> Result<Started> {
+    launch(state, caddy, front_door, explicit, false)
+}
+
+/// Written by `stop` so running environments leave a deliberately stopped proxy alone.
+const STOPPED: &str = "stopped";
+
+/// Restart a proxy that died while environments still use it, for example after Caddy crashed or
+/// the system killed it. Returns false, and starts nothing, after a deliberate `parcela proxy stop`.
+pub fn revive(state: &Path) -> Result<bool> {
+    if router::proxy_dir(state).join(STOPPED).exists()
+        || matches!(status(state)?, Status::Running(_))
+    {
+        return Ok(false);
+    }
+    match launch(state, "caddy", FrontDoor::load(state)?, false, true)? {
+        Started::Launched(_) => Ok(true),
+        Started::Already(_) => Ok(false),
+    }
+}
+
+fn launch(
+    state: &Path,
+    caddy: &str,
+    front_door: FrontDoor,
+    explicit: bool,
+    revive: bool,
+) -> Result<Started> {
     front_door.validate()?;
     let directory = router::proxy_dir(state);
     private::directory(&directory)?;
     let _start = Lock::wait_for(&directory.join("start.lock"), STARTUP)?;
+    // Checked under the start lock, so a revive never undoes a stop that ran meanwhile.
+    if directory.join(STOPPED).exists() {
+        ensure!(!revive, "the proxy was stopped on purpose");
+        std::fs::remove_file(directory.join(STOPPED))?;
+    }
     match status(state)? {
         Status::Running(router) if explicit && router.front_door != front_door => bail!(
             "the proxy is already running with {}; switch with `parcela proxy restart{}`",
@@ -220,6 +252,7 @@ pub fn stop(state: &Path) -> Result<bool> {
         return Ok(false);
     }
     let _start = Lock::wait_for(&directory.join("start.lock"), STARTUP)?;
+    private::write_bytes(&directory.join(STOPPED), b"")?;
     let lock = directory.join("owner.lock");
     let daemon_running =
         std::fs::symlink_metadata(&lock).is_ok() && Lock::try_acquire(&lock)?.is_none();
