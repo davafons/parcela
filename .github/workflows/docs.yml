@@ -12,7 +12,7 @@ on:
       - 'assets/brand/logo.svg'
       - '.github/workflows/docs.yml'
   push:
-    branches: [main, docs-site]
+    branches: [main]
     paths:
       - 'docs/site/**'
       - 'docs/website/**'
@@ -47,6 +47,7 @@ jobs:
           mkdir -p target/pages
           mv target/docs target/pages/docs
           cp target/pages/docs/404.html target/pages/404.html
+          cp docs/website/install.sh target/pages/install.sh
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=/docs/"><link rel="canonical" href="https://parcela.davafons.com/docs/"><a href="/docs/">Parcela docs</a>\n' > target/pages/index.html
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -18,7 +18,7 @@ export default defineConfig({
   cacheDir: resolve(project, '.generated/cache'),
   cleanUrls: true,
   title: 'Parcela',
-  description: 'Independent development environments for your agents and worktrees.',
+  description: 'Deployable dev environments for your AI agents.',
   head: [['link', { rel: 'icon', href: `${base}assets/logo.svg?v=picket-a` }]],
   transformHead({ pageData }) {
     if (pageData.relativePath === '404.md') return [];

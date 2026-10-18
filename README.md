@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  Run every checkout's services at named HTTPS URLs.
+  Deployable dev environments for your AI agents.
 </p>
 
 <p align="center">
@@ -25,19 +25,11 @@ Parcela gives each checkout of your project its own web server, API, workers, po
 
 ## Install
 
-With Homebrew, which also installs Caddy and Process Compose:
-
 ```sh
-brew install davafons/tap/parcela
+curl -fsSL https://parcela.davafons.com/install.sh | sh
 ```
 
-Or with the shell installer, then install [Caddy](https://caddyserver.com/docs/install) 2.x and [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1.x yourself:
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
-```
-
-Builds cover macOS and Linux. From source: `cargo install --git https://github.com/davafons/parcela --locked`.
+Parcela also needs [Caddy](https://caddyserver.com/docs/install) 2 and [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1. Homebrew installs all three: `brew install davafons/tap/parcela`. Builds cover macOS and Linux; from source, run `cargo install --git https://github.com/davafons/parcela --locked`.
 
 ## Quickstart
 

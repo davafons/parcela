@@ -35,3 +35,28 @@
   outline: 3px solid var(--vp-c-brand-1);
   outline-offset: 3px;
 }
+
+@media (min-width: 960px) {
+  .VPHero .text {
+    font-size: 48px;
+    line-height: 1.15;
+  }
+}
+
+.VPHero .image-container {
+  width: auto;
+  height: auto;
+  transform: none;
+  text-align: left;
+}
+
+.VPHero .image-bg {
+  display: none;
+}
+
+@media (max-width: 959px) {
+  .VPHero .image {
+    order: 3;
+    margin: 40px 0 0;
+  }
+}

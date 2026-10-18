@@ -20,26 +20,15 @@ You need macOS or Linux, Python 3 and Git. The example app is plain Python, so t
 
 ## Install Parcela
 
-With Homebrew on macOS or Linux, one command installs Parcela, Caddy and Process Compose:
+```sh
+curl -fsSL https://parcela.davafons.com/install.sh | sh
+```
+
+Parcela serves HTTPS with [Caddy](https://caddyserver.com/docs/install) 2 and runs your processes with [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1. Install both from their sites, or use Homebrew, which installs all three at once:
 
 ```sh
 brew install davafons/tap/parcela
 ```
-
-Without Homebrew, install the `parcela` binary into `~/.local/bin`:
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/davafons/parcela/releases/latest/download/parcela-installer.sh | sh
-```
-
-Parcela uses [Caddy](https://caddyserver.com/docs/install) 2.x for HTTPS and [Process Compose](https://f1bonacc1.github.io/process-compose/installation/) 1.x to run your processes. Install both:
-
-```sh
-# Linux: install Caddy from your distribution or caddyserver.com, then
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/F1bonacc1/process-compose/main/scripts/get-pc.sh)" -- -b ~/.local/bin
-```
-
-To build from source instead, use Rust 1.89 or newer: `cargo install --git https://github.com/davafons/parcela --locked`.
 
 ## Create the app
 
