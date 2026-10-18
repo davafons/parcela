@@ -244,7 +244,7 @@ $ parcela proxy status
 ✓ Proxy running: HTTPS on :1443
   urls     https://<name>.localhost:1443
   pid      95029 (Caddy 95034)
-  version  Parcela 0.2.0
+  version  Parcela 0.3.0
   log      /Users/you/.local/state/parcela/proxy/proxy.log
   Run `parcela trust` once so browsers trust these URLs.
 ```
