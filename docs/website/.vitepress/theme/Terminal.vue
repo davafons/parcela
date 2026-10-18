@@ -1,13 +1,14 @@
 <template>
   <figure class="terminal" aria-label="Two worktrees of the shop app running side by side">
     <div class="bar"><span></span><span></span><span></span></div>
-    <pre><code><span class="prompt">~/shop $</span> parcela up --detach
+    <pre><code><span class="comment"># your main checkout</span>
+<span class="prompt">~/shop $</span> parcela up --detach
 <span class="ok">✓</span> shop is running at <span class="url">https://shop.localhost:1443</span>
-  api  <span class="url">https://api-shop.localhost:1443</span>
 
+<span class="comment"># a second worktree, running at the same time</span>
+<span class="prompt">~/shop $</span> git worktree add ../signup &amp;&amp; cd ../signup
 <span class="prompt">~/signup $</span> parcela up --detach
 <span class="ok">✓</span> signup (shop) is running at <span class="url">https://signup-shop.localhost:1443</span>
-  api  <span class="url">https://api-signup-shop.localhost:1443</span>
 
 <span class="prompt">~/signup $</span> parcela ls
 PROJECT  NAME     STATE  URL
@@ -53,6 +54,10 @@ pre {
 
 .prompt {
   color: #8b8b94;
+}
+
+.comment {
+  color: #e8a36b;
 }
 
 .ok {

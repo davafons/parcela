@@ -11,7 +11,7 @@
   --vp-button-brand-text: #ffffff;
   --vp-code-color: #a4512f;
   --vp-code-bg: #f4ece2;
-  --parcela-hero: linear-gradient(120deg, #b45d3c 10%, #d98b3a 55%, #57966f 100%);
+  --parcela-hero: linear-gradient(120deg, #a4512f 0%, #c97a3e 50%, #d9a03f 100%);
 }
 
 :root.dark {
@@ -27,7 +27,7 @@
   --vp-button-brand-text: #ffffff;
   --vp-code-color: #e8b44f;
   --vp-code-bg: #25222a;
-  --parcela-hero: linear-gradient(120deg, #e8a36b 10%, #e8b44f 55%, #7cc495 100%);
+  --parcela-hero: linear-gradient(120deg, #e0895a 0%, #e8a36b 45%, #e8c45f 100%);
 }
 
 .vp-doc p,
@@ -46,11 +46,12 @@
   background-clip: text;
   color: transparent;
   letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 @media (min-width: 960px) {
   .VPHero .text {
-    font-size: 52px;
+    font-size: 46px;
     line-height: 1.12;
   }
 }
@@ -78,8 +79,6 @@
 }
 
 .VPHome .vp-doc {
-  max-width: 760px;
-  margin: 0 auto;
   counter-reset: step;
 }
 
@@ -106,7 +105,7 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--parcela-hero);
+  background: var(--vp-c-brand-3);
   color: #ffffff;
   font-size: 15px;
   font-weight: 700;
