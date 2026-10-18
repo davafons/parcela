@@ -854,7 +854,8 @@ def run(caddy, compose, cases=None):
         except Exception:
             record['error'] = traceback.format_exc()
         records.append(record)
-        print(f"  recovery {case.__name__}: {'FAIL' if 'error' in record else 'ok'}", flush=True)
+        detail = f" ({record['error'].strip().splitlines()[-1]})" if 'error' in record else ''
+        print(f"  recovery {case.__name__}: {'FAIL' if 'error' in record else 'ok'}{detail}", flush=True)
     failed = [record['case'] for record in records if 'error' in record]
     assert not failed, {'failed': failed, 'cases': records}
     return {'cases': records}

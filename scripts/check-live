@@ -50,6 +50,9 @@ def main():
         report = output / f'{suite}.json'
         report.write_text(json.dumps({'suite': suite, **record}, indent=2) + '\n')
         print(f"{suite}: {'ok' if record['ok'] else 'FAILED'} in {record['seconds']}s, report {report}", flush=True)
+        if not record['ok']:
+            # The report stays on the machine; print enough of the error to diagnose a CI run.
+            print('\n'.join('  | ' + line for line in record['error'].splitlines()[-25:]), flush=True)
     print(f'failed: {", ".join(failed)}' if failed else 'all live suites passed')
     sys.exit(1 if failed else 0)
 
