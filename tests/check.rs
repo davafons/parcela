@@ -63,10 +63,9 @@ fn up_and_doctor_report_the_same_configuration_error() {
 
 #[test]
 fn every_bundled_example_passes_the_doctor_config_check() {
-    for example in ["docs-demo", "rails-postgres"] {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("examples")
-            .join(example);
+    // The repository's own parcela.yaml runs the docs site.
+    for example in ["examples/docs-demo", "examples/rails-postgres", "."] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(example);
         let report: Value = serde_json::from_slice(
             &Command::new(env!("CARGO_BIN_EXE_parcela"))
                 .arg("--path")
