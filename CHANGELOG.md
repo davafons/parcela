@@ -8,6 +8,10 @@
 - `parcela logs --follow` streams new lines from every process, or one.
 - A JSON Schema for `parcela.yaml` at `https://parcela.davafons.com/schema/v1.json`, generated from the parser. `parcela init` adds the line editors use to find it.
 
+### Changed
+
+- `restart` picks up added, removed and renamed services; `down` and `up` are no longer needed for that.
+
 ### Fixed
 
 - Process Compose probes only services that another service or hook waits for, so health checks no longer fill every HTTP service's log.

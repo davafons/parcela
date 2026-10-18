@@ -118,7 +118,7 @@ $ parcela down
 parcela restart [--detach] [--backend-port N]
 ```
 
-Stops everything and starts it again from the current `parcela.yaml`. It checks that the new configuration can start before it stops the running one. Use it after you change a command, a worker, `ports` or `environment`. A new or renamed service needs `down` and then `up`, because it needs a new hostname.
+Stops everything and starts it again from the current `parcela.yaml`. Use it after any change, including added, removed or renamed services. It checks that the new configuration can start before it stops the running one. When the services' URLs change, it can only reserve the new ones after the old run stops.
 
 ## Inspect
 

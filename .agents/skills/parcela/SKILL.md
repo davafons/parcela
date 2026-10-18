@@ -109,7 +109,7 @@ Tasks are optional; ordinary project commands remain usable directly. Before `ta
 
 `up` runs the project's own `hooks.setup` on an environment's first start and `hooks.prestart` on every start, before the other services. Read both in `parcela.yaml` before the first `up` and tell the user what they will do, such as installing packages, creating a database or migrating. `up --setup` reruns setup; use it only when asked. A failed hook stops `up` and prints its output. Do not run preparation commands that `parcela.yaml` does not declare.
 
-The default service uses the environment base hostname. Other HTTP services use a flat prefix from `subdomain` or the service name. For a preview labeled `review` of `my-app`, typical names are `review-my-app.localhost` and `api-review-my-app.localhost`. Read actual reserved or recorded URLs instead of constructing them. Hostname reservations remain while stopped; changing service reservations requires a stopped environment and a new `up` with the existing identity.
+The default service uses the environment base hostname. Other HTTP services use a flat prefix from their `http.subdomain`. For a preview labeled `review` of `my-app`, typical names are `review-my-app.localhost` and `api-review-my-app.localhost`. Read actual reserved or recorded URLs instead of constructing them. Hostname reservations remain while stopped. `restart` reserves the URLs of added or renamed services after the old run stops.
 
 ## Limits
 

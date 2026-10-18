@@ -249,15 +249,13 @@ Three things are new:
 - `api` is a second HTTP service. Its `subdomain` puts it at `api-` plus the environment's hostname.
 - `hooks.setup` runs once, the first time an environment starts. It creates the database before any service starts.
 
-A new service needs a new hostname, so stop the environment and start it again:
+Restart the environment to pick up the new configuration:
 
 ```sh
-parcela down
-parcela up --detach
+parcela restart --detach
 ```
 
 ```text
-✓ Stopped hello; source and data preserved
 ✓ hello is running at https://hello.localhost:1443
   api       https://api-hello.localhost:1443
 
@@ -313,7 +311,7 @@ tasks:
     command: python3 db.py list
 ```
 
-No hostname changes this time, so a restart is enough. `restart` stops everything and starts it again from the current `parcela.yaml`. Setup already ran, so it does not run again:
+Restart again. Setup already ran in this environment, so it does not run again:
 
 ```sh
 parcela restart --detach

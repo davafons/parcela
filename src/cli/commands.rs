@@ -455,7 +455,11 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             _ => {}
         }
     }
-    if start.restart || start.detach {
+    // A service was added, removed or renamed: its URLs can only be reserved once the old run stops.
+    let new_hosts = start.restart
+        && snapshot.is_none()
+        && registry.hosts(&workspace.id)? != manifest.service_hosts(&workspace.hostname)?;
+    if (start.restart || start.detach) && !new_hosts {
         parcela::runtime::preflight(
             &registry,
             &manifest,
@@ -474,6 +478,22 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
         );
         lifecycle::down(&registry, &workspace)?;
     }
+    let workspace = if new_hosts {
+        let workspace = registry
+            .adopt(&manifest, &source, workspace.role, &workspace.label)
+            .context("the environment stopped, but the new service URLs could not be reserved")?;
+        parcela::runtime::preflight(
+            &registry,
+            &manifest,
+            &workspace,
+            launch,
+            start.backend_port,
+            start.readiness_timeout,
+        )?;
+        workspace
+    } else {
+        workspace
+    };
     if !start.detach {
         drop(restart_lock);
         return parcela::runtime::run(

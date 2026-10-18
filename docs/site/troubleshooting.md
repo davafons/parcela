@@ -58,14 +58,6 @@ Another checkout owns that name. Start this one with another name: `parcela up -
 
 Parcela remembers a checkout's name after the first `up`. To rename it, run `parcela down`, `parcela rm`, then `parcela up --name NEW`. The renamed checkout gets a new runtime directory, so move any files you keep in `PARCELA_RUNTIME_DIR` yourself.
 
-## `restart` refuses a new service
-
-```text
-parcela: service hostname not reserved; explicitly re-adopt the stopped environment
-```
-
-A new or renamed service needs a new hostname, and `restart` keeps the existing ones. Run `parcela down`, then `parcela up --detach`.
-
 ## `logs` needs a running environment
 
 ```text

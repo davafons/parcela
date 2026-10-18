@@ -207,7 +207,19 @@ def run(caddy, compose, **_):
         assert (runtime / 'setup-complete').exists()
         logs = cli(hooks, 'logs').stdout
         assert 'setup    | seeded' in logs and 'prestart | migrated 1' in logs, logs
+        (hooks / 'parcela.yaml').write_text(HOOKS.replace('hooks:\n', f'''  api:
+    command: python3 {SERVICE} api
+    http:
+      subdomain: api
+      healthcheck: /ready
+hooks:
+''', 1))
+        added = json.loads(cli(hooks, 'restart', '--detach', '--process-compose', compose).stdout)
+        live.ports.extend(endpoint['backend_port'] for endpoint in added['session']['endpoints'])
+        assert request('api-hooks-sets.localhost')['id'] == workspaces[hooks]['id'], 'restart reserves an added service'
+        (hooks / 'parcela.yaml').write_text(HOOKS)
         cli(hooks, 'restart', '--detach', '--process-compose', compose)
+        assert set(json.loads(cli(hooks, 'status').stdout)['live']['endpoints']) == {'web'}, 'restart drops a removed service'
         assert (runtime / 'data' / 'setup-runs').read_text() == 'x', 'restart skips setup'
         assert cli(hooks, 'logs', 'prestart').stdout.strip().endswith('migrated 1')
         assert cli(hooks, 'down').returncode == 0
