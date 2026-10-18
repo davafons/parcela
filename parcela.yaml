@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://parcela.davafons.com/schema/v1.json
+# Runs this repository's documentation site, so every worktree previews its own docs.
+version: 1
+project: parcela
+
+env:
+  DOCS_BASE: /
+
+services:
+  docs:
+    command: npm run dev --prefix docs/website -- --port $PORT
+    http:
+      healthcheck: /
+
+hooks:
+  setup:
+    command: npm ci --prefix docs/website

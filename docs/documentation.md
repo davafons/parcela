@@ -17,7 +17,13 @@ A page under `docs/site/` can have YAML frontmatter. The home page uses it for t
 
 ## Build, preview and check
 
-Use Node 22.19 or newer:
+Use Node 22.19 or newer. The repository's own `parcela.yaml` runs the dev server, so each worktree previews its docs at its own URL:
+
+```sh
+parcela up --detach
+```
+
+The first `up` installs the packages. The site is at the environment's URL, such as `https://parcela.localhost:1443`, and reloads when a listed source changes. Without Parcela:
 
 ```sh
 npm ci --prefix docs/website
@@ -25,7 +31,7 @@ npm run dev --prefix docs/website -- --port 5173
 npm run check --prefix docs/website
 ```
 
-The dev server serves `http://127.0.0.1:5173/docs/` and reloads when a listed source changes. Search does not refresh until you restart it.
+That serves `http://127.0.0.1:5173/docs/`. Search does not refresh until you restart it.
 
 `npm run check` builds the site once into `target/docs` at the production base `/docs/`. The build fails on a dead link. The check then confirms that every page has one heading and only existing anchors, that every searchable page is in the search index, that the downloads match their sources and that the rendered Claude skill install block matches `docs/site/worktrees.md`. `tests/test_skill_install.py` runs that block in a sandbox. `scripts/check-live docs-example` runs the Getting started app against real Caddy and Process Compose.
 
