@@ -75,7 +75,7 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
     }
     assert_eq!(
         check(&report, "process-compose"),
-        &json!({"name": "process-compose", "ok": false, "detail": "/nonexistent/process-compose not found on PATH", "fix": "install Process Compose 1.x: brew install f1bonacci/tap/process-compose"})
+        &json!({"name": "process-compose", "ok": false, "detail": "/nonexistent/process-compose not found on PATH", "fix": "install Process Compose 1.x: brew install f1bonacc1/tap/process-compose (or https://f1bonacc1.github.io/process-compose/installation/)"})
     );
     assert_eq!(
         check(&report, "config"),
