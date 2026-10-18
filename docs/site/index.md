@@ -3,16 +3,12 @@ layout: home
 title: Parcela
 search: false
 hero:
-  name: Parcela
   text: Deployable dev environments for your AI agents
   tagline: Every worktree runs the whole app at its own HTTPS URL, side by side.
   actions:
     - theme: brand
       text: Get started
       link: /getting-started/
-    - theme: alt
-      text: CLI guide
-      link: /cli/
     - theme: alt
       text: GitHub
       link: https://github.com/davafons/parcela
@@ -26,17 +22,40 @@ curl -fsSL https://parcela.davafons.com/install.sh | sh
 
 Or with Homebrew: `brew install davafons/tap/parcela`.
 
-## A CLI your agent can drive
+## Five minutes to a running app
+
+### Describe your app
+
+`parcela init` writes a `parcela.yaml` for your dev server. Add a line for each process:
+
+```yaml
+web: bin/rails server -p $PORT
+api: npm run api -- --port $PORT
+workers:
+  jobs: bin/jobs
+```
+
+Each service gets a free port in `$PORT` and its own URL.
+
+### Start it
 
 ```sh
-parcela init
 parcela up --detach
 ```
 
-`init` writes a one-line `parcela.yaml`. `up` starts your web server, API and workers and prints the URL. Every command answers in JSON when piped, so an agent can start, check and stop its own copy of your dev environment.
+```text
+✓ shop is running at https://shop.localhost:1443
+  api       https://api-shop.localhost:1443
+```
 
-## Parallel environments, no port conflicts
+### Open it
 
-Each worktree gets its own ports, logs and URL. Run one copy per agent, and each one verifies its change against a real running app.
+Visit `https://shop.localhost:1443`. `parcela logs` shows what every process printed, and `parcela down` stops it all.
+
+## Why agents need it
+
+**A CLI they can drive.** Every command answers in JSON when piped, so an agent starts, checks and stops its own copy of your app.
+
+**Parallel copies, no port conflicts.** Run `parcela up` in another worktree and it gets its own ports, logs and URL, like `https://signup-shop.localhost:1443`. Each agent verifies its change against a real running app.
 
 [Build your first environment](getting-started.md).
