@@ -9,7 +9,7 @@ use tempfile::TempDir;
 fn expected(project: &str, comment: Option<&str>, command: &str) -> String {
     let comment = comment.map_or(String::new(), |comment| format!("    # {comment}\n"));
     format!(
-        "# Reference: https://parcela.davafons.com/docs/configuration/\nversion: 1\nproject: {project}\n\nservices:\n  web:\n{comment}    command: {command}\n    http:\n      healthcheck: /\n\n# Commands that prepare a new environment, such as installing packages or creating a database:\n# hooks:\n#   setup:\n#     command: bin/setup\n"
+        "# yaml-language-server: $schema=https://parcela.davafons.com/schema/v1.json\n# Reference: https://parcela.davafons.com/docs/configuration/\nversion: 1\nproject: {project}\n\nservices:\n  web:\n{comment}    command: {command}\n    http:\n      healthcheck: /\n\n# Commands that prepare a new environment, such as installing packages or creating a database:\n# hooks:\n#   setup:\n#     command: bin/setup\n"
     )
 }
 

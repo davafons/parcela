@@ -54,12 +54,14 @@ pub struct Process {
     pub healthcheck: Option<String>,
 }
 
+/// Commands that prepare an environment. Each runs after the services in its `depends_on` and before every other service.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Hooks {
-    /// Runs on the first `up` of a new environment.
+    /// Runs on the first `up` of an environment, and again with `up --setup`. Install packages, create and seed the database, copy secrets.
     pub setup: Option<Hook>,
-    /// Runs on every `up`, after `setup`.
+    /// Runs on every `up` and `restart`, after `setup`. Run migrations.
     pub prestart: Option<Hook>,
 }
 
@@ -76,17 +78,24 @@ impl Hooks {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Hook {
+    /// A shell command, run from the checkout root. A nonzero exit stops `up`.
     pub command: String,
+    /// Services to start, and wait for, before the hook runs.
     #[serde(default)]
     pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Task {
+    /// A shell command, run from the checkout root. Arguments after `--` are appended.
     pub command: String,
+    /// Stop the task after this many seconds and exit 124.
+    #[cfg_attr(test, schemars(range(min = 1)))]
     pub timeout_seconds: Option<u64>,
 }
 
@@ -95,40 +104,66 @@ pub const VERSION: u32 = 1;
 const SHUTDOWN_TIMEOUT_SECONDS: u64 = 300;
 
 /// `parcela.yaml` as written. Every field has one spelling and one shape.
+/// Reference: https://parcela.davafons.com/docs/configuration/
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[cfg_attr(test, schemars(title = "parcela.yaml", extend("patternProperties" = {"^x-": {}})))]
 #[serde(deny_unknown_fields)]
 struct File {
+    /// The file format version.
     #[serde(rename = "version")]
+    #[cfg_attr(test, schemars(extend("const" = 1)))]
     _version: u32,
+    /// The project name, used in every URL: `https://<project>.localhost:1443`.
+    #[cfg_attr(
+        test,
+        schemars(regex(pattern = r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"))
+    )]
     project: String,
+    /// Variables for every service, hook and task. Values can use `${NAME}` for any variable Parcela sets.
     #[serde(default)]
     env: BTreeMap<String, String>,
+    /// Extra ports to lease per environment, exported as `PARCELA_PORT_<NAME>`.
     #[serde(default)]
     ports: Vec<String>,
+    /// Every long-running process, keyed by name.
     services: BTreeMap<String, FileService>,
     #[serde(default)]
     hooks: Hooks,
+    /// Commands to run with `parcela task NAME`.
     #[serde(default)]
     tasks: BTreeMap<String, Task>,
 }
 
+/// A long-running process.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct FileService {
+    /// A shell command, run from the checkout root. HTTP services listen on `127.0.0.1:$PORT`.
     command: String,
+    /// Gives the service a port in `$PORT` and an HTTPS URL.
     http: Option<Http>,
+    /// For services without `http`: a shell command that exits 0 once the service is ready.
     healthcheck: Option<String>,
+    /// Services to start, and wait for, before this one.
     #[serde(default)]
     depends_on: Vec<String>,
+    /// A directory relative to the checkout root to run `command` in.
     working_dir: Option<String>,
+    /// Variables for this service only.
     #[serde(default)]
     env: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct Http {
+    /// The URL prefix: `https://<subdomain>-<environment>.localhost`. Leave it out on the one service that gets the environment's own URL.
     subdomain: Option<String>,
+    /// A path that answers 2xx once the service is ready, like `/up`.
+    #[cfg_attr(test, schemars(regex(pattern = "^/")))]
     healthcheck: String,
 }
 
@@ -505,4 +540,25 @@ pub fn locate(start: &Path) -> Result<PathBuf> {
         "no parcela.yaml in {} or above; create one with parcela init, or pass --path to a configured checkout",
         start.display()
     )
+}
+
+#[cfg(test)]
+mod schema {
+    /// The schema editors load from https://parcela.davafons.com/schema/v1.json.
+    const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docs/website/schema/v1.json");
+
+    #[test]
+    fn published_schema_matches_the_parser() {
+        let mut schema = serde_json::to_value(schemars::schema_for!(super::File)).unwrap();
+        schema["$id"] = "https://parcela.davafons.com/schema/v1.json".into();
+        let text = serde_json::to_string_pretty(&schema).unwrap() + "\n";
+        if std::env::var_os("PARCELA_UPDATE_SCHEMA").is_some() {
+            std::fs::write(PATH, &text).unwrap();
+        }
+        assert_eq!(
+            std::fs::read_to_string(PATH).unwrap_or_default(),
+            text,
+            "regenerate with PARCELA_UPDATE_SCHEMA=1 cargo test --lib schema"
+        );
+    }
 }

@@ -1,0 +1,218 @@
+{
+  "$defs": {
+    "FileService": {
+      "additionalProperties": false,
+      "description": "A long-running process.",
+      "properties": {
+        "command": {
+          "description": "A shell command, run from the checkout root. HTTP services listen on `127.0.0.1:$PORT`.",
+          "type": "string"
+        },
+        "depends_on": {
+          "default": [],
+          "description": "Services to start, and wait for, before this one.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Variables for this service only.",
+          "type": "object"
+        },
+        "healthcheck": {
+          "description": "For services without `http`: a shell command that exits 0 once the service is ready.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Http"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gives the service a port in `$PORT` and an HTTPS URL."
+        },
+        "working_dir": {
+          "description": "A directory relative to the checkout root to run `command` in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "Hook": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "A shell command, run from the checkout root. A nonzero exit stops `up`.",
+          "type": "string"
+        },
+        "depends_on": {
+          "default": [],
+          "description": "Services to start, and wait for, before the hook runs.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "Hooks": {
+      "additionalProperties": false,
+      "description": "Commands that prepare an environment. Each runs after the services in its `depends_on` and before every other service.",
+      "properties": {
+        "prestart": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Runs on every `up` and `restart`, after `setup`. Run migrations."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Runs on the first `up` of an environment, and again with `up --setup`. Install packages, create and seed the database, copy secrets."
+        }
+      },
+      "type": "object"
+    },
+    "Http": {
+      "additionalProperties": false,
+      "properties": {
+        "healthcheck": {
+          "description": "A path that answers 2xx once the service is ready, like `/up`.",
+          "pattern": "^/",
+          "type": "string"
+        },
+        "subdomain": {
+          "description": "The URL prefix: `https://<subdomain>-<environment>.localhost`. Leave it out on the one service that gets the environment's own URL.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "healthcheck"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "A shell command, run from the checkout root. Arguments after `--` are appended.",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "description": "Stop the task after this many seconds and exit 124.",
+          "format": "uint64",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://parcela.davafons.com/schema/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`parcela.yaml` as written. Every field has one spelling and one shape.\nReference: https://parcela.davafons.com/docs/configuration/",
+  "patternProperties": {
+    "^x-": {}
+  },
+  "properties": {
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {},
+      "description": "Variables for every service, hook and task. Values can use `${NAME}` for any variable Parcela sets.",
+      "type": "object"
+    },
+    "hooks": {
+      "$ref": "#/$defs/Hooks",
+      "default": {
+        "prestart": null,
+        "setup": null
+      }
+    },
+    "ports": {
+      "default": [],
+      "description": "Extra ports to lease per environment, exported as `PARCELA_PORT_<NAME>`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "project": {
+      "description": "The project name, used in every URL: `https://<project>.localhost:1443`.",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+      "type": "string"
+    },
+    "services": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FileService"
+      },
+      "description": "Every long-running process, keyed by name.",
+      "type": "object"
+    },
+    "tasks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Task"
+      },
+      "default": {},
+      "description": "Commands to run with `parcela task NAME`.",
+      "type": "object"
+    },
+    "version": {
+      "const": 1,
+      "description": "The file format version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "project",
+    "services"
+  ],
+  "title": "parcela.yaml",
+  "type": "object"
+}

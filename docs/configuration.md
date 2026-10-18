@@ -208,6 +208,14 @@ tasks:
 
 Arguments after `--` are appended: `parcela task test -- test/models` runs `bin/rails test test/models`.
 
+## Editor support
+
+The file format has a JSON Schema at `https://parcela.davafons.com/schema/v1.json`. Editors with the YAML language server, such as VS Code with the Red Hat YAML extension, use it for completion and validation when the file starts with this line, which `parcela init` writes:
+
+```yaml
+# yaml-language-server: $schema=https://parcela.davafons.com/schema/v1.json
+```
+
 ## Extension keys
 
 Top-level keys that start with `x-` are ignored, as in Docker Compose. Use them for YAML anchors:

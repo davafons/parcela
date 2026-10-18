@@ -4,6 +4,7 @@ use parcela::{config::Manifest, frontdoor::FrontDoor};
 use std::{fs, io::Write, path::Path};
 
 const DOCS: &str = "https://parcela.davafons.com/docs/configuration/";
+const SCHEMA: &str = "https://parcela.davafons.com/schema/v1.json";
 
 /// A guessed dev server command and the evidence it came from.
 struct Suggestion {
@@ -101,8 +102,9 @@ pub fn run(
             .context("--name needs letters or digits for a DNS-safe project name")?,
         None => parcela::config::inferred_project_name(&directory)?,
     };
-    let mut text =
-        format!("# Reference: {DOCS}\nversion: 1\nproject: {project}\n\nservices:\n  web:\n");
+    let mut text = format!(
+        "# yaml-language-server: $schema={SCHEMA}\n# Reference: {DOCS}\nversion: 1\nproject: {project}\n\nservices:\n  web:\n"
+    );
     if let Some(reason) = suggestion.reason {
         text.push_str(&format!("    # {reason}\n"));
     }

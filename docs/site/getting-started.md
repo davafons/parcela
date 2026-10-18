@@ -77,6 +77,7 @@ Next: parcela up
 `init` looks for `package.json`, a Rails app or Django to guess your dev server. This directory has none of those, so it serves the directory with Python. Open `parcela.yaml`:
 
 ```yaml
+# yaml-language-server: $schema=https://parcela.davafons.com/schema/v1.json
 # Reference: https://parcela.davafons.com/docs/configuration/
 version: 1
 project: hello

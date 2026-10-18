@@ -501,6 +501,9 @@ mod tests {
             super::without_title("\x1b]0;process-compose: mb/hooks\x07[setup\t] broken"),
             "[setup\t] broken"
         );
-        assert_eq!(super::without_title("plain \x1b]2;t\x1b\\line"), "plain line");
+        assert_eq!(
+            super::without_title("plain \x1b]2;t\x1b\\line"),
+            "plain line"
+        );
     }
 }
