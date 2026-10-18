@@ -46,6 +46,8 @@ hooks:
     command: printf x >> "$PARCELA_DATA_DIR/setup-runs" && echo seeded
   prestart:
     command: echo "migrated $(wc -c < "$PARCELA_DATA_DIR/setup-runs" | tr -d ' ')"
+  teardown:
+    command: echo "dropped $PARCELA_ENVIRONMENT_NAME" > "$PARCELA_DATA_DIR/teardown"
 '''
 BY_UUID = {'status', 'url', 'logs', 'restart', 'recover', 'down', 'task'}
 
@@ -212,5 +214,8 @@ def run(caddy, compose, **_):
         (hooks / 'parcela.yaml').write_text(HOOKS.replace('echo seeded', 'echo broken; exit 7'))
         failed = cli(hooks, 'up', '--detach', '--setup', '--process-compose', compose, check=False)
         assert failed.returncode != 0 and 'hooks.setup failed with exit code 7; its output is above' in failed.stderr, failed.stderr
-        cases.append('setup-runs-once-prestart-every-up-and-a-failed-setup-stops-up')
+        assert cli(hooks, 'rm').returncode == 0
+        assert (runtime / 'data' / 'teardown').read_text() == 'dropped hooks\n', 'rm runs hooks.teardown'
+        workspaces.pop(hooks)
+        cases.append('setup-runs-once-prestart-every-up-a-failed-setup-stops-up-and-rm-runs-teardown')
         return {'https_port': live.https, 'cases': cases}

@@ -101,6 +101,17 @@
             }
           ],
           "description": "Runs on the first `up` of an environment, and again with `up --setup`. Install packages, create and seed the database, copy secrets."
+        },
+        "teardown": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Runs on `parcela rm`, after the environment stopped. Drop its database or delete outside data. It cannot use `depends_on`."
         }
       },
       "type": "object"
@@ -169,7 +180,8 @@
       "$ref": "#/$defs/Hooks",
       "default": {
         "prestart": null,
-        "setup": null
+        "setup": null,
+        "teardown": null
       }
     },
     "ports": {

@@ -11,6 +11,7 @@ use crate::{
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::json;
+use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::{
     collections::BTreeMap,
@@ -1195,6 +1196,49 @@ pub fn task(
         &json!({"task":name,"exit_code":code,"outcome":outcome,"generation":workspace.generation,"environment_id":workspace.id,"automatic_retry":false}),
     )?;
     Ok(code)
+}
+
+/// Runs `hooks.teardown` for a stopped environment before `rm` forgets it. Its output goes to
+/// stderr, so `--json` stays parseable. Runs from the checkout, or the runtime directory once the
+/// checkout is gone.
+pub fn teardown(registry: &Registry, manifest: &Manifest, workspace: &Workspace) -> Result<()> {
+    let Some(hook) = &manifest.hooks.teardown else {
+        return Ok(());
+    };
+    let path = registry.runtime_path(workspace);
+    let env = match registry.session(&workspace.id)? {
+        Some(session) => session_environment(manifest, workspace, &path, &session)?,
+        None => environment(
+            manifest,
+            workspace,
+            &path,
+            &crate::lifecycle::url(registry, workspace)?,
+            None,
+            &[],
+            &BTreeMap::new(),
+        )?,
+    };
+    let directory = if workspace.source.is_dir() {
+        workspace.source.clone()
+    } else {
+        path.clone()
+    };
+    let mut command = Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(&hook.command)
+        .current_dir(directory)
+        .stdout(std::process::Stdio::from(
+            std::io::stderr().as_fd().try_clone_to_owned()?,
+        ));
+    command_env(&mut command, &env);
+    let status = command.status().context("run hooks.teardown")?;
+    ensure!(
+        status.success(),
+        "hooks.teardown failed with exit code {}; the environment stays registered",
+        exit_code(status)
+    );
+    Ok(())
 }
 
 fn live_status(

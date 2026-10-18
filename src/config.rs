@@ -63,9 +63,11 @@ pub struct Hooks {
     pub setup: Option<Hook>,
     /// Runs on every `up` and `restart`, after `setup`. Run migrations.
     pub prestart: Option<Hook>,
+    /// Runs on `parcela rm`, after the environment stopped. Drop its database or delete outside data. It cannot use `depends_on`.
+    pub teardown: Option<Hook>,
 }
 
-/// Hook names in run order. They also name the hook's process, so no service may use them.
+/// The hooks `up` runs, in order. They also name the hook's process, so no service may use them.
 pub const HOOKS: [&str; 2] = ["setup", "prestart"];
 
 impl Hooks {
@@ -395,6 +397,16 @@ impl Manifest {
             );
         }
         self.check_cycles()?;
+        if let Some(teardown) = &self.hooks.teardown {
+            ensure!(
+                !teardown.command.trim().is_empty() && !teardown.command.contains('\0'),
+                "hooks.teardown needs a command"
+            );
+            ensure!(
+                teardown.depends_on.is_empty(),
+                "hooks.teardown runs after every service stopped, so it cannot use depends_on"
+            );
+        }
         for (name, hook) in self.hooks.iter() {
             ensure!(
                 !hook.command.trim().is_empty() && !hook.command.contains('\0'),

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
+- A JSON Schema for `parcela.yaml` at `https://parcela.davafons.com/schema/v1.json`, generated from the parser. `parcela init` adds the line editors use to find it.
+
+### Fixed
+
+- Errors that show `owner.log` lines no longer include Process Compose's terminal-title escape.
+
 ## 0.3.0 - 2026-10-18
 
 `parcela.yaml` has a new format, version 1. Files written for 0.2 or earlier need rewriting, and `parcela doctor` links to the new format. The [configuration reference](docs/configuration.md) shows the new format.

@@ -121,8 +121,9 @@ hooks:
 |---|---|
 | `setup` | On the first `up` of an environment. Install packages, create and seed the database, copy secrets. `parcela up --setup` runs it again. |
 | `prestart` | On every `up` and `restart`, after `setup`. Run migrations or anything that must happen before the app starts. |
+| `teardown` | On `parcela rm`, after the environment stopped. Drop its database or delete data outside the checkout. It cannot use `depends_on`. For a checkout that is already gone, it runs from `PARCELA_RUNTIME_DIR` with the configuration of the last successful run. |
 
-Each hook has a `command` and an optional `depends_on`. On `up`, Parcela starts the hooks' `depends_on` services, waits until they are ready, runs `setup` if it is due, then `prestart`, then starts every other service. A hook that exits nonzero stops `up` with its exit code and output, and no other service starts. While the environment runs, `parcela logs setup` shows a hook's output again.
+`setup` and `prestart` take a `command` and an optional `depends_on`. On `up`, Parcela starts the hooks' `depends_on` services, waits until they are ready, runs `setup` if it is due, then `prestart`, then starts every other service. A hook that exits nonzero stops `up` with its exit code and output, and no other service starts. While the environment runs, `parcela logs setup` shows a hook's output again.
 
 A setup that fails runs again on the next `up`. Write it so it can run twice, like `bin/rails db:prepare` or `CREATE TABLE IF NOT EXISTS`.
 

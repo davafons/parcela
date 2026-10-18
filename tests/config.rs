@@ -168,6 +168,10 @@ fn every_rule_has_one_error() {
             "hooks.setup depends on db, which is not a service",
         ),
         (
+            format!("{minimal}hooks:\n  teardown: {{command: bin/drop, depends_on: [web]}}\n"),
+            "hooks.teardown runs after every service stopped, so it cannot use depends_on",
+        ),
+        (
             format!("{minimal}  setup: {{command: bin/setup}}\n"),
             "setup is reserved for hooks.setup; rename the service",
         ),

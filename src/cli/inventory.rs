@@ -179,12 +179,36 @@ pub fn remove(
         (vec![target_workspace(&existing, path, id)?], Vec::new())
     };
     let mut released = Vec::new();
-    for workspace in &targets {
+    let mut prepared = Vec::new();
+    for workspace in targets {
+        // The checkout's current file, or the one its last successful run recorded.
+        let manifest = if workspace.source.is_dir() {
+            Manifest::load(&workspace.source.join("parcela.yaml")).ok()
+        } else {
+            parcela::private::read_json(
+                &existing
+                    .runtime_path(&workspace)
+                    .join("last-successful.json"),
+            )
+            .ok()
+        };
+        if !running(&existing, &workspace)?
+            && let Some(manifest) = manifest
+            && let Err(error) = parcela::runtime::teardown(&existing, &manifest, &workspace)
+        {
+            if !prune {
+                return Err(error);
+            }
+            skipped.push(json!({"workspace": workspace, "reason": format!("{error:#}")}));
+            continue;
+        }
         released.push((
             existing.hosts(&workspace.id)?,
-            existing.runtime_path(workspace),
+            existing.runtime_path(&workspace),
         ));
+        prepared.push(workspace);
     }
+    let targets = prepared;
     drop(existing);
     let mut registry = Registry::open(state, true)?.context("registry disappeared")?;
     let mut forgotten = Vec::new();

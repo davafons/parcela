@@ -273,7 +273,7 @@ curl --cacert "$(parcela trust --print)" "$(parcela url)"
 parcela rm [--prune]
 ```
 
-Forgets a stopped environment and frees its URLs and ports. It refuses a running environment. Source and the runtime directory stay on disk.
+Forgets a stopped environment and frees its URLs and ports. It refuses a running environment. If `parcela.yaml` has `hooks.teardown`, `rm` runs it first, and a failed teardown keeps the environment registered. Parcela itself leaves the source and the runtime directory on disk.
 
 `--prune` forgets every stopped environment whose checkout directory no longer exists. Run it after you delete worktrees.
 
