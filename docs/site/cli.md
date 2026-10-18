@@ -166,10 +166,10 @@ hello    billing  not started  https://billing-hello.localhost:1443  /Users/you/
 ### parcela logs
 
 ```text
-parcela logs [SERVICE] [--tail N]
+parcela logs [SERVICE] [--tail N] [--follow]
 ```
 
-Prints the last lines of every service and worker, each line prefixed with its name. Name a service or worker to see only its output. `--tail` is the number of lines per process, 100 by default. It does not follow the log.
+Prints the last lines of every service and worker, each line prefixed with its name. Name a service or worker to see only its output. `--tail` is the number of lines per process, 100 by default. `--follow`, or `-f`, keeps printing new lines until Ctrl-C or until the environment stops.
 
 ```text
 $ parcela logs --tail 2

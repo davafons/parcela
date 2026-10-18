@@ -132,6 +132,9 @@ pub enum Command {
         /// Number of lines per process, 1 to 10000.
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=10000))]
         tail: u32,
+        /// Keep printing new lines until Ctrl-C or the environment stops.
+        #[arg(short, long)]
+        follow: bool,
     },
     /// Print the environment URL. It may not be reachable yet.
     Url {

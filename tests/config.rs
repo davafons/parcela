@@ -99,9 +99,13 @@ fn hooks_run_after_their_dependencies_and_before_everything_else() {
         json!({"db": {"condition": "process_healthy"}, "prestart": {"condition": "process_completed_successfully"}})
     );
     assert_eq!(processes["web"]["environment"], json!(["PORT=21000"]));
+    assert!(
+        processes["web"].get("readiness_probe").is_none(),
+        "nothing waits for web, so Process Compose never probes it"
+    );
     assert_eq!(
-        processes["web"]["readiness_probe"]["http_get"],
-        json!({"host": "127.0.0.1", "scheme": "http", "port": 21000, "path": "/up"})
+        processes["db"]["readiness_probe"]["exec"]["command"],
+        "pg_isready -h 127.0.0.1 -p \"$PARCELA_PORT_DB\""
     );
     assert_eq!(
         processes["api"]["environment"],

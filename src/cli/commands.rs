@@ -306,7 +306,16 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             out.emit(&status, |style| render::status(&status, style))?;
             Ok(0)
         }
-        Command::Logs { service, tail } => {
+        Command::Logs {
+            service,
+            tail,
+            follow: true,
+        } => {
+            let (registry, workspace) = reader()?;
+            lifecycle::follow_logs(&registry, &workspace, service.as_deref(), tail)?;
+            Ok(0)
+        }
+        Command::Logs { service, tail, .. } => {
             let (registry, workspace) = reader()?;
             let result = lifecycle::service_request(
                 &registry,

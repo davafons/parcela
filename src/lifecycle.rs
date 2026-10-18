@@ -399,3 +399,90 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
         std::thread::sleep(Duration::from_millis(100));
     }
 }
+
+/// Stream new log lines from a running environment's processes, each prefixed with its name unless
+/// one is named. Reads Process Compose directly, read-only, so the owner is never blocked.
+pub fn follow_logs(
+    registry: &Registry,
+    workspace: &Workspace,
+    service: Option<&str>,
+    tail: u32,
+) -> Result<()> {
+    use std::io::{BufRead, Write};
+    let listed = service_request(registry, workspace, Action::Services)?;
+    let mut names: Vec<String> = listed["services"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|process| process["name"].as_str().map(str::to_owned))
+        .collect();
+    names.sort();
+    if let Some(service) = service {
+        ensure!(
+            names.iter().any(|name| name == service),
+            "unknown service {service}; this run has {}",
+            names.join(", ")
+        );
+        names = vec![service.to_owned()];
+    }
+    let session = registry
+        .session(&workspace.id)?
+        .context("environment is not running")?;
+    let runtime = registry.runtime_path(workspace);
+    let record = crate::owner::Record::read(&runtime, &session)?;
+    let native = record
+        .native
+        .context("logs require a Process Compose environment")?;
+    let socket = crate::sockets::environment(&runtime)?.compose;
+    let width = names.iter().map(String::len).max().unwrap_or(0);
+    let prefixed = service.is_none();
+    let output = std::sync::Mutex::new(std::io::stdout());
+    let signals = Signals::new()?;
+    let mut children = Vec::new();
+    std::thread::scope(|scope| -> Result<()> {
+        let mut readers = Vec::new();
+        for name in &names {
+            let mut child = std::process::Command::new(&native.binary)
+                .args(["--use-uds", "--unix-socket"])
+                .arg(&socket)
+                .arg("--token-file")
+                .arg(runtime.join("pc.token"))
+                .arg("--log-file")
+                .arg(runtime.join("log/control.log"))
+                .args(["--read-only", "process", "logs", "--follow", "--tail"])
+                .arg(tail.to_string())
+                .arg("--")
+                .arg(name)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .context("start Process Compose log reader")?;
+            let stdout = child.stdout.take().context("log reader has no output")?;
+            children.push(child);
+            let output = &output;
+            readers.push(scope.spawn(move || {
+                for line in std::io::BufReader::new(stdout).lines() {
+                    let Ok(line) = line else { break };
+                    let mut out = output.lock().unwrap_or_else(|poison| poison.into_inner());
+                    let written = if prefixed {
+                        writeln!(out, "{name:width$} | {line}")
+                    } else {
+                        writeln!(out, "{line}")
+                    };
+                    if written.and_then(|()| out.flush()).is_err() {
+                        break;
+                    }
+                }
+            }));
+        }
+        // Readers end when the environment stops; a signal ends them here.
+        while signals.received() == 0 && !readers.iter().all(|reader| reader.is_finished()) {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        for child in &mut children {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        Ok(())
+    })
+}

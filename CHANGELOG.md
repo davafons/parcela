@@ -5,10 +5,12 @@
 ### Added
 
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
+- `parcela logs --follow` streams new lines from every process, or one.
 - A JSON Schema for `parcela.yaml` at `https://parcela.davafons.com/schema/v1.json`, generated from the parser. `parcela init` adds the line editors use to find it.
 
 ### Fixed
 
+- Process Compose probes only services that another service or hook waits for, so health checks no longer fill every HTTP service's log.
 - Errors that show `owner.log` lines no longer include Process Compose's terminal-title escape.
 
 ## 0.3.0 - 2026-10-18

@@ -398,20 +398,33 @@ pub fn compose_graph(
         );
     }
     let before_hooks = manifest.hook_dependencies();
+    // Process Compose probes forever, and every probe lands in the service's log, so only services
+    // something waits for get one.
+    let awaited: std::collections::BTreeSet<&str> = manifest
+        .processes
+        .values()
+        .flat_map(|process| &process.depends_on)
+        .chain(manifest.hooks.iter().flat_map(|(_, hook)| &hook.depends_on))
+        .map(String::as_str)
+        .collect();
     for (name, process) in &manifest.processes {
         let mut environment = Vec::new();
         let mut entry = serde_json::Map::new();
-        if let Some(endpoint) = endpoints.iter().find(|endpoint| &endpoint.service == name) {
+        let endpoint = endpoints.iter().find(|endpoint| &endpoint.service == name);
+        if let Some(endpoint) = endpoint {
             environment.push(format!("PORT={}", endpoint.backend_port));
-            entry.insert(
-                "readiness_probe".into(),
+        }
+        let probe = match (endpoint, &process.healthcheck) {
+            (Some(endpoint), _) => Some(
                 json!({"http_get": {"host": "127.0.0.1", "scheme": "http", "port": endpoint.backend_port, "path": manifest.services[name].readiness_path}, "period_seconds": 1, "failure_threshold": 100000}),
-            );
-        } else if let Some(healthcheck) = &process.healthcheck {
-            entry.insert(
-                "readiness_probe".into(),
+            ),
+            (None, Some(healthcheck)) => Some(
                 json!({"exec": {"command": healthcheck}, "period_seconds": 1, "timeout_seconds": 10, "failure_threshold": 100000}),
-            );
+            ),
+            (None, None) => None,
+        };
+        if let Some(probe) = probe.filter(|_| awaited.contains(name.as_str())) {
+            entry.insert("readiness_probe".into(), probe);
         }
         for (key, value) in &process.env {
             environment.push(format!("{key}={}", resolve(key, value, env)?));

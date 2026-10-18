@@ -71,6 +71,13 @@ def run(caddy, compose, **_):
         wait_for(lambda: 'cli-worker-ready' in cli(compose_path, 'logs', 'worker', '--tail', '10').stdout, [owner])
         assert 'PROCESS' in live.human(compose_path, 'status')
         assert 'worker | cli-worker-ready' in cli(compose_path, 'logs', '--tail', '10').stdout
+        follower = subprocess.Popen(live.argv(compose_path, 'logs', '--follow', '--tail', '10'), stdout=subprocess.PIPE, text=True)
+        assert any('worker | cli-worker-ready' in follower.stdout.readline() for _ in range(20)), 'logs --follow prints every process'
+        follower.send_signal(signal.SIGINT)
+        assert follower.wait(timeout=10) == 0, 'logs --follow exits cleanly on Ctrl-C'
+        compose_socket = json.loads((live.state / 'environments' / compose_id / 'context.json').read_text())['sockets']['compose']
+        readers = subprocess.run(['pgrep', '-f', f'{compose_socket}.*process logs'], capture_output=True, text=True).stdout
+        assert not readers, f'no log reader outlives logs --follow: {readers}'
         assert cli(compose_path, 'logs', 'unknown', check=False).returncode != 0
         assert cli(auth_path, 'restart', '--detach', '--process-compose', compose, check=False).returncode != 0
         assert preview.poll() is None
