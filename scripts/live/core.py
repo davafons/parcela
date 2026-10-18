@@ -74,6 +74,7 @@ def run(caddy, compose, **_):
         assert all(item['pid'] for item in status['processes']), status['processes']
         wait_for(lambda: 'cli-worker-ready' in cli(compose_path, 'logs', 'worker', '--tail', '10').stdout, [owner])
         assert 'PROCESS' in live.human(compose_path, 'status')
+        assert 'worker | cli-worker-ready' in cli(compose_path, 'logs', '--tail', '10').stdout
         assert cli(compose_path, 'logs', 'unknown', check=False).returncode != 0
         assert cli(auth_path, 'restart', '--detach', '--process-compose', compose, check=False).returncode != 0
         assert preview.poll() is None

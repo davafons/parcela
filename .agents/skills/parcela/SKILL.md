@@ -77,7 +77,7 @@ parcela --workspace "$ENVIRONMENT_ID" status
 parcela --workspace "$ENVIRONMENT_ID" logs backend --tail 100
 ```
 
-Read process names from `status.processes` before selecting logs. A legacy single-service graph can have a different process name from its routed service. Logs are bounded tails, not a follow stream. Avoid copying secrets from diagnostics.
+`logs` without a name prints every process, each line prefixed with `name |`. Process names are in `status.processes`. Logs are bounded tails, not a follow stream. Avoid copying secrets from diagnostics.
 
 `unknown`, `interrupted`, missing evidence or a replaced native handle is not permission to clear locks, delete sockets, free leases or kill a process. Never signal a persisted PID, use broad `pkill`, or bypass the owner through raw native commands. Preserve the diagnostic and ask for an explicit recovery or manual intervention plan.
 

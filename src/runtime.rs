@@ -1098,61 +1098,76 @@ fn compose_read(
     manifest: &Manifest,
     env: &BTreeMap<String, String>,
 ) -> Result<serde_json::Value> {
-    let mut command = Command::new(binary);
-    command
-        .args(["--use-uds", "--unix-socket"])
-        .arg(crate::sockets::environment(runtime)?.compose)
-        .arg("--token-file")
-        .arg(runtime.join("pc.token"))
-        .arg("--log-file")
-        .arg(runtime.join("log/control.log"))
-        .arg("--read-only");
-    command_env(&mut command, manifest, env);
+    let run = |args: &[&str]| -> Result<Vec<u8>> {
+        let mut command = Command::new(binary);
+        command
+            .args(["--use-uds", "--unix-socket"])
+            .arg(crate::sockets::environment(runtime)?.compose)
+            .arg("--token-file")
+            .arg(runtime.join("pc.token"))
+            .arg("--log-file")
+            .arg(runtime.join("log/control.log"))
+            .arg("--read-only")
+            .args(args);
+        command_env(&mut command, manifest, env);
+        let output = crate::process::capture(&mut command, Duration::from_secs(3), 512000)?;
+        ensure!(
+            output.status.success(),
+            "Process Compose inspection failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output.stdout)
+    };
     match action {
-        Action::Services => {
-            command.args(["process", "list", "--output", "json"]);
-        }
+        Action::Services => Ok(json!({
+            "services": serde_json::from_slice::<serde_json::Value>(&run(&[
+                "process", "list", "--output", "json"
+            ])?)?
+        })),
         Action::Logs { service, tail } => {
-            let service = service.as_ref().unwrap_or(&manifest.default_service);
             ensure!(
                 *tail > 0 && *tail <= 10000,
                 "log tail must be between 1 and 10000"
             );
-            ensure!(
-                manifest
-                    .process_compose
-                    .as_ref()
-                    .and_then(|graph| graph.get("processes"))
-                    .and_then(|processes| processes.get(service))
-                    .is_some(),
-                "unknown service {service}"
-            );
-            ensure!(
-                !service.starts_with('-') && !service.contains([',', '\n', '\r', '\0']),
-                "invalid service name"
-            );
-            command.args([
-                "process",
-                "logs",
-                "--tail",
-                &tail.to_string(),
-                "--",
-                service,
-            ]);
+            let processes = manifest
+                .process_compose
+                .as_ref()
+                .and_then(|graph| graph.get("processes"))
+                .and_then(|processes| processes.as_object())
+                .context("environment has no processes")?;
+            let names: Vec<&str> = match service {
+                Some(service) => {
+                    ensure!(processes.contains_key(service), "unknown service {service}");
+                    vec![service]
+                }
+                None => processes.keys().map(String::as_str).collect(),
+            };
+            let width = names.iter().map(|name| name.len()).max().unwrap_or(0);
+            let mut logs = String::new();
+            for name in &names {
+                ensure!(
+                    !name.starts_with('-') && !name.contains([',', '\n', '\r', '\0']),
+                    "invalid service name"
+                );
+                let output = String::from_utf8(run(&[
+                    "process",
+                    "logs",
+                    "--tail",
+                    &tail.to_string(),
+                    "--",
+                    name,
+                ])?)?;
+                if service.is_some() {
+                    logs.push_str(&output);
+                    continue;
+                }
+                for line in output.lines() {
+                    logs.push_str(&format!("{name:width$} | {line}\n"));
+                }
+            }
+            Ok(json!({"logs": logs}))
         }
         _ => anyhow::bail!("not a backend inspection action"),
-    }
-    let output = crate::process::capture(&mut command, Duration::from_secs(3), 512000)?;
-    ensure!(
-        output.status.success(),
-        "Process Compose inspection failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    match action {
-        Action::Services => {
-            Ok(json!({"services": serde_json::from_slice::<serde_json::Value>(&output.stdout)?}))
-        }
-        _ => Ok(json!({"logs": String::from_utf8(output.stdout)?})),
     }
 }
 

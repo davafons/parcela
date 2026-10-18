@@ -119,11 +119,11 @@ pub enum Command {
     },
     /// List every registered environment, plus this project's checkouts that were never started.
     Ls,
-    /// Print recent output of one service. Defaults to the web service.
+    /// Print recent output of every service and worker, or of one.
     Logs {
-        /// Service or worker name.
+        /// Service or worker name. Without it, every process's lines are prefixed with its name.
         service: Option<String>,
-        /// Number of lines, 1 to 10000.
+        /// Number of lines per process, 1 to 10000.
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=10000))]
         tail: u32,
     },

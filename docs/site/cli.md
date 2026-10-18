@@ -168,11 +168,17 @@ hello    billing  not started  https://billing-hello.localhost:1443  /Users/you/
 parcela logs [SERVICE] [--tail N]
 ```
 
-Prints the last lines of a service's or worker's output. The default is the web service and 100 lines, and `--tail` takes 1 to 10000. It does not follow the log.
+Prints the last lines of every service and worker, each line prefixed with its name. Name a service or worker to see only its output. `--tail` is the number of lines per process, 100 by default. It does not follow the log.
 
 ```text
-$ parcela logs ticker --tail 3
-tick 1
+$ parcela logs --tail 2
+api    | 127.0.0.1 - - [18/Oct/2026 19:06:52] "GET / HTTP/1.1" 200 -
+api    | 127.0.0.1 - - [18/Oct/2026 19:06:53] "GET / HTTP/1.1" 200 -
+ticker | tick 1
+ticker | tick 2
+web    | 127.0.0.1 - - [18/Oct/2026 19:06:52] "GET / HTTP/1.1" 200 -
+
+$ parcela logs ticker --tail 2
 tick 2
 tick 3
 ```

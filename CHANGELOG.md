@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `parcela logs` without a service prints every service and worker, each line prefixed with its name.
+
+### Fixed
+
+- `parcela doctor` names the right Process Compose tap (`f1bonacc1/tap/process-compose`) and links each backend's install page.
+
 ## 0.2.0 - 2026-10-18
 
 A smaller CLI and a faster proxy.
