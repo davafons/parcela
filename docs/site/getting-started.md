@@ -1,5 +1,38 @@
 # Getting started with Parcela
 
+## Let your agent set it up
+
+Most people start here. Paste this into Claude Code, Codex or any coding agent, from the root of your project:
+
+```text
+Set up Parcela for this project, so that `parcela up` alone runs the whole
+app in any checkout or worktree, each at its own HTTPS URL.
+
+1. If `parcela --version` fails, install it:
+   curl -fsSL https://parcela.davafons.com/install.sh | sh
+   Then run `parcela doctor` and tell me what it says is missing.
+2. Read `parcela --skill` and https://parcela.davafons.com/docs/configuration/.
+3. Find how the project runs today: Procfile, bin/dev, docker-compose.yml,
+   package.json scripts, Makefile, README. Don't read .env files or secrets.
+4. Write parcela.yaml with the project's real commands:
+   - one service per process; HTTP services listen on 127.0.0.1:$PORT and
+     have an http.healthcheck;
+   - data that belongs to each environment: SQLite under $PARCELA_DATA_DIR,
+     or one database per environment;
+   - hooks.setup to install packages, copy .env from $PARCELA_PRIMARY_DIR and
+     create and seed the database; hooks.prestart to run migrations.
+   Ask me before deciding how databases, uploads or queues are shared.
+5. Run `parcela doctor`, then `parcela up --detach`. Check every URL with
+   curl and read `parcela logs`. Fix what fails.
+6. Show me parcela.yaml and what you verified. Leave the app running.
+```
+
+When it is done, every worktree you or your agents create runs the full app with `parcela up`. Install the [Parcela skill for Claude Code](worktrees.md#set-up-a-coding-agent) so agents keep using it correctly.
+
+The rest of this page builds a small app by hand, so you know what the agent did.
+
+## Build it by hand
+
 This guide takes you from nothing to a small app with a database, running at named HTTPS URLs, with a second copy of it running next to the first.
 
 ## What you'll build

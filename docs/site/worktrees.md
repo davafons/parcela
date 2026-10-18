@@ -135,22 +135,4 @@ Then ask Claude Code something bounded:
 
 ### Ask an agent to configure a project
 
-Paste this into your agent to have it write `parcela.yaml` for a project:
-
-```text
-Configure this checkout for Parcela.
-
-Read `parcela --skill` and https://parcela.davafons.com/docs/configuration/.
-Look at how the project starts its dev servers, workers and databases today.
-Don't read .env files or credentials.
-
-Write a minimal parcela.yaml with the project's real commands. Every HTTP
-service must listen on 127.0.0.1:$PORT. Give each environment its own data
-under $PARCELA_DATA_DIR, and put install, database creation and seeding in
-hooks.setup and migrations in hooks.prestart, so `parcela up` alone prepares
-a fresh worktree. Ask me before choosing how databases, uploads or queues
-are shared.
-
-Run `parcela doctor`. Don't start services, run migrations or install anything.
-Show me the diff and the commands to start it.
-```
+[Getting started](getting-started.md#let-your-agent-set-it-up) has a prompt that installs Parcela and writes `parcela.yaml` for an existing project.

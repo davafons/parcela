@@ -22,6 +22,8 @@ curl -fsSL https://parcela.davafons.com/install.sh | sh
 
 Or with Homebrew: `brew install davafons/tap/parcela`.
 
+Using a coding agent? [Paste it this prompt](getting-started.md#let-your-agent-set-it-up) and it installs Parcela and configures your project.
+
 ## Five minutes to a running app
 
 ### Describe your app
