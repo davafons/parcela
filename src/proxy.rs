@@ -86,7 +86,7 @@ pub fn started_hint(router: &Router, host: &str) -> String {
         FrontDoor::Port { https } => format!(
             "Started the proxy on :{https}. Run `parcela trust` to trust https://{host}:{https}"
         ),
-        FrontDoor::Standard { .. } => "Started the proxy on ports 80 and 443".into(),
+        FrontDoor::Standard { .. } => "Started the proxy on ports 443 and 80".into(),
     }
 }
 
@@ -157,7 +157,7 @@ fn launch(
     }
     ensure!(
         matches!(front_door, FrontDoor::Port { .. }) || front_door == FrontDoor::load(state)?,
-        "standard ports must be saved in proxy/frontdoor.json with a forwarder in place before the proxy starts on them"
+        "ports 443 and 80 need `parcela proxy forward`"
     );
     let log_file = log_path(state);
     let log = OpenOptions::new()

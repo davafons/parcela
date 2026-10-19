@@ -3,6 +3,7 @@ pub mod config;
 pub mod context;
 pub mod control;
 pub mod discovery;
+pub mod forward;
 pub mod frontdoor;
 pub mod http;
 pub mod lifecycle;

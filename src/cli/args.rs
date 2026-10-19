@@ -237,6 +237,15 @@ pub enum ProxyCommand {
     },
     /// Show the proxy's status
     Status,
+    /// Serve URLs on ports 443 and 80 (asks for your password)
+    Forward {
+        /// Stop forwarding and go back to the proxy's own port
+        #[arg(long)]
+        remove: bool,
+        /// Caddy binary.
+        #[arg(long, default_value = "caddy", hide = true)]
+        caddy: String,
+    },
     /// Run the proxy in the foreground
     #[command(hide = true)]
     Run {

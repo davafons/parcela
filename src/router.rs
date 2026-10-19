@@ -72,7 +72,7 @@ pub fn current(state: &Path) -> Result<Router> {
     verify(state, &router)?;
     if router.front_door.http_listener().is_some() {
         http::front_door(80, &router.id())
-            .context("standard-port forwarding is not active; complete explicit host setup")?;
+            .context("ports 443 and 80 do not reach the proxy; run `parcela proxy forward` again, or `parcela proxy forward --remove`")?;
     }
     Ok(router)
 }

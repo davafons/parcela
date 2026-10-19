@@ -58,7 +58,7 @@ impl FrontDoor {
         let listeners = self.listeners();
         ensure!(
             listeners.iter().all(|port| *port >= 1024),
-            "the proxy listens only on unprivileged ports (1024 or higher); standard ports 443 and 80 need a separate forwarder"
+            "the proxy listens only on ports 1024 or higher; for 443 and 80 run `parcela proxy forward`"
         );
         ensure!(
             listeners.first() != listeners.get(1),
@@ -100,7 +100,7 @@ impl FrontDoor {
         match self {
             Self::Port { https } => format!("HTTPS on :{https}"),
             Self::Standard { https, http } => {
-                format!("standard ports 443/80, forwarded to :{https}/:{http}")
+                format!("HTTPS on :443, forwarded to :{https} (HTTP :80 to :{http})")
             }
         }
     }

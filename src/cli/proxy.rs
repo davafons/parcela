@@ -2,6 +2,7 @@
 use super::{args::ProxyCommand, output::Output, render};
 use anyhow::{Context, Result};
 use parcela::{
+    forward,
     frontdoor::FrontDoor,
     proxy::{self, Started, Status},
     registry::Registry,
@@ -102,6 +103,41 @@ pub fn run(state: &Path, command: ProxyCommand, out: Output) -> Result<i32> {
             }
             proxy::stop(state)?;
             let started = proxy::start(state, &listen.caddy, front_door, true)?;
+            report_started(state, &started, out)
+        }
+        ProxyCommand::Forward { remove, caddy } => {
+            Registry::open(state, true)?.context("cannot create the registry")?;
+            let current = FrontDoor::load(state)?;
+            let https = current.https_listener();
+            if remove {
+                eprintln!(
+                    "Removing the forward from ports 443 and 80. It may ask for your password."
+                );
+                forward::remove()?;
+                FrontDoor::Port { https }.save(state)?;
+            } else {
+                if matches!(current, FrontDoor::Port { .. }) {
+                    for port in [443, 80] {
+                        anyhow::ensure!(
+                            !forward::answers(port),
+                            "port {port} is already in use; stop whatever serves it, then run this again"
+                        );
+                    }
+                    parcela::router::probe_listener(forward::HTTP_PORT)?;
+                }
+                eprintln!(
+                    "Forwarding ports 443 and 80 to :{https} and :{} with pf. It may ask for your password.\n  undo  parcela proxy forward --remove",
+                    forward::HTTP_PORT
+                );
+                forward::install(https, forward::HTTP_PORT)?;
+                FrontDoor::Standard {
+                    https,
+                    http: forward::HTTP_PORT,
+                }
+                .save(state)?;
+            }
+            proxy::stop(state)?;
+            let started = proxy::start(state, &caddy, FrontDoor::load(state)?, true)?;
             report_started(state, &started, out)
         }
         ProxyCommand::Stop => {

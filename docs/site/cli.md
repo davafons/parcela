@@ -230,6 +230,7 @@ parcela proxy start [--port N]
 parcela proxy stop
 parcela proxy restart [--port N]
 parcela proxy status
+parcela proxy forward [--remove]
 ```
 
 The proxy is one background Caddy that serves the URLs of every environment. `up` starts it when it is not running, and if it dies while environments run, for example because Caddy crashed or was killed, they start it again within a few seconds. You rarely need these commands.
@@ -238,6 +239,7 @@ The proxy is one background Caddy that serves the URLs of every environment. `up
 - `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`.
 - `restart` replaces the proxy. Run it after upgrading Parcela.
 - `status` shows the port, process IDs, version and log file. It exits 1 when the proxy is not running.
+- `forward` serves URLs on ports 443 and 80, so they carry no port: `https://hello.localhost`. The proxy stays unprivileged. On macOS, a pf rule forwards loopback 443 to 1443 and 80 to 1080, and a LaunchDaemon (`org.parcela.pf`) loads that rule again at boot. Installing them needs your password once. `forward` refuses when something else already answers on 443 or 80. `forward --remove` takes the rule and daemon out and goes back to `:1443`. Linux is not supported yet.
 
 ```text
 $ parcela proxy status

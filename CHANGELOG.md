@@ -4,6 +4,7 @@
 
 ### Added
 
+- `parcela proxy forward` serves URLs on ports 443 and 80 on macOS, without a port in the URL. It asks for your password once to install a pf rule and its boot daemon; `--remove` undoes it.
 - Colors on a terminal: help, errors, and a color per process in `parcela logs`. `NO_COLOR` turns them off.
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
 - `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when they are missing, checking each download against its release checksums.
