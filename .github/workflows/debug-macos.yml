@@ -11,23 +11,18 @@ jobs:
       - run: cargo build --locked
       - name: probe
         run: |
-          set -x
-          python3 -m http.server 31001 --bind 127.0.0.1 >/dev/null 2>&1 &
-          sleep 2
-          /usr/sbin/lsof -nP -iTCP:31001 -sTCP:LISTEN -Fptn; echo "lsof=$?"
-          sudo /usr/sbin/lsof -nP -iTCP:31001 -sTCP:LISTEN -Fptn; echo "sudo lsof=$?"
-          ps -o ppid= -p $!; echo "ps=$?"
-          id; ulimit -a | head -3
-          kill %1
-          D=$(mktemp -d /tmp/dbg.XXXX); cp -R examples/docs-demo $D/hello
-          P="target/debug/parcela --path $D/hello --state-dir $D/state"
-          $P proxy start --port 31555
-          $P up --detach --readiness-timeout 25 &
-          sleep 10
-          $P --json status | head -120
-          /usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fptn
-          ps -A -o pid,ppid,command | grep -v grep | grep -E "parcela|python|process-compose"
-          W=$(pgrep -f "http.server" | head -1); echo "web pid $W"
-          /usr/sbin/lsof -nP -p $W | grep -iE "tcp|ipv4|sock" 
-          sample $W 1 2>&1 | grep -vE "^\s*$" | sed -n '1,80p'
-          wait
+          cat > /tmp/fq.py <<'PY'
+          import socket, time, sys
+          t = time.time()
+          print(sys.argv[1], socket.getfqdn('127.0.0.1'), round(time.time() - t, 2), flush=True)
+          PY
+          python3 /tmp/fq.py direct
+          cat > /tmp/pc.yaml <<'YML'
+          processes:
+            fq:
+              command: python3 /tmp/fq.py under-pc
+          YML
+          process-compose -f /tmp/pc.yaml -t=false --port 31777 2>/dev/null | head -5 &
+          sleep 45; kill %1 || true
+          env -i PATH=$PATH HOME=$HOME python3 /tmp/fq.py env-i
+          setsid true 2>/dev/null; python3 -c "import os; os.setsid(); import subprocess; subprocess.run(['python3','/tmp/fq.py','setsid'])"
