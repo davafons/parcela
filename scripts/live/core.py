@@ -101,7 +101,8 @@ def run(caddy, compose, **_):
         first = live.json(compose_path, 'up', '--detach', '--process-compose', compose)
         assert first['detached'] and first['live']['state'] == 'ready'
         assert first['workspace']['generation'] == first['session']['generation']
-        assert cli(compose_path, 'up', '--detach', '--process-compose', compose, check=False).returncode != 0
+        again = live.json(compose_path, 'up', '--detach', '--process-compose', compose)
+        assert again['already_running'] and again['session']['token'] == first['session']['token']
         second = live.json(compose_path, 'restart', '--detach', '--process-compose', compose)
         assert second['session']['generation'] > first['session']['generation']
         assert second['session']['token'] != first['session']['token']

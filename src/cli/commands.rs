@@ -3,7 +3,7 @@ use super::{
     output::{Output, status_diagnostics},
     render,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use parcela::{
     config::{Manifest, locate},
     context::ResolvedContext,
@@ -565,7 +565,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
 }
 
 /// `up` on a ready environment reports it like a fresh start, as `docker compose up -d` does.
-/// Any other live state, or a ready run without the sharing asked for, is refused.
+/// A ready run without the sharing asked for is refused.
 fn already_running(
     registry: &Registry,
     workspace: &Workspace,
@@ -579,14 +579,10 @@ fn already_running(
     }
     let status = lifecycle::status(registry, workspace)?;
     let name = render::name(&serde_json::to_value(workspace)?);
+    // Anything but ready goes on to the start path, which takes back or replaces a crashed run.
     let state = status["state"].as_str().unwrap_or("unknown");
-    match state {
-        "ready" => {}
-        "unknown" => bail!(
-            "{name} has a run Parcela cannot reach ({}); see `parcela status`",
-            status["diagnostic"].as_str().unwrap_or("no owner")
-        ),
-        _ => bail!("{name} is {state}; see `parcela status`, or run `parcela restart`"),
+    if state != "ready" {
+        return Ok(None);
     }
     let shared: Vec<&str> = status["live"]["endpoints"]
         .as_object()

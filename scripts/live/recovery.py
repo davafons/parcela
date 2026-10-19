@@ -311,11 +311,12 @@ def up_recovers_surviving_graph(f):
     assert status['state'] == 'ready' and [process['name'] for process in status['processes']] == ['web'], status
     assert status['processes'][0]['state'] == 'running' and status['processes'][0]['pid'], status
     duplicate = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
-    assert duplicate.returncode != 0 and json.loads(f.probe(app)[1])['pid'] == service['pid'], 'a live owner is never replaced'
+    assert duplicate.returncode == 0 and json.loads(duplicate.stdout)['already_running'], duplicate.stderr
+    assert f.session(app)['token'] == before['token'] and json.loads(f.probe(app)[1])['pid'] == service['pid'], 'a live owner is never replaced'
     down = f.cli(app['path'], 'down')
     assert down.returncode == 0 and json.loads(down.stdout)['state'] == 'stopped', down.stderr
     assert not listening(app['port'])
-    return {'up_detach_recovered': True, 'service_pid_preserved': True, 'generation_preserved': True, 'duplicate_up_refused': True}
+    return {'up_detach_recovered': True, 'service_pid_preserved': True, 'generation_preserved': True, 'duplicate_up_reported': True}
 
 def up_foreground_recovers_surviving_graph(f):
     app = f.app('upforeground')
