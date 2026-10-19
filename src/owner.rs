@@ -51,6 +51,9 @@ pub struct Record {
     pub native: Option<Native>,
     pub manifest: Manifest,
     pub diagnostic: Option<String>,
+    /// Records from before sharing have none.
+    #[serde(default)]
+    pub share: crate::share::Share,
 }
 impl Record {
     pub fn read(path: &Path, expected: &Session) -> Result<Self> {
@@ -166,8 +169,13 @@ impl Record {
             .arg(path.join("log/recovery.log"));
         let mut resolved = workspace.clone();
         resolved.generation = self.session.generation;
-        let env =
-            crate::runtime::session_environment(&self.manifest, &resolved, path, &self.session)?;
+        let env = crate::runtime::session_environment(
+            &self.manifest,
+            &resolved,
+            path,
+            &self.session,
+            &self.share,
+        )?;
         crate::runtime::command_env(&mut command, &env);
         Ok(command)
     }

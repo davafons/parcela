@@ -15,5 +15,6 @@ pub mod proxy;
 pub mod registry;
 pub mod router;
 pub mod runtime;
+pub mod share;
 pub mod sockets;
 pub mod startup;

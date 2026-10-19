@@ -196,6 +196,7 @@ fn context_placeholders_reserved_names_and_readiness_validation() {
         Some(32001),
         &[],
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     assert!(env["DATA_DIR"].ends_with("/data"));
@@ -216,6 +217,7 @@ fn context_placeholders_reserved_names_and_readiness_validation() {
             "https://auth-app.localhost",
             None,
             &[],
+            &Default::default(),
             &Default::default(),
         )
         .is_err()

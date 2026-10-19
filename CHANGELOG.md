@@ -4,6 +4,7 @@
 
 ### Added
 
+- `up --lan` and `up --tailscale` (and `restart`) also serve one environment to other devices: at `.local` names on the LAN through mDNS, or on the tailnet through `tailscale serve`. `PARCELA_SHARE_HOSTS` lists the shared hostnames for a dev server's host check.
 - Colors on a terminal: help, errors, and a color per process in `parcela logs`. `NO_COLOR` turns them off.
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
 - `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when they are missing, checking each download against its release checksums.

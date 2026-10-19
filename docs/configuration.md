@@ -244,6 +244,7 @@ Every service, hook and task receives these. Service names are uppercased, with 
 | `HOST` | `127.0.0.1` |
 | `PARCELA_URL` | `https://shop.localhost:1443`, the environment's URL |
 | `PARCELA_HOSTNAME` | `shop.localhost` |
+| `PARCELA_SHARE_HOSTS` | `shop.local,mb.tail1234.ts.net`, the hostnames other devices use after `up --lan` or `--tailscale`. Empty otherwise. Add them to your dev server's allowed hosts. |
 | `PARCELA_SERVICE_<NAME>_URL` | `PARCELA_SERVICE_API_URL=https://api-shop.localhost:1443` |
 | `PARCELA_SERVICE_<NAME>_HOSTNAME` | `PARCELA_SERVICE_API_HOSTNAME=api-shop.localhost` |
 | `PARCELA_SERVICE_<NAME>_PORT` | `PARCELA_SERVICE_API_PORT=26798` |

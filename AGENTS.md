@@ -6,7 +6,8 @@ Use jj for version control; preserve unrelated work and never use mutating Git c
 - Read docs/architecture.md before architecture changes.
 - Keep Caddy routing/TLS and Process Compose supervision as maintained backends.
 - Defaults: HTTPS on the no-sudo port 1443, loopback only, flat names, tenants off.
-- Never take over listeners, trust a CA, expose LAN/tailnet services, or delete source/data implicitly.
+- Never take over listeners, trust a CA, expose LAN/tailnet services, or delete source/data implicitly. Sharing is per run, only through `up --lan`/`--tailscale`; never Tailscale Funnel.
+- Share live tests only on disposable environments, and check `down` removes the mDNS names and `tailscale serve` config.
 - Keep project commands/data policy in configuration; no framework assumptions in core.
 - Run cargo fmt --check, cargo clippy --all-targets -- -D warnings, cargo test, and scripts/check for code changes.
 - Test live processes only in disposable directories with isolated state and explicit test ports.

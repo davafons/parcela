@@ -12,7 +12,11 @@ prepareContent();
 
 export default defineConfig({
   srcDir,
-  vite: { plugins: [watchSources] },
+  // `parcela up --lan` or `--tailscale` lists the names other devices use, for Vite's host check.
+  vite: {
+    plugins: [watchSources],
+    server: { allowedHosts: (process.env.PARCELA_SHARE_HOSTS ?? '').split(',').filter(Boolean) },
+  },
   base,
   outDir: resolve(project, process.env.DOCS_OUTPUT ?? '../../target/docs'),
   cacheDir: resolve(project, '.generated/cache'),

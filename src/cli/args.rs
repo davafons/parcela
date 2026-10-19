@@ -87,6 +87,12 @@ pub enum Command {
         /// Port for the main service
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
+        /// Also serve at .local names on the LAN
+        #[arg(long)]
+        lan: bool,
+        /// Also serve on your tailnet with tailscale serve
+        #[arg(long)]
+        tailscale: bool,
         /// Process Compose binary.
         #[arg(long, default_value = "process-compose", hide = true)]
         process_compose: String,
@@ -117,6 +123,12 @@ pub enum Command {
         /// Port for the main service
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
+        /// Also serve at .local names on the LAN
+        #[arg(long)]
+        lan: bool,
+        /// Also serve on your tailnet with tailscale serve
+        #[arg(long)]
+        tailscale: bool,
         /// Process Compose binary.
         #[arg(long, default_value = "process-compose", hide = true)]
         process_compose: String,

@@ -9,7 +9,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    net::TcpListener,
+    net::{Ipv4Addr, TcpListener},
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -92,22 +92,30 @@ pub fn sync(registry: &Registry, router: &Router) -> Result<()> {
     verify(state, router)?;
     let routes = routes(registry, router)?;
     renew_leases(registry, router, &routes)?;
-    let config = render(registry, router, &routes)?;
+    let mut config = render(registry, router, &routes, true)?;
+    // A LAN listener Caddy could not open never takes the loopback routes down with it.
+    if FAILED_LAN
+        .lock()
+        .is_ok_and(|failed| failed.as_ref() == Some(&config))
+    {
+        config = render(registry, router, &routes, false)?;
+    }
     let cached: Result<Value> = private::read_json(&proxy_dir(state).join("loaded.json"));
     if cached.is_ok_and(|cached| cached == config) {
         return Ok(());
     }
-    let (status, response) = http::admin(
-        &socket(state)?,
-        "POST",
-        "/load",
-        &serde_json::to_vec(&config)?,
-    )?;
-    ensure!(
-        status == 200,
-        "Caddy rejected owned route update: {}",
-        String::from_utf8_lossy(&response)
-    );
+    if let Err(error) = load(state, &config) {
+        ensure!(
+            config["apps"]["http"]["servers"].get("lan").is_some(),
+            error
+        );
+        eprintln!("parcela: LAN sharing is off; Caddy could not listen there: {error:#}");
+        if let Ok(mut failed) = FAILED_LAN.lock() {
+            *failed = Some(config);
+        }
+        config = render(registry, router, &routes, false)?;
+        load(state, &config)?;
+    }
     private::write_json(&proxy_dir(state).join("loaded.json"), &config)?;
     if let Ok(mut evidence) =
         private::read_json::<ProxyEvidence>(&proxy_dir(state).join("owner.json"))
@@ -120,6 +128,36 @@ pub fn sync(registry: &Registry, router: &Router) -> Result<()> {
         private::write_json(&proxy_dir(state).join("owner.json"), &evidence)?;
     }
     Ok(())
+}
+/// The last configuration whose LAN listener Caddy refused.
+static FAILED_LAN: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+fn load(state: &Path, config: &Value) -> Result<()> {
+    let (status, response) = http::admin(
+        &socket(state)?,
+        "POST",
+        "/load",
+        &serde_json::to_vec(config)?,
+    )?;
+    ensure!(
+        status == 200,
+        "Caddy rejected owned route update: {}",
+        String::from_utf8_lossy(&response)
+    );
+    Ok(())
+}
+
+/// Whether the loaded proxy configuration already listens on `ip:port` for the LAN.
+pub fn lan_listening(state: &Path, ip: Ipv4Addr, port: u16) -> bool {
+    private::read_json::<Value>(&proxy_dir(state).join("loaded.json")).is_ok_and(|config| {
+        config["apps"]["http"]["servers"]["lan"]["listen"]
+            .as_array()
+            .is_some_and(|listen| {
+                listen
+                    .iter()
+                    .any(|address| address == &json!(format!("{ip}:{port}")))
+            })
+    })
 }
 fn lease_directory(state: &Path, router: &Router, session: &Session) -> PathBuf {
     proxy_dir(state)
@@ -140,6 +178,8 @@ pub fn route_published(registry: &Registry, router: &Router, session: &Session) 
 struct Route {
     session: Session,
     dials: Vec<(Endpoint, std::net::SocketAddr)>,
+    /// The LAN address of a run started with `--lan`.
+    lan: Option<Ipv4Addr>,
 }
 /// Every routable session, checked once per update with one listener snapshot.
 fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
@@ -156,16 +196,15 @@ fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
             && record.owner_holds(&path)
         {
             let endpoints = session.endpoints(&record.manifest.default_service);
-            candidates.push((session, record.supervisor.pid, endpoints));
+            candidates.push((session, record.supervisor.pid, endpoints, record.share.lan));
         }
     }
-    let listeners = crate::process::Listeners::inspect(
-        candidates
-            .iter()
-            .flat_map(|(_, _, endpoints)| endpoints.iter().map(|endpoint| endpoint.backend_port)),
-    )?;
+    let listeners =
+        crate::process::Listeners::inspect(candidates.iter().flat_map(|(_, _, endpoints, _)| {
+            endpoints.iter().map(|endpoint| endpoint.backend_port)
+        }))?;
     let mut routes = Vec::new();
-    for (session, supervisor, endpoints) in candidates {
+    for (session, supervisor, endpoints, lan) in candidates {
         let owned = endpoints.iter().all(|endpoint| {
             listeners
                 .owned(endpoint.backend_port, supervisor)
@@ -179,7 +218,11 @@ fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
                     Ok((endpoint, address))
                 })
                 .collect::<Result<_>>()?;
-            routes.push(Route { session, dials });
+            routes.push(Route {
+                session,
+                dials,
+                lan,
+            });
         }
     }
     Ok(routes)
@@ -230,9 +273,11 @@ fn renew_leases(registry: &Registry, router: &Router, routes: &[Route]) -> Resul
     Ok(())
 }
 pub fn configuration(registry: &Registry, router: &Router) -> Result<Value> {
-    render(registry, router, &routes(registry, router)?)
+    render(registry, router, &routes(registry, router)?, true)
 }
-fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value> {
+/// The whole Caddy configuration. With `lan`, runs started with `--lan` also answer on their LAN
+/// address under `.local` names, on a server of their own so LAN clients reach nothing else.
+fn render(registry: &Registry, router: &Router, ready: &[Route], lan: bool) -> Result<Value> {
     let state = registry.state_path();
     let workspaces = registry.list(None)?;
     let mut routes = Vec::new();
@@ -247,7 +292,15 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
                 .context("invalid owned hostname")?,
         )?;
     }
-    for Route { session, dials } in ready {
+    let mut lan_routes = Vec::new();
+    let mut lan_listen = std::collections::BTreeSet::new();
+    let mut lan_hosts = Vec::new();
+    for Route {
+        session,
+        dials,
+        lan: lan_address,
+    } in ready
+    {
         let workspace = workspaces
             .iter()
             .find(|workspace| workspace.id == session.environment_id)
@@ -262,10 +315,18 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
                 !router.listens_on(endpoint.backend_port),
                 "proxy loop rejected"
             );
-            routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":{"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]}}], "handle":[{
+            let leased = json!({"root":lease_directory(state, router, session), "try_files":["{time.now.unix}"]});
+            let handle = json!([{
                 "handler":"reverse_proxy", "upstreams":[{"dial":address.to_string()}],
                 "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
-            }], "terminal": true}));
+            }]);
+            routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":leased}], "handle":handle, "terminal": true}));
+            if let Some(ip) = lan_address.filter(|ip| lan && crate::share::present(*ip)) {
+                let host = crate::share::local_host(&endpoint.hostname);
+                lan_listen.insert(format!("{ip}:{}", router.front_door.https));
+                lan_routes.push(json!({"match":[{"host":[host], "file":leased}], "handle":handle, "terminal": true}));
+                lan_hosts.push(host);
+            }
         }
     }
     if !hosts.is_empty() {
@@ -273,10 +334,15 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
     }
     routes.push(json!({"@id":router.id(), "handle":[{"handler":"static_response", "status_code":404, "body":"No ready Parcela route\n"}], "terminal":true}));
     let https_port = router.front_door.https;
-    let servers = json!({
+    let mut servers = json!({
         "https":{"listen":[format!("127.0.0.1:{https_port}")], "protocols":["h1","h2"],
             "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":routes}
     });
+    if !lan_routes.is_empty() {
+        lan_routes.push(json!({"handle":[{"handler":"static_response", "status_code":404, "body":"No shared Parcela route\n"}], "terminal":true}));
+        servers["lan"] = json!({"listen":lan_listen, "protocols":["h1","h2"],
+            "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":lan_routes});
+    }
     let http_app = json!({"https_port": https_port, "servers": servers});
     let mut config = json!({
         "admin":{"listen":format!("unix/{}", socket(state)?.display()), "config":{"persist":false}},
@@ -287,7 +353,8 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
         }
     });
     if !hosts.is_empty() {
-        config["apps"]["tls"] = json!({"automation":{"policies":[{"subjects":hosts, "issuers":[{"module":"internal"}]}]}});
+        let subjects: Vec<_> = hosts.iter().chain(&lan_hosts).collect();
+        config["apps"]["tls"] = json!({"automation":{"policies":[{"subjects":subjects, "issuers":[{"module":"internal"}]}]}});
     }
     Ok(config)
 }

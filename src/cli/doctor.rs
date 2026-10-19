@@ -3,13 +3,11 @@ use anyhow::Result;
 use parcela::{
     config::{Manifest, locate},
     frontdoor::FrontDoor,
+    process::on_path,
     proxy::Status,
 };
 use serde::Serialize;
-use std::{
-    os::unix::fs::MetadataExt,
-    path::{Path, PathBuf},
-};
+use std::{os::unix::fs::MetadataExt, path::Path};
 
 /// One readiness fact. `fix` is the command or action that turns it green.
 #[derive(Serialize)]
@@ -37,15 +35,6 @@ impl Check {
             fix: Some(fix.into()),
         }
     }
-}
-
-fn on_path(program: &str) -> Option<PathBuf> {
-    if program.contains('/') {
-        return Path::new(program).is_file().then(|| program.into());
-    }
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|directory| directory.join(program))
-        .find(|candidate| candidate.is_file())
 }
 
 fn backend(name: &'static str, binary: &str, expect: &str, install: &str) -> Check {

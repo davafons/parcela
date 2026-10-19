@@ -41,6 +41,9 @@ pub struct EndpointHealth {
     pub listener_owned: bool,
     pub listener_pids: Vec<u32>,
     pub http_ready: bool,
+    /// Where other devices reach it, when the run is shared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LiveStatus {

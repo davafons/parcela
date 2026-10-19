@@ -140,6 +140,18 @@ pub fn exit_code(status: ExitStatus) -> i32 {
         .unwrap_or_else(|| 128 + status.signal().unwrap_or(SIGTERM))
 }
 
+/// Where `program` resolves: itself when it is a path, else the first match on PATH.
+pub fn on_path(program: &str) -> Option<std::path::PathBuf> {
+    if program.contains('/') {
+        return std::path::Path::new(program)
+            .is_file()
+            .then(|| program.into());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join(program))
+        .find(|candidate| candidate.is_file())
+}
+
 /// Capture a bounded diagnostic command with a deadline and a retained child identity.
 pub fn capture(
     command: &mut Command,

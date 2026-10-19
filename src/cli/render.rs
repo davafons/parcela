@@ -12,22 +12,44 @@ pub fn status(row: &Value, style: &Style) -> String {
         style.url(&url_of(row)),
     );
     let endpoints = row["live"]["endpoints"].as_object();
+    let shared = |endpoint: &Value| -> Vec<String> {
+        endpoint["shared"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(cell)
+            .collect()
+    };
     if let Some(endpoints) = endpoints.filter(|endpoints| endpoints.len() > 1) {
         let rows: Vec<Vec<String>> = endpoints
             .iter()
-            .map(|(service, endpoint)| {
-                vec![
+            .flat_map(|(service, endpoint)| {
+                let state = if endpoint["http_ready"] == true {
+                    style.state("ready")
+                } else {
+                    style.state("unhealthy")
+                };
+                std::iter::once(vec![
                     format!("  {service}"),
-                    if endpoint["http_ready"] == true {
-                        style.state("ready")
-                    } else {
-                        style.state("unhealthy")
-                    },
+                    state,
                     cell(&endpoint["public_url"]),
-                ]
+                ])
+                .chain(
+                    shared(endpoint)
+                        .into_iter()
+                        .map(|url| vec![String::new(), String::new(), url]),
+                )
             })
             .collect();
         text.push_str(&table(&["  SERVICE", "HTTP", "URL"], &rows));
+    } else {
+        for url in endpoints
+            .into_iter()
+            .flat_map(|endpoints| endpoints.values())
+            .flat_map(shared)
+        {
+            text.push_str(&format!("  {}\n", style.url(&url)));
+        }
     }
     let processes: Vec<Vec<String>> = row["processes"]
         .as_array()
@@ -124,18 +146,23 @@ pub fn started(value: &Value, style: &Style) -> String {
         name(&value["workspace"]),
         style.url(&url)
     );
-    let others: Vec<&Value> = value["session"]["endpoints"]
+    let live = &value["live"]["endpoints"];
+    let (main, others): (Vec<&Value>, Vec<&Value>) = value["session"]["endpoints"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|endpoint| endpoint["public_url"].as_str() != Some(url.as_str()))
-        .collect();
-    for endpoint in others {
-        text.push_str(&format!(
-            "  {:<10}{}\n",
-            cell(&endpoint["service"]),
-            style.url(&cell(&endpoint["public_url"]))
-        ));
+        .partition(|endpoint| endpoint["public_url"].as_str() == Some(url.as_str()));
+    for endpoint in main.into_iter().chain(others) {
+        let service = cell(&endpoint["service"]);
+        if endpoint["public_url"].as_str() != Some(url.as_str()) {
+            text.push_str(&format!(
+                "  {service:<10}{}\n",
+                style.url(&cell(&endpoint["public_url"]))
+            ));
+        }
+        for shared in live[&service]["shared"].as_array().into_iter().flatten() {
+            text.push_str(&format!("  {:<10}{}\n", "", style.url(&cell(shared))));
+        }
     }
     text.push_str(&format!(
         "\n  {}    show service output\n  {}  check health\n  {}    stop it\n",

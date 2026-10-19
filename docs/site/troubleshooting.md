@@ -46,6 +46,14 @@ The setup or prestart command exited nonzero, so no other service started and th
 
 The environment is registered but not running, or it is still starting. Run `parcela status`. If it says `stopped`, run `parcela up --detach`.
 
+## Another device cannot open a shared URL
+
+Run `parcela status` and look at the `parcela-lan-*` and `parcela-tailscale-*` processes. `parcela logs parcela-tailscale-web` shows why one stopped.
+
+- **A `.local` name does not resolve.** The device must be on the same network, and some guest or office Wi-Fi blocks mDNS. After the laptop changes networks, run `parcela restart --lan`.
+- **The page says the host is not allowed.** The dev server refuses the shared name. Add `PARCELA_SHARE_HOSTS` to its allowed hosts, as shown in [the CLI guide](cli.md#let-the-dev-server-accept-the-names).
+- **`--tailscale` refuses to start.** It says what is missing: the CLI, `tailscale up`, or HTTPS certificates in the tailnet's DNS settings.
+
 ## A preview name is taken
 
 ```text

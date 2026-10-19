@@ -11,6 +11,7 @@ use parcela::{
     frontdoor::FrontDoor,
     lifecycle,
     registry::{Registry, Workspace},
+    share::Request as Share,
     startup,
 };
 use std::path::{Path, PathBuf};
@@ -209,6 +210,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 parcela::runtime::Launch::Command(&argv),
                 backend_port,
                 readiness_timeout,
+                Default::default(),
             )
         }
         Command::Up {
@@ -219,6 +221,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             readiness_timeout,
             detach,
             setup,
+            lan,
+            tailscale,
             launch_file,
         } => start(
             &state,
@@ -231,6 +235,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 readiness_timeout,
                 detach,
                 setup,
+                share: Share { lan, tailscale },
                 launch_file,
             },
             out,
@@ -241,6 +246,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             readiness_timeout,
             detach,
             setup,
+            lan,
+            tailscale,
             launch_file,
         } => start(
             &state,
@@ -253,6 +260,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 readiness_timeout,
                 detach,
                 setup,
+                share: Share { lan, tailscale },
                 launch_file,
             },
             out,
@@ -397,6 +405,7 @@ struct Start {
     readiness_timeout: u64,
     detach: bool,
     setup: bool,
+    share: Share,
     /// Set only for the detached owner `up --detach` launches, pinning its source and manifest.
     launch_file: Option<PathBuf>,
 }
@@ -490,6 +499,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             launch,
             start.backend_port,
             start.readiness_timeout,
+            start.share,
         )?;
     }
     if start.restart {
@@ -512,6 +522,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             launch,
             start.backend_port,
             start.readiness_timeout,
+            start.share,
         )?;
         workspace
     } else {
@@ -526,6 +537,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             launch,
             start.backend_port,
             start.readiness_timeout,
+            start.share,
         );
     }
     // Started here so its notice reaches this terminal, not the detached owner's log.
@@ -538,6 +550,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
         &start.process_compose,
         start.backend_port,
         start.readiness_timeout,
+        start.share,
         &manifest,
     )
     .inspect_err(|_| print_new_log_lines(&log, offset, 20))?;

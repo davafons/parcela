@@ -80,7 +80,15 @@ fn hooks_run_after_their_dependencies_and_before_everything_else() {
         public_url: format!("https://{service}.localhost:1443"),
     });
     let env = BTreeMap::from([("PARCELA_ENVIRONMENT_NAME".to_owned(), "signup".to_owned())]);
-    let graph = compose_graph(&manifest, &endpoints, &env, Path::new("/state/env"), true).unwrap();
+    let graph = compose_graph(
+        &manifest,
+        &endpoints,
+        &env,
+        Path::new("/state/env"),
+        true,
+        &Default::default(),
+    )
+    .unwrap();
     let processes = &graph["processes"];
     assert_eq!(graph["disable_env_expansion"], true);
     assert_eq!(
@@ -113,7 +121,15 @@ fn hooks_run_after_their_dependencies_and_before_everything_else() {
     );
     assert_eq!(processes["api"]["working_dir"], "api");
 
-    let graph = compose_graph(&manifest, &endpoints, &env, Path::new("/state/env"), false).unwrap();
+    let graph = compose_graph(
+        &manifest,
+        &endpoints,
+        &env,
+        Path::new("/state/env"),
+        false,
+        &Default::default(),
+    )
+    .unwrap();
     assert!(graph["processes"].get("setup").is_none());
     assert_eq!(
         graph["processes"]["prestart"]["depends_on"],
@@ -278,4 +294,27 @@ fn linked_checkouts_suggest_the_main_checkout_project_name() {
         let name = parcela::config::inferred_project_name(&t.path().join(directory)).unwrap();
         assert_eq!(name, expected, "{directory}");
     }
+}
+
+#[test]
+fn sharing_publishers_join_the_graph_and_retry() {
+    let manifest = Manifest::parse(SHOP).unwrap();
+    let shared = BTreeMap::from([(
+        "parcela-tailscale-web".to_owned(),
+        "tailscale serve --https=443 http://127.0.0.1:21000".to_owned(),
+    )]);
+    let graph = compose_graph(
+        &manifest,
+        &[],
+        &BTreeMap::from([("PARCELA_ENVIRONMENT_NAME".to_owned(), "signup".to_owned())]),
+        Path::new("/state/env"),
+        false,
+        &shared,
+    )
+    .unwrap();
+    assert_eq!(
+        graph["processes"]["parcela-tailscale-web"],
+        json!({"command": "tailscale serve --https=443 http://127.0.0.1:21000",
+            "availability": {"restart": "on_failure", "backoff_seconds": 1, "max_restarts": 10}})
+    );
 }

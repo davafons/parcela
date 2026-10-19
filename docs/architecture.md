@@ -16,6 +16,7 @@ Parcela is a Rust CLI that coordinates two maintained programs. It does not impl
 - `startup` and `runtime` register a checkout, launch Process Compose and wait for readiness. `ports` leases the backend ports.
 - `owner`, `control` and `lifecycle` run the per-environment owner process and the stop, restart and recover requests sent to it.
 - `router`, `proxy` and `frontdoor` generate Caddy config, run the background proxy and pick its listen port.
+- `share` plans `up --lan` and `up --tailscale`: the LAN address, the mDNS and `tailscale serve` publishers, and `PARCELA_SHARE_HOSTS`.
 - `process` and `http` check listener ownership and readiness. `http` is a client, never a proxy.
 - `discovery` reads jj and Git checkout inventory without changing it.
 - `private` and `sockets` own private files, kernel locks and Unix socket paths.
@@ -32,6 +33,8 @@ Parcela is a Rust CLI that coordinates two maintained programs. It does not impl
 7. Publish Caddy routes for the whole group. With `--detach`, return once the owner reports ready.
 
 The proxy is `parcela proxy run` in the background, supervising one Caddy and renewing every running environment's routes twice a second. Routes expire 3 seconds after the last renewal, so a dead proxy never serves stale routes. If it dies while environments run, each owner restarts it within about 2 seconds and republishes its routes, unless `parcela proxy stop` left a `proxy/stopped` marker. Nothing starts the proxy at login or after a reboot; the next `up` does.
+
+`up --lan` records the LAN address with the run. Caddy then adds a second server on that address and the HTTPS port, routing `<name>.local` to the run's services and nothing else, and only while an interface still has the address. If Caddy cannot listen there, the proxy loads the config without it, so loopback routes never go down with it. `up --tailscale` picks free tailnet HTTPS ports from `tailscale serve status`. The publishers, `dns-sd`/`avahi-publish` and a foreground `tailscale serve` per service, are processes in the run's Process Compose graph, so they stop with it; Tailscale drops a foreground serve config when its process exits, even on SIGKILL.
 
 `down` sends a stop request to that owner. The owner withdraws routes, stops the graph and marks the run stopped. `restart` checks the replacement first and then starts a new generation.
 
@@ -50,7 +53,7 @@ Control, Process Compose and Caddy admin sockets live in `/tmp/parcela-<uid>/<ha
 
 ## Safety rules
 
-- Listen on loopback only. Never take over a busy port. Report its holder instead.
+- Listen on loopback only, except for a run started with `--lan`, and serve the tailnet only for a run started with `--tailscale`. Never take over a busy port. Report its holder instead.
 - Never signal a PID read from disk. Stop and recover need a live owner or matching process-birth evidence.
 - Never trust a CA, change forwarding or install software, except through `parcela trust`.
 - Never delete source or data. `rm` forgets a registration and keeps the runtime directory.

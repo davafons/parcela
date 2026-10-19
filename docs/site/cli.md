@@ -67,7 +67,7 @@ Next: parcela up
 ### parcela up
 
 ```text
-parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N]
+parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--lan] [--tailscale]
 ```
 
 Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
@@ -77,6 +77,7 @@ Starts every service in `parcela.yaml` and waits until each HTTP service answers
 - `--setup` runs `hooks.setup` again, as on a new environment.
 - `--name NAME` names this checkout on its first `up`. `--primary` gives a linked checkout the project URL.
 - `--backend-port N` sets the default service's port. Other ports are picked for you.
+- `--lan` and `--tailscale` also serve the environment to your other devices. See [Open it on your phone or another device](#open-it-on-your-phone-or-another-device).
 
 ```text
 $ parcela up --detach
@@ -115,10 +116,10 @@ $ parcela down
 ### parcela restart
 
 ```text
-parcela restart [--detach] [--backend-port N]
+parcela restart [--detach] [--backend-port N] [--lan] [--tailscale]
 ```
 
-Stops everything and starts it again from the current `parcela.yaml`. Use it after any change, including added, removed or renamed services. It checks that the new configuration can start before it stops the running one. When the services' URLs change, it can only reserve the new ones after the old run stops.
+Stops everything and starts it again from the current `parcela.yaml`. Use it after any change, including added, removed or renamed services. It checks that the new configuration can start before it stops the running one. When the services' URLs change, it can only reserve the new ones after the old run stops. Sharing does not carry over: pass `--lan` or `--tailscale` again.
 
 ## Inspect
 
@@ -264,6 +265,48 @@ Adds Parcela's local certificate authority to the system trust store, so browser
 ```sh
 curl --cacert "$(parcela trust --print)" "$(parcela url)"
 ```
+
+## Open it on your phone or another device
+
+By default every URL answers on this machine only. `up` and `restart` can also serve one environment to other devices. Each flag shares that environment alone, for that run, and `down` ends it.
+
+### On the same Wi-Fi: --lan
+
+```text
+$ parcela up --detach --lan
+✓ hello is running at https://hello.localhost:1443
+            https://hello.local:1443
+  api       https://api-hello.localhost:1443
+            https://api-hello.local:1443
+```
+
+Each service also answers at a `.local` name, which the device on your network resolves over mDNS. Parcela publishes the names with `dns-sd` on macOS or `avahi-publish` on Linux, and Caddy listens on this machine's LAN address with the same port. Devices on the network reach only the environments started with `--lan`.
+
+The device does not trust Parcela's certificate authority, so it warns first. To stop the warning, install the certificate from `parcela trust --print` on the device. If the network changes, run `parcela restart --lan`.
+
+### On your tailnet: --tailscale
+
+```text
+$ parcela up --detach --tailscale
+✓ hello is running at https://hello.localhost:1443
+            https://mb.tail1234.ts.net
+  api       https://api-hello.localhost:1443
+            https://mb.tail1234.ts.net:8443
+```
+
+Each service gets its own HTTPS port on this machine's tailnet name, through `tailscale serve`. Tailscale's certificate is trusted everywhere, so there is no warning. Only devices on your tailnet can open it. It never uses Funnel. It needs the Tailscale CLI, a connected machine and HTTPS certificates turned on for the tailnet. Parcela picks ports that `tailscale serve status` shows free, and leaves the rest of your serve configuration alone.
+
+### Let the dev server accept the names
+
+Dev servers such as Vite and Rails refuse hostnames they do not know. Parcela puts the shared ones in `PARCELA_SHARE_HOSTS`, separated by commas. For Vite:
+
+```js
+server: {
+  allowedHosts: (process.env.PARCELA_SHARE_HOSTS ?? '').split(',').filter(Boolean),
+},
+```
+
+The publishers show up in `parcela status` and `parcela logs` as `parcela-lan-<service>` and `parcela-tailscale-<service>`. A link that the app builds from `PARCELA_URL` still points at `.localhost`, which other devices cannot open.
 
 ## Projects and cleanup
 

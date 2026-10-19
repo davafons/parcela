@@ -248,6 +248,7 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         )
         .unwrap(),
         diagnostic: None,
+        share: Default::default(),
     };
     record.save(&path).unwrap();
     drop(control);
@@ -319,6 +320,7 @@ fn contending_stop(replace_session: bool) {
         )
         .unwrap(),
         diagnostic: None,
+        share: Default::default(),
     };
     record.save(&path).unwrap();
     drop(control);
@@ -404,6 +406,7 @@ fn waiting_stop(replace_control: bool) {
         )
         .unwrap(),
         diagnostic: None,
+        share: Default::default(),
     };
     record.save(&path).unwrap();
     let (control, retained_control) = if replace_control {
@@ -580,6 +583,7 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
         )
         .unwrap(),
         diagnostic: None,
+        share: Default::default(),
     };
     record.save(&path).unwrap();
     drop(control);

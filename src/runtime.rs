@@ -8,6 +8,7 @@ use crate::{
     process::{Listeners, OwnedChild, Signals, exit_code, version},
     registry::{Endpoint, Registry, Session, SessionStatus, Workspace},
     router::{self, Router},
+    share::{self, Share},
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::json;
@@ -28,6 +29,7 @@ pub fn session_environment(
     workspace: &Workspace,
     runtime: &std::path::Path,
     session: &Session,
+    share: &Share,
 ) -> Result<BTreeMap<String, String>> {
     environment(
         manifest,
@@ -37,9 +39,11 @@ pub fn session_environment(
         Some(session.backend_port),
         &session.endpoints(&manifest.default_service),
         &session.ports,
+        share,
     )
 }
 /// The variables every service and task sees. Without a run, pass no endpoints or ports.
+#[allow(clippy::too_many_arguments)]
 pub fn environment(
     manifest: &Manifest,
     workspace: &Workspace,
@@ -48,6 +52,7 @@ pub fn environment(
     port: Option<u16>,
     endpoints: &[Endpoint],
     ports: &BTreeMap<String, u16>,
+    share: &Share,
 ) -> Result<BTreeMap<String, String>> {
     let mut context = BTreeMap::from([
         ("PARCELA_PROJECT_ID".into(), workspace.project_id.clone()),
@@ -80,6 +85,7 @@ pub fn environment(
         ),
         ("PARCELA_URL".into(), url.into()),
         ("PARCELA_HOSTNAME".into(), workspace.hostname.clone()),
+        ("PARCELA_SHARE_HOSTS".into(), share.hosts(endpoints)),
         ("HOST".into(), "127.0.0.1".into()),
     ]);
     if let Some(port) = port {
@@ -161,8 +167,17 @@ pub fn run(
     launch: Launch<'_>,
     backend_port: Option<u16>,
     timeout: u64,
+    request: share::Request,
 ) -> Result<i32> {
-    preflight(registry, manifest, workspace, launch, backend_port, timeout)?;
+    preflight(
+        registry,
+        manifest,
+        workspace,
+        launch,
+        backend_port,
+        timeout,
+        request,
+    )?;
     let router = crate::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
     let path = runtime(registry, workspace)?;
     let owner_lock = Lock::acquire(&path.join("owner.lock"))?;
@@ -173,6 +188,12 @@ pub fn run(
         .iter()
         .find(|endpoint| endpoint.service == manifest.default_service)
         .context("default endpoint missing")?;
+    let share = Share::plan(
+        registry.state_path(),
+        request,
+        &endpoints,
+        router.front_door.https,
+    )?;
     let kind = match launch {
         Launch::Command(_) => "run",
         Launch::Compose(_) => "compose",
@@ -190,7 +211,7 @@ pub fn run(
     let launched = (|| -> Result<_> {
         let mut workspace = registry.current(&workspace.source, manifest)?;
         workspace.generation = session.generation;
-        let mut env = session_environment(manifest, &workspace, &path, &session)?;
+        let mut env = session_environment(manifest, &workspace, &path, &session, &share)?;
         let sockets = crate::sockets::environment(&path)?;
         private::write_json(
             &path.join("context.json"),
@@ -211,12 +232,14 @@ pub fn run(
                     std::fs::remove_dir_all(&hooks)?;
                 }
                 private::directory(&hooks)?;
+                let endpoints = session.endpoints(&manifest.default_service);
                 let graph = compose_graph(
                     manifest,
-                    &session.endpoints(&manifest.default_service),
+                    &endpoints,
                     &env,
                     &path,
                     setup_pending(manifest, &path),
+                    &share.processes(manifest, &endpoints, router.front_door.https)?,
                 )?;
                 let graph_path = path.join("process-compose.json");
                 private::write_json(&graph_path, &graph)?;
@@ -306,6 +329,7 @@ pub fn run(
         native,
         manifest: manifest.clone(),
         diagnostic: None,
+        share,
     };
     record.save(&path)?;
     Owner {
@@ -359,6 +383,7 @@ pub fn compose_graph(
     env: &BTreeMap<String, String>,
     runtime: &std::path::Path,
     setup: bool,
+    shared: &BTreeMap<String, String>,
 ) -> Result<serde_json::Value> {
     let condition = |name: &str| {
         let ready =
@@ -448,6 +473,14 @@ pub fn compose_graph(
         }
         processes.insert(name.clone(), serde_json::Value::Object(entry));
     }
+    // Sharing publishers start at once and stop with the graph. Concurrent `tailscale serve`
+    // changes can lose a race on the serve config, so a failed one tries again.
+    for (name, command) in shared {
+        processes.insert(
+            name.clone(),
+            json!({"command": command, "availability": {"restart": "on_failure", "backoff_seconds": 1, "max_restarts": 10}}),
+        );
+    }
     Ok(json!({"version": "0.5", "disable_env_expansion": true, "processes": processes}))
 }
 
@@ -477,6 +510,7 @@ pub fn preflight(
     launch: Launch<'_>,
     port: Option<u16>,
     timeout: u64,
+    request: share::Request,
 ) -> Result<()> {
     ensure!(
         matches!(launch, Launch::Compose(_)) || manifest.services.len() == 1,
@@ -553,6 +587,16 @@ pub fn preflight(
         .iter()
         .find(|endpoint| endpoint.service == manifest.default_service)
         .context("default endpoint missing")?;
+    ensure!(
+        matches!(launch, Launch::Compose(_)) || !request.lan && !request.tailscale,
+        "sharing needs up; run starts no publishers"
+    );
+    let share = Share::plan(
+        registry.state_path(),
+        request,
+        &endpoints,
+        active_router.front_door.https,
+    )?;
     let mut env = environment(
         manifest,
         &resolved,
@@ -561,6 +605,7 @@ pub fn preflight(
         Some(default.backend_port),
         &endpoints,
         &ports,
+        &share,
     )?;
     if let Launch::Compose(binary) = launch {
         let binary = resolve_binary(binary, &workspace.source)?;
@@ -571,6 +616,7 @@ pub fn preflight(
             &env,
             &path,
             setup_pending(manifest, &path),
+            &share.processes(manifest, &endpoints, active_router.front_door.https)?,
         )?;
         env.remove("PORT");
         crate::sockets::environment(&path)?;
@@ -612,6 +658,7 @@ fn ready_notice(
     session: &Session,
     endpoints: &[Endpoint],
     manifest: &Manifest,
+    share: &Share,
 ) -> String {
     use std::io::IsTerminal;
     let terminal = std::io::stderr().is_terminal();
@@ -627,15 +674,21 @@ fn ready_notice(
         paint("32", "✓"),
         paint("1;36", &session.public_url)
     );
-    for endpoint in endpoints
+    // The main service first, so its shared URLs sit under the first line.
+    let (main, others): (Vec<_>, Vec<_>) = endpoints
         .iter()
-        .filter(|endpoint| endpoint.service != manifest.default_service)
-    {
-        text.push_str(&format!(
-            "  {:<10}{}\n",
-            endpoint.service,
-            paint("1;36", &endpoint.public_url)
-        ));
+        .partition(|endpoint| endpoint.service == manifest.default_service);
+    for endpoint in main.into_iter().chain(others) {
+        if endpoint.service != manifest.default_service {
+            text.push_str(&format!(
+                "  {:<10}{}\n",
+                endpoint.service,
+                paint("1;36", &endpoint.public_url)
+            ));
+        }
+        for url in share.urls(endpoint) {
+            text.push_str(&format!("  {:<10}{}\n", "", paint("1;36", &url)));
+        }
     }
     if terminal {
         text.push_str(&format!("  {}\n", paint("2", "Press Ctrl-C to stop")));
@@ -802,7 +855,8 @@ impl Owner<'_> {
                             self.workspace,
                             &self.record.session,
                             &endpoints,
-                            &self.record.manifest
+                            &self.record.manifest,
+                            &self.record.share,
                         )
                     );
                     private::write_json(
@@ -887,6 +941,7 @@ impl Owner<'_> {
             self.workspace,
             self.path,
             &self.record.session,
+            &self.record.share,
         )?;
         let list = compose_read(&native.binary, self.path, &Action::Services, &env)?;
         let hooks: Vec<_> = list["services"]
@@ -921,6 +976,7 @@ impl Owner<'_> {
                 &self.record.session,
                 self.supervisor.identity().pid,
                 &self.record.manifest,
+                &self.record.share,
             ),
             Action::Stop => {
                 self.enter(Phase::Stopping)?;
@@ -938,6 +994,7 @@ impl Owner<'_> {
                     self.workspace,
                     self.path,
                     &self.record.session,
+                    &self.record.share,
                 )?;
                 compose_read(&native.binary, self.path, action, &env)
             }
@@ -983,6 +1040,7 @@ impl Owner<'_> {
                         &self.record.session,
                         self.supervisor.identity().pid,
                         &self.record.manifest,
+                        &self.record.share,
                     ),
                     _ => Err(anyhow::anyhow!(
                         "service inspection unavailable during shutdown"
@@ -1180,7 +1238,7 @@ pub fn task(
     let session = registry.session(&workspace.id)?;
     let url = crate::lifecycle::url(registry, workspace)?;
     let env = if let Some(session) = &session {
-        session_environment(manifest, workspace, &path, session)?
+        session_environment(manifest, workspace, &path, session, &Share::default())?
     } else {
         environment(
             manifest,
@@ -1190,6 +1248,7 @@ pub fn task(
             None,
             &[],
             &BTreeMap::new(),
+            &Share::default(),
         )?
     };
     // Extra arguments follow the command, like `parcela task test -- spec/models`.
@@ -1238,7 +1297,9 @@ pub fn teardown(registry: &Registry, manifest: &Manifest, workspace: &Workspace)
     };
     let path = registry.runtime_path(workspace);
     let env = match registry.session(&workspace.id)? {
-        Some(session) => session_environment(manifest, workspace, &path, &session)?,
+        Some(session) => {
+            session_environment(manifest, workspace, &path, &session, &Share::default())?
+        }
         None => environment(
             manifest,
             workspace,
@@ -1247,6 +1308,7 @@ pub fn teardown(registry: &Registry, manifest: &Manifest, workspace: &Workspace)
             None,
             &[],
             &BTreeMap::new(),
+            &Share::default(),
         )?,
     };
     let directory = if workspace.source.is_dir() {
@@ -1277,6 +1339,7 @@ fn live_status(
     session: &Session,
     child: u32,
     manifest: &Manifest,
+    share: &Share,
 ) -> Result<serde_json::Value> {
     let current = current_session(registry, session)?;
     let mut endpoints = BTreeMap::new();
@@ -1300,6 +1363,7 @@ fn live_status(
         endpoints.insert(
             endpoint.service.clone(),
             EndpointHealth {
+                shared: share.urls(&endpoint),
                 hostname: endpoint.hostname,
                 public_url: endpoint.public_url,
                 backend_port: endpoint.backend_port,

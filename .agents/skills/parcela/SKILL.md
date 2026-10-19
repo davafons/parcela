@@ -1,21 +1,19 @@
 ---
 name: parcela
-description: "Use Parcela to inspect, start, stop, restart or recover named local development environments, retrieve service URLs and logs, and run explicitly configured project tasks. Use for Parcela operations, not terminal layout, VCS history or implicit application setup."
+description: "Use Parcela to inspect, start, stop, restart or recover named local development environments, retrieve service URLs and logs, share one with other devices on request, and run explicitly configured project tasks. Use for Parcela operations, not terminal layout, VCS history or implicit application setup."
 ---
 
 # Parcela
 
-Parcela manages an explicit service set belonging to one configured checkout. Caddy owns HTTPS routing. Process Compose owns application processes and workers. Project configuration owns commands, working directories, dependencies, writable resources and external effects.
+Parcela runs the services in one checkout's `parcela.yaml` and gives each HTTP service its own HTTPS URL. Caddy serves the URLs. Process Compose runs the processes. The project's `parcela.yaml` owns commands, data and anything with external effects.
 
-This skill does not grant permission to start services, process queues, run migrations, change trust or expose a listener. Follow the user's authorization and the project's instructions. Do not print credentials, `.env` contents, native tokens or full process environments.
+This skill does not grant permission to start services, process queues, run migrations, change trust or share an environment beyond this machine. Follow the user's authorization and the project's instructions. Do not print credentials, `.env` contents or full process environments.
 
-## Learn and select the target
+## Pick the target
 
-Use the same binary and registry for discovery and subsequent operations. Check unfamiliar syntax with `parcela --help` or the relevant command's `--help`. `parcela --skill` and `parcela skill` print this bundled document without reading project or registry state.
+Run `parcela --help` or `parcela <command> --help` for syntax. Output is JSON when stdout is not a terminal; pass `--json` whenever you parse it. `url` and `logs` always print plain text.
 
-Output is JSON when stdout is not a terminal and aligned text on a terminal. Pass `--json` whenever you parse a result. `url` and `logs` always print plain text.
-
-Set `CHECKOUT` to the intended existing checkout's absolute path. Do not infer the target from a focused terminal, bookmark or branch name.
+Set `CHECKOUT` to the absolute path of the checkout the user means. Never infer it from a focused terminal or a branch name.
 
 ```sh
 parcela --json ls
@@ -23,94 +21,77 @@ parcela --json --path "$CHECKOUT" doctor
 parcela --path "$CHECKOUT" status
 ```
 
-`ls` returns `.workspaces`, each containing `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. Run inside a project, it also returns `.unregistered`: that project's jj workspaces and Git worktrees that were never started, with `state` `not started` and the `url` `up` would give them. Listing them registers nothing. `status` requires a registered configured checkout and returns its `.workspace` identity, `.url` and live state. Read its `parcela.yaml` and project instructions before a mutation. Schema validation and planned URLs do not prove readiness or data isolation. `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Its `config` check reports the same validation error `up` would print. Report failed checks and their `fix`; do not apply a fix that installs tools or changes trust without authorization.
+- `ls` returns `.workspaces`, each with `.workspace.id`, `.workspace.source`, `.workspace.role` and live status. Inside a project it also returns `.unregistered`: worktrees never started, with the URL `up` would give them. Listing registers nothing.
+- `status` returns the environment's `.workspace`, `.url`, `.state` and `.processes`.
+- `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Report failed checks and their `fix`. Do not apply a fix that installs tools or changes trust without authorization.
 
-If the user asks to configure a checkout that has no `parcela.yaml`, `parcela init` writes a minimal version 1 `parcela.yaml` with a guessed command. Review the guess with the user. `init` never overwrites an existing file.
+From another directory, target an environment by its ID: `parcela --workspace "$ENVIRONMENT_ID" status`. `--path` and `--workspace` conflict. Keep any `--state-dir` on every call.
 
-For a registered target, read its UUID from the response. Prefer that exact ID when issuing later operations from a different directory:
+If the checkout has no `parcela.yaml` and the user asks to configure it, `parcela init` writes a minimal one with a guessed command. Review the guess with the user. `init` never overwrites a file.
 
-```sh
-parcela --workspace "$ENVIRONMENT_ID" status
-```
+## Names and data
 
-`--path` and `--workspace` conflict. Keep an explicit `--state-dir` prefix on every call if using a nondefault registry. UUID targeting does not select another machine. Missing source paths do not authorize source or registry deletion.
+The main checkout gets the project URL. A linked jj workspace or Git worktree gets its own name on its first `up`; `--name NAME` picks one, and `--primary` gives the project URL to a checkout only when the user intends that. Names stay after the first `up`.
 
-For sibling checkouts, read `ls` `.unregistered`. Read the selected checkout's project instructions, `parcela.yaml` and data bindings before startup. `up` registers only the selected checkout automatically when startup is authorized. It does not create worktrees or change VCS history.
+A separate URL does not separate databases, uploads, secrets or queues. Read the project's `parcela.yaml` and instructions before the first `up`, and refuse to start until its data bindings suit the request.
 
-On first startup, main jj/Git checkouts and plain directories use the project base URL. Linked jj workspaces use their workspace name; linked Git worktrees use their directory name. Use `--name NAME` for an explicit preview name. Use `--primary` only when the user intends that checkout to own the base URL. Unknown or conflicting identities fail rather than taking another environment's namespace. Existing registered names and roles remain stable after VCS metadata changes.
-
-A preview name and distinct URL do not isolate databases, uploads, secrets or queues. Refuse startup until the project's bindings and external-effect policy are appropriate.
+`up` runs `hooks.setup` on an environment's first start and `hooks.prestart` on every start. Tell the user what they will do, such as installing packages or migrating. `up --setup` reruns setup; use it only when asked. Do not run preparation commands that `parcela.yaml` does not declare.
 
 ## Start and verify
-
-Check the environment before startup:
-
-```sh
-parcela --path "$CHECKOUT" status
-```
-
-An authorized `up`, `restart` or `run` starts Parcela's shared HTTPS proxy when none runs and says so in one stderr line. `parcela proxy status` reports it without starting anything. The proxy serves every environment on the machine: do not stop or restart it unless the user asks. URLs carry the proxy port (`:1443` by default), so always use the URLs Parcela returns. For TLS checks without changing system trust, use `curl --cacert "$(parcela trust --print)"`. `parcela trust` changes system trust; run it only when the user asks.
-
-If already ready, reuse the environment unless the user requests a restart. If prerequisites are absent, report them. Do not automatically install backends, start Docker or a GUI, reuse another agent's dependencies, trust a CA, change global firewall rules or take over listeners. Do not open an installed registry for writing with a newer binary while an older proxy or controller still serves it; an upgrade requires an explicit coordinated plan.
-
-After authorized startup, use detached mode for agent operations:
 
 ```sh
 parcela --path "$CHECKOUT" up --detach
 parcela --path "$CHECKOUT" status
-parcela --path "$CHECKOUT" url
-parcela --path "$CHECKOUT" url --service backend
+parcela --path "$CHECKOUT" url --service api
 ```
 
-Use a declared service name instead of assuming every project has `backend`. `up --name review --detach` selects a preview name on first startup. `up` starts the whole native graph. `run -- ARGV` is a literal foreground command for a single HTTP service, not a substitute for a service-set graph. `--backend-port` selects the default service only. Do not assume a fixed backend port.
+- If the environment is already `ready`, reuse it unless the user asks for a restart.
+- `up` starts the shared HTTPS proxy when none runs. It serves every environment on the machine: do not stop or restart it unless asked. `parcela proxy status` reports it.
+- Use the URLs Parcela returns; they carry the proxy port (`:1443` by default). Use declared service names, never an assumed port.
+- `state: ready` means every HTTP service answered its healthcheck. When the task needs proof, request the application path over the returned HTTPS URL with `curl --cacert "$(parcela trust --print)"`. Never disable TLS verification.
+- `parcela trust` changes system trust; run it only when the user asks.
+- If backends are missing, report it. Do not install software, start Docker or a GUI, change firewall rules or take over a busy port.
+- `run -- ARGV` runs one foreground command as the only web service. It is not a substitute for `up`.
 
-Each run has one generation and nonce with a recorded endpoint set. All declared HTTP endpoints must have graph-owned loopback listeners and pass initial readiness before the group routes open. Services without `http` get no route. `working_dir`, `env` and `depends_on` are per-service fields in `parcela.yaml`.
+Report the environment ID, the URLs, what you verified and what you did not.
 
-Inspect `status.state`, `status.live.endpoints` and `status.processes`, where each Process Compose service and worker has a `name`, lowercase `state` and `pid`. `live_health_verified` means the owner answered, not that every HTTP probe succeeded. Recorded `ready`, planned URLs and native `Running` states are not interchangeable with fresh HTTP health. Check the intended application path over its returned HTTPS origin when the task needs application proof. Never disable TLS verification to make a check pass.
+## Share with other devices
 
-Report the selected environment ID, role, generation, returned URLs, observed health and unverified behavior. Leave user-managed environments running unless stop was requested.
+Only when the user asks for it, for the environment they name:
 
-## Diagnose without guessing ownership
+```sh
+parcela --path "$CHECKOUT" up --detach --lan        # https://<name>.local:1443 on the same network
+parcela --path "$CHECKOUT" up --detach --tailscale  # https://<machine>.<tailnet>.ts.net on the tailnet
+```
+
+Shared URLs appear under each service in `up` and `status` output, and in `.live.endpoints.<service>.shared`. Sharing lasts for that run; `restart` needs the flag again and `down` ends it. Never use it as a default, and never use Tailscale Funnel. A dev server that rejects the host needs `PARCELA_SHARE_HOSTS` in its allowed hosts; that is a project change, so propose it rather than make it unasked.
+
+## Diagnose
 
 ```sh
 parcela --workspace "$ENVIRONMENT_ID" status
-parcela --workspace "$ENVIRONMENT_ID" logs backend --tail 100
+parcela --workspace "$ENVIRONMENT_ID" logs api --tail 100
 ```
 
-`logs` without a name prints every process, each line prefixed with `name |`. Process names are in `status.processes`. Logs are bounded tails; `logs --follow` streams until interrupted, so do not use it in a command that must return. Avoid copying secrets from diagnostics.
+`logs` without a name prints every process, each line prefixed with `name |`. `logs --follow` streams until interrupted, so do not use it in a command that must return.
 
-`unknown`, `interrupted`, missing evidence or a replaced native handle is not permission to clear locks, delete sockets, free leases or kill a process. Never signal a persisted PID, use broad `pkill`, or bypass the owner through raw native commands. Preserve the diagnostic and ask for an explicit recovery or manual intervention plan.
+If `status` says `interrupted` or `unknown`, and starting is authorized, run `up --detach`: it takes back services that are still running instead of starting a second copy, and says so on stderr. If it says the run was being stopped, run `parcela down` first. When Parcela refuses, report its message. Never kill processes by PID, use broad `pkill`, delete sockets or locks, or edit the state directory.
 
-When the owner has died while its services still run, and the task authorizes starting the environment, `up` takes them back instead of starting a second graph. It prints `taking back control of its running services` on stderr and returns `recovered: true`:
+## Restart, stop and tasks
 
-```sh
-parcela --workspace "$ENVIRONMENT_ID" up --detach
-parcela --workspace "$ENVIRONMENT_ID" status
-```
-
-Recovery requires matching generation, process births, original lock/socket identities and native authentication. It uses the recorded launch manifest and does not replay startup. `up` reattaches only to a run that was starting or ready. A run that was stopping or interrupted still needs `parcela down` or the hidden `parcela recover`; a pending stop remains a stop, so that result can be `stopped` rather than `ready`. Do not retry by launching a duplicate graph when recovery refuses.
-
-## Restart, stop and optional project tasks
-
-Only for the explicitly selected authorized environment:
+Only for the environment the user selected:
 
 ```sh
 parcela --workspace "$ENVIRONMENT_ID" restart --detach
-parcela --workspace "$ENVIRONMENT_ID" status
 parcela --workspace "$ENVIRONMENT_ID" down
-parcela --workspace "$ENVIRONMENT_ID" status
 ```
 
-Restart preflights the replacement and starts the whole graph in a new generation. It does not restart one named service or replay arbitrary `run` commands. Stop withdraws routes before native shutdown and preserves source/data. Do not stop other environments as test cleanup. Do not treat a refused or incomplete stop as successful cleanup. `down --all` stops every running environment of the project and `--all-projects` every one; use them only when the user asks for that scope.
-
-`rm` forgets a stopped environment's registration and releases its hostnames; `rm --prune` does so for every stopped registration whose checkout is gone. Both keep source and runtime data, refuse running environments, and are only for explicit cleanup requests.
-
-Tasks are optional; ordinary project commands remain usable directly. Before `task NAME -- ARGS`, read that task's command, timeout and effects in `parcela.yaml`. Run only the requested task with literal arguments.
-
-`up` runs the project's own `hooks.setup` on an environment's first start and `hooks.prestart` on every start, before the other services. Read both in `parcela.yaml` before the first `up` and tell the user what they will do, such as installing packages, creating a database or migrating. `up --setup` reruns setup; use it only when asked. A failed hook stops `up` and prints its output. Do not run preparation commands that `parcela.yaml` does not declare.
-
-The default service uses the environment base hostname. Other HTTP services use a flat prefix from their `http.subdomain`. For a preview labeled `review` of `my-app`, typical names are `review-my-app.localhost` and `api-review-my-app.localhost`. Read actual reserved or recorded URLs instead of constructing them. Hostname reservations remain while stopped. `restart` reserves the URLs of added or renamed services after the old run stops.
+- `restart` checks the new configuration, then restarts every service. It cannot restart one service alone.
+- `down` stops the services and keeps source and data. Do not stop other environments as cleanup. A refused stop is not a successful one.
+- `down --all` stops the project's environments and `--all-projects` every one; use them only when asked.
+- `rm` forgets a stopped environment and frees its URLs; `rm --prune` does so for every one whose checkout is gone. Both keep data. Use them only on an explicit cleanup request.
+- Before `task NAME -- ARGS`, read that task's command and effects in `parcela.yaml`. Run only the requested task.
 
 ## Limits
 
-This is an experimental local runtime manager, not a sandbox, terminal multiplexer or cross-machine environment transfer tool. It does not automatically reconcile allocations missing launch evidence, adopt arbitrary orphan processes, restart individual services, create data replicas or certify reboot/browser trust. A skill, command help or configuration document is not runtime proof.
+Parcela is a local development runner, not a sandbox. It does not restart individual services, copy data between environments or prove browser trust. This skill and `--help` are not runtime proof.
