@@ -16,7 +16,6 @@ use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::{
     collections::BTreeMap,
-    net::TcpListener,
     path::PathBuf,
     process::Command,
     thread,
@@ -566,7 +565,7 @@ pub fn preflight(
                     && session.status != SessionStatus::Stopped),
             "--backend-port {port} is leased by another environment; pick another"
         );
-        if TcpListener::bind(("127.0.0.1", port)).is_err() {
+        if crate::ports::claim(port).is_none() {
             let busy = || {
                 format!(
                     "--backend-port {port} is already in use by {}; pick another",

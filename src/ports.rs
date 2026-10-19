@@ -35,7 +35,7 @@ pub(crate) fn allocate(
     let mut probes = Vec::new();
     for (service, hostname) in manifest.service_hosts(&workspace.hostname)? {
         let probe = match port.filter(|_| service == manifest.default_service) {
-            Some(requested) => TcpListener::bind(("127.0.0.1", requested)).with_context(|| {
+            Some(requested) => claim(requested).with_context(|| {
                 format!(
                     "--backend-port {requested} is already in use by {}; pick another",
                     crate::process::port_holder(requested)
@@ -105,7 +105,7 @@ fn candidates(start: u16, unavailable: &BTreeSet<u16>) -> impl Iterator<Item = u
 
 /// Hold `port` on 127.0.0.1 unless any socket owns it on a loopback or wildcard address.
 /// std binds with SO_REUSEADDR, which lets 127.0.0.1 succeed beside a 0.0.0.0, [::] or [::1] owner.
-fn claim(port: u16) -> Option<TcpListener> {
+pub(crate) fn claim(port: u16) -> Option<TcpListener> {
     let addresses: [IpAddr; 3] = [
         Ipv4Addr::UNSPECIFIED.into(),
         Ipv6Addr::UNSPECIFIED.into(),
