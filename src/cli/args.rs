@@ -89,10 +89,13 @@ pub enum Command {
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
         /// Also serve at .local names on the LAN
-        #[arg(long)]
+        #[arg(long, env = "PARCELA_LAN", value_parser = clap::builder::FalseyValueParser::new())]
         lan: bool,
+        /// LAN address for --lan (default: detected)
+        #[arg(long, value_name = "IP")]
+        lan_ip: Option<std::net::Ipv4Addr>,
         /// Also serve on your tailnet with tailscale serve
-        #[arg(long)]
+        #[arg(long, env = "PARCELA_TAILSCALE", value_parser = clap::builder::FalseyValueParser::new())]
         tailscale: bool,
         /// Process Compose binary.
         #[arg(long, default_value = "process-compose", hide = true)]
@@ -125,10 +128,13 @@ pub enum Command {
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
         /// Also serve at .local names on the LAN
-        #[arg(long)]
+        #[arg(long, env = "PARCELA_LAN", value_parser = clap::builder::FalseyValueParser::new())]
         lan: bool,
+        /// LAN address for --lan (default: detected)
+        #[arg(long, value_name = "IP")]
+        lan_ip: Option<std::net::Ipv4Addr>,
         /// Also serve on your tailnet with tailscale serve
-        #[arg(long)]
+        #[arg(long, env = "PARCELA_TAILSCALE", value_parser = clap::builder::FalseyValueParser::new())]
         tailscale: bool,
         /// Process Compose binary.
         #[arg(long, default_value = "process-compose", hide = true)]
@@ -246,6 +252,10 @@ pub enum ProxyCommand {
     },
     /// Show the proxy's status
     Status,
+    /// Serve URLs without a port, on 443 (macOS)
+    Install,
+    /// Remove the 443 relay
+    Uninstall,
     /// Run the proxy in the foreground
     #[command(hide = true)]
     Run {

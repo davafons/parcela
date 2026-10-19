@@ -25,6 +25,7 @@ pub fn on_terminal(mut command: Command) -> (Option<i32>, String) {
         unsafe { (File::from_raw_fd(primary), OwnedFd::from_raw_fd(secondary)) };
     let mut child = command
         .env("NO_COLOR", "1")
+        .env("PARCELA_NO_TRUST", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::from(writer))
         .stderr(Stdio::null())

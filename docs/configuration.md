@@ -100,6 +100,7 @@ services:
 |---|---|
 | `healthcheck` | Required. A path. `up` waits until `GET` on it returns 2xx, then opens the URLs. |
 | `subdomain` | The prefix for this service's URL: `https://api-shop.localhost:1443`. Leave it out on exactly one HTTP service, which gets the environment's own URL, `https://shop.localhost:1443`. |
+| `wildcard` | `true` also sends every subdomain of the service's host to it, for subdomain-per-tenant apps: `https://kobe.shop.localhost:1443`, and `https://kobe.signup-shop.localhost:1443` in the `signup` worktree. `.local` names from `--lan` cover the host only. |
 
 Every environment of the project uses the same prefixes in front of its own name: the `signup` worktree's API is at `https://api-signup-shop.localhost:1443`.
 

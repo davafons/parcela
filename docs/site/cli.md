@@ -67,7 +67,7 @@ Next: parcela up
 ### parcela up
 
 ```text
-parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--lan] [--tailscale]
+parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--lan] [--lan-ip IP] [--tailscale]
 ```
 
 Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. On an environment that is already ready, `up` prints its URLs and exits 0. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
@@ -116,7 +116,7 @@ $ parcela down
 ### parcela restart
 
 ```text
-parcela restart [--detach] [--setup] [--backend-port N] [--lan] [--tailscale]
+parcela restart [--detach] [--setup] [--backend-port N] [--lan] [--lan-ip IP] [--tailscale]
 ```
 
 Stops everything and starts it again from the current `parcela.yaml`. Use it after any change, including added, removed or renamed services. It checks that the new configuration can start before it stops the running one. When the services' URLs change, it can only reserve the new ones after the old run stops. Sharing does not carry over: pass `--lan` or `--tailscale` again.
@@ -231,14 +231,17 @@ parcela proxy start [--port N]
 parcela proxy stop
 parcela proxy restart [--port N]
 parcela proxy status
+parcela proxy install
+parcela proxy uninstall
 ```
 
 The proxy is one background Caddy that serves the URLs of every environment. `up` starts it when it is not running, and if it dies while environments run, for example because Caddy crashed or was killed, they start it again within a few seconds. You rarely need these commands.
 
-- `start --port N` listens on port `N` and saves it for later starts. The default is 1443, or `PARCELA_HTTPS_PORT` when it is set and nothing is saved. With `--port 443`, URLs have no port, like `https://hello.localhost`. Parcela never runs as root, so that works only where the system lets a normal user listen on 443: on Linux after `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`, and not on macOS.
+- `start --port N` listens on port `N` and saves it for later starts. The default is 1443, or `PARCELA_HTTPS_PORT` when it is set and nothing is saved. With `--port 443`, URLs have no port, like `https://hello.localhost`. Parcela never runs as root, so that works only where the system lets a normal user listen on 443: on Linux after `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`. On macOS, use `install`.
 - `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`. It says how many environments that affects.
 - `restart` replaces the proxy. Run it after upgrading Parcela.
 - `status` shows the port, process IDs, version and log file. It exits 1 when the proxy is not running.
+- `install`, on macOS, makes URLs portless, like `https://hello.localhost`. It asks for your password once to add the launchd service `org.parcela.https`, which owns port 443 on 127.0.0.1 and hands each connection to `nc` running as you, relaying it to the proxy's port. No Parcela code runs as root, and it survives reboots. It refuses when another program uses 443. Restart running environments afterwards to pick up the new URLs. `uninstall` removes it.
 
 ```text
 $ parcela proxy status
@@ -258,7 +261,9 @@ If the port is busy, `start` fails and names the process that holds it. It never
 parcela trust [--print]
 ```
 
-Adds Parcela's local certificate authority to the system trust store, so browsers accept its URLs. It prints what it adds and how to undo it, then runs `caddy trust`, which may ask for your password. This is the only command that changes system trust.
+Adds Parcela's local certificate authority to the system trust store, so browsers accept its URLs. It prints what it adds and how to undo it, then runs `caddy trust`, which may ask for your password. You need it once per machine: every project shares the one authority.
+
+The first `up` in a terminal does this for you when the authority is not trusted yet, behind the same password prompt, and asks only once per authority. It never happens without a terminal, so agents, scripts and CI never change trust, and `PARCELA_NO_TRUST=1` turns it off.
 
 `--print` prints the certificate's path and changes nothing. Use it with `curl`:
 
@@ -282,7 +287,7 @@ $ parcela up --detach --lan
 
 Each service also answers at a `.local` name, which the device on your network resolves over mDNS. Parcela publishes the names with `dns-sd` on macOS or `avahi-publish` on Linux, and Caddy listens on this machine's LAN address with the same port. Devices on the network reach only the environments started with `--lan`.
 
-The device does not trust Parcela's certificate authority, so it warns first. To stop the warning, install the certificate from `parcela trust --print` on the device. If the network changes, run `parcela restart --lan`.
+The device does not trust Parcela's certificate authority, so it warns first. To stop the warning, install the certificate from `parcela trust --print` on the device. If the network changes, run `parcela restart --lan`. `--lan-ip IP` picks the address when the detected one is wrong, for example behind a VPN. `PARCELA_LAN=1` in the environment works like `--lan`, and `PARCELA_TAILSCALE=1` like `--tailscale`.
 
 ### On your tailnet: --tailscale
 

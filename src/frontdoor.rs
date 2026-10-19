@@ -13,6 +13,9 @@ pub const PORT_ENV: &str = "PARCELA_HTTPS_PORT";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrontDoor {
     pub https: u16,
+    /// Set by `parcela proxy install` on macOS: launchd relays 443 to `https`, so URLs have no port.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relay: bool,
 }
 
 fn path(state: &Path) -> PathBuf {
@@ -37,16 +40,25 @@ impl FrontDoor {
                 .with_context(|| format!("{PORT_ENV} must be a port number, got {value:?}"))?,
             Err(_) => DEFAULT_HTTPS_PORT,
         };
-        Ok(Self { https })
+        Ok(Self::on(https))
+    }
+
+    /// The proxy on `https`, without the 443 relay.
+    pub fn on(https: u16) -> Self {
+        Self {
+            https,
+            relay: false,
+        }
     }
 
     pub fn save(&self, state: &Path) -> Result<()> {
         private::write_json(&path(state), self)
     }
 
-    /// URLs leave out the port when it is HTTPS's own.
+    /// URLs leave out the port when it is HTTPS's own, directly or through the relay.
     pub fn url(&self, host: &str) -> String {
         match self.https {
+            _ if self.relay => format!("https://{host}"),
             443 => format!("https://{host}"),
             port => format!("https://{host}:{port}"),
         }
@@ -54,7 +66,11 @@ impl FrontDoor {
 
     /// One phrase for people: where the proxy answers.
     pub fn describe(&self) -> String {
-        format!("HTTPS on :{}", self.https)
+        if self.relay {
+            format!("HTTPS on :443, relayed to :{}", self.https)
+        } else {
+            format!("HTTPS on :{}", self.https)
+        }
     }
 }
 
@@ -65,19 +81,24 @@ mod tests {
     #[test]
     fn urls_carry_the_port_unless_it_is_443() {
         assert_eq!(
-            FrontDoor { https: 1443 }.url("notes.localhost"),
+            FrontDoor::on(1443).url("notes.localhost"),
             "https://notes.localhost:1443"
         );
         assert_eq!(
-            FrontDoor { https: 443 }.url("notes.localhost"),
+            FrontDoor::on(443).url("notes.localhost"),
             "https://notes.localhost"
         );
+        let relayed = FrontDoor {
+            https: 1443,
+            relay: true,
+        };
+        assert_eq!(relayed.url("notes.localhost"), "https://notes.localhost");
     }
 
     #[test]
     fn saved_as_the_https_port() {
         assert_eq!(
-            serde_json::to_value(FrontDoor { https: 1443 }).unwrap(),
+            serde_json::to_value(FrontDoor::on(1443)).unwrap(),
             serde_json::json!({"https": 1443})
         );
     }

@@ -223,6 +223,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             detach,
             setup,
             lan,
+            lan_ip,
             tailscale,
             launch_file,
         } => start(
@@ -236,7 +237,11 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 readiness_timeout,
                 detach,
                 setup,
-                share: Share { lan, tailscale },
+                share: Share {
+                    lan,
+                    lan_ip,
+                    tailscale,
+                },
                 launch_file,
             },
             out,
@@ -248,6 +253,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             detach,
             setup,
             lan,
+            lan_ip,
             tailscale,
             launch_file,
         } => start(
@@ -261,7 +267,11 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                 readiness_timeout,
                 detach,
                 setup,
-                share: Share { lan, tailscale },
+                share: Share {
+                    lan,
+                    lan_ip,
+                    tailscale,
+                },
                 launch_file,
             },
             out,
@@ -548,6 +558,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     }
     // Started here so its notice reaches this terminal, not the detached owner's log.
     parcela::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
+    parcela::proxy::offer_trust(registry.state_path());
     let log = registry.runtime_path(&workspace).join("log/owner.log");
     let offset = std::fs::metadata(&log).map_or(0, |metadata| metadata.len());
     let result = lifecycle::detached(
@@ -596,7 +607,7 @@ fn already_running(
         authority.split(':').next().unwrap_or_default().to_owned()
     };
     for (asked, flag, suffix) in [
-        (share.lan, "--lan", ".local"),
+        (share.lan || share.lan_ip.is_some(), "--lan", ".local"),
         (share.tailscale, "--tailscale", ".ts.net"),
     ] {
         ensure!(

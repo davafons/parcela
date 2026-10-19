@@ -17,6 +17,8 @@ use std::{
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Request {
     pub lan: bool,
+    /// The address for `--lan` instead of the detected one.
+    pub lan_ip: Option<Ipv4Addr>,
     pub tailscale: bool,
 }
 
@@ -27,6 +29,9 @@ pub struct Share {
     /// The LAN address the `.local` names point at. Caddy also listens there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan: Option<Ipv4Addr>,
+    /// Caddy's port on that address. The 443 relay serves loopback only, so this is the proxy's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_port: Option<u16>,
     /// The mDNS publisher, `dns-sd` or `avahi-publish`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mdns: Option<String>,
@@ -57,14 +62,24 @@ impl Share {
         https_port: u16,
     ) -> Result<Self> {
         let mut share = Self::default();
-        if request.lan {
-            let ip = lan_address()?;
+        if request.lan || request.lan_ip.is_some() {
+            let ip = match request.lan_ip {
+                Some(ip) => {
+                    ensure!(
+                        present(ip),
+                        "--lan-ip {ip}: no network interface has that address"
+                    );
+                    ip
+                }
+                None => lan_address()?,
+            };
             let mdns = ["dns-sd", "avahi-publish"]
                 .into_iter()
                 .find_map(on_path)
                 .context("--lan needs dns-sd (macOS) or avahi-publish (Linux) on PATH")?;
             probe_lan(state, ip, https_port)?;
             share.lan = Some(ip);
+            share.lan_port = Some(https_port);
             share.mdns = Some(mdns.to_str().context("non-UTF-8 mDNS path")?.into());
         }
         if request.tailscale {
@@ -81,11 +96,12 @@ impl Share {
     pub fn urls(&self, endpoint: &Endpoint) -> Vec<String> {
         let mut urls = Vec::new();
         if self.lan.is_some() {
-            urls.push(endpoint.public_url.replacen(
-                &endpoint.hostname,
-                &local_host(&endpoint.hostname),
-                1,
-            ));
+            let host = local_host(&endpoint.hostname);
+            urls.push(match self.lan_port {
+                Some(443) => format!("https://{host}"),
+                Some(port) => format!("https://{host}:{port}"),
+                None => endpoint.public_url.replacen(&endpoint.hostname, &host, 1),
+            });
         }
         if let Some(tailnet) = &self.tailscale
             && let Some(port) = tailnet.ports.get(&endpoint.service)
@@ -351,6 +367,7 @@ mod tests {
     fn shared() -> Share {
         Share {
             lan: Some(Ipv4Addr::new(192, 168, 1, 20)),
+            lan_port: Some(1443),
             mdns: Some("/usr/bin/dns-sd".into()),
             tailscale: Some(Tailnet {
                 binary: "/usr/local/bin/tailscale".into(),

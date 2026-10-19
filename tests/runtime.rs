@@ -113,7 +113,7 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
     let (_temp, mut registry, _manifest, workspace) = fixture();
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        front_door: FrontDoor { https: 34443 },
+        front_door: FrontDoor::on(34443),
         version: router::VERSION.into(),
     };
     let session = registry
@@ -275,7 +275,7 @@ fn port_443_urls_carry_no_port() {
     let (_temp, registry, _manifest, _workspace) = fixture();
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        front_door: FrontDoor { https: 443 },
+        front_door: FrontDoor::on(443),
         version: router::VERSION.into(),
     };
     assert_eq!(
@@ -299,6 +299,7 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
         parcela::config::Service {
             subdomain: Some("api".into()),
             readiness_path: "/ready".into(),
+            wildcard: false,
         },
     );
     registry
@@ -446,6 +447,7 @@ fn secondary_hostname_conflicts_with_preview_base_without_partial_adoption() {
         parcela::config::Service {
             subdomain: None,
             readiness_path: "/".into(),
+            wildcard: false,
         },
     );
     registry

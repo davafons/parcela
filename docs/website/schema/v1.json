@@ -130,6 +130,11 @@
             "string",
             "null"
           ]
+        },
+        "wildcard": {
+          "default": false,
+          "description": "Also send every subdomain of this service's host to it, like `https://kobe.shop.localhost`, for subdomain-per-tenant apps.",
+          "type": "boolean"
         }
       },
       "required": [

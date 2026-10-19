@@ -180,6 +180,8 @@ struct Route {
     dials: Vec<(Endpoint, std::net::SocketAddr)>,
     /// The LAN address of a run started with `--lan`.
     lan: Option<Ipv4Addr>,
+    /// Services that also take every subdomain of their host.
+    wildcard: std::collections::BTreeSet<String>,
 }
 /// Every routable session, checked once per update with one listener snapshot.
 fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
@@ -196,15 +198,27 @@ fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
             && record.owner_holds(&path)
         {
             let endpoints = session.endpoints(&record.manifest.default_service);
-            candidates.push((session, record.supervisor.pid, endpoints, record.share.lan));
+            let wildcard = record
+                .manifest
+                .services
+                .iter()
+                .filter(|(_, service)| service.wildcard)
+                .map(|(name, _)| name.clone())
+                .collect();
+            candidates.push((
+                session,
+                record.supervisor.pid,
+                endpoints,
+                record.share.lan,
+                wildcard,
+            ));
         }
     }
-    let listeners =
-        crate::process::Listeners::inspect(candidates.iter().flat_map(|(_, _, endpoints, _)| {
-            endpoints.iter().map(|endpoint| endpoint.backend_port)
-        }))?;
+    let listeners = crate::process::Listeners::inspect(candidates.iter().flat_map(
+        |(_, _, endpoints, _, _)| endpoints.iter().map(|endpoint| endpoint.backend_port),
+    ))?;
     let mut routes = Vec::new();
-    for (session, supervisor, endpoints, lan) in candidates {
+    for (session, supervisor, endpoints, lan, wildcard) in candidates {
         let owned = endpoints.iter().all(|endpoint| {
             listeners
                 .owned(endpoint.backend_port, supervisor)
@@ -222,6 +236,7 @@ fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
                 session,
                 dials,
                 lan,
+                wildcard,
             });
         }
     }
@@ -295,10 +310,12 @@ fn render(registry: &Registry, router: &Router, ready: &[Route], lan: bool) -> R
     let mut lan_routes = Vec::new();
     let mut lan_listen = std::collections::BTreeSet::new();
     let mut lan_hosts = Vec::new();
+    let mut wildcards = Vec::new();
     for Route {
         session,
         dials,
         lan: lan_address,
+        wildcard,
     } in ready
     {
         let workspace = workspaces
@@ -320,7 +337,15 @@ fn render(registry: &Registry, router: &Router, ready: &[Route], lan: bool) -> R
                 "handler":"reverse_proxy", "upstreams":[{"dial":address.to_string()}],
                 "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
             }]);
-            routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":[endpoint.hostname], "file":leased}], "handle":handle, "terminal": true}));
+            let mut matched = vec![endpoint.hostname.clone()];
+            if wildcard.contains(&endpoint.service) {
+                // Subdomains of an environment's host are never another environment's: those
+                // join their labels with hyphens, `api-shop.localhost`.
+                let tenants = format!("*.{}", endpoint.hostname);
+                matched.push(tenants.clone());
+                wildcards.push(tenants);
+            }
+            routes.push(json!({"@id": format!("run-{}-{}", session.token, endpoint.service), "match":[{"host":matched, "file":leased}], "handle":handle, "terminal": true}));
             if let Some(ip) = lan_address.filter(|ip| lan && crate::share::present(*ip)) {
                 let host = crate::share::local_host(&endpoint.hostname);
                 lan_listen.insert(format!("{ip}:{}", router.front_door.https));
@@ -353,7 +378,7 @@ fn render(registry: &Registry, router: &Router, ready: &[Route], lan: bool) -> R
         }
     });
     if !hosts.is_empty() {
-        let subjects: Vec<_> = hosts.iter().chain(&lan_hosts).collect();
+        let subjects: Vec<_> = hosts.iter().chain(&lan_hosts).chain(&wildcards).collect();
         config["apps"]["tls"] = json!({"automation":{"policies":[{"subjects":subjects, "issuers":[{"module":"internal"}]}]}});
     }
     Ok(config)

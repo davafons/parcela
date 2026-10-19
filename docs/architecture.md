@@ -55,7 +55,7 @@ Control, Process Compose and Caddy admin sockets live in `/tmp/parcela-<uid>/<ha
 
 - Listen on loopback only, except for a run started with `--lan`, and serve the tailnet only for a run started with `--tailscale`. Never take over a busy port. Report its holder instead.
 - Never signal a PID read from disk. Stop and recover need a live owner or matching process-birth evidence.
-- Never trust a CA, change forwarding or install software, except through `parcela trust`.
+- Trust a CA only through `parcela trust`, or the first `up` on a terminal behind the system's password prompt; never without a terminal. Install a system service only through `parcela proxy install`: a launchd socket on 127.0.0.1:443 that runs `nc` as the user. Never redirect ports with pf, which would hide another program's listener.
 - Never delete source or data. `rm` forgets a registration and keeps the runtime directory.
 - Read-only commands never register a checkout or start anything.
 - Keep framework and data policy in `parcela.yaml`, not in core.

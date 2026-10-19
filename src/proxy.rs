@@ -283,6 +283,30 @@ pub fn certificate(state: &Path) -> PathBuf {
     router::proxy_dir(state).join("data/pki/authorities/local/root.crt")
 }
 
+/// Whether the system trusts this proxy's CA, or None when it cannot tell. Read-only.
+pub fn trusted(state: &Path) -> Option<bool> {
+    let certificate = certificate(state);
+    if !certificate.is_file() {
+        return None;
+    }
+    let mut command = if cfg!(target_os = "macos") {
+        let mut command = Command::new("/usr/bin/security");
+        command.arg("verify-cert").arg("-c");
+        command
+    } else {
+        let mut command = Command::new("openssl");
+        command.arg("verify");
+        command
+    };
+    command
+        .arg(&certificate)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()
+        .map(|status| status.success())
+}
+
 /// `caddy trust` against this proxy: the same private storage and admin socket (from the
 /// generated config), so it installs Parcela's CA and never another Caddy's.
 pub fn trust_command(state: &Path, caddy: &str) -> Command {
@@ -296,6 +320,53 @@ pub fn trust_command(state: &Path, caddy: &str) -> Command {
         .env("XDG_DATA_HOME", directory.join("data"))
         .env("XDG_CONFIG_HOME", directory.join("config"));
     command
+}
+
+pub fn install_trust(state: &Path, caddy: &str) -> Result<()> {
+    let certificate = certificate(state);
+    eprintln!(
+        "Adding Parcela's certificate authority to the system trust store. It may ask for your password.\n  certificate  {}\n  undo         {caddy} untrust --cert {}",
+        certificate.display(),
+        certificate.display(),
+    );
+    let status = trust_command(state, caddy)
+        .status()
+        .with_context(|| format!("run {caddy} trust"))?;
+    anyhow::ensure!(status.success(), "{caddy} trust failed ({status})");
+    eprintln!("Trusted. Restart the browser if it still warns.");
+    Ok(())
+}
+
+/// The first `up` in a terminal trusts a new CA, behind the system's own password prompt, so
+/// HTTPS works without a separate `parcela trust`. Asked once per CA, never without a
+/// terminal (agents, scripts, CI), and never with `PARCELA_NO_TRUST=1`.
+pub fn offer_trust(state: &Path) {
+    use std::io::IsTerminal;
+    if std::env::var("PARCELA_NO_TRUST").is_ok_and(|value| !value.is_empty() && value != "0")
+        || !std::io::stdin().is_terminal()
+        || !std::io::stderr().is_terminal()
+    {
+        return;
+    }
+    let certificate = certificate(state);
+    let asked = state.join("proxy/trust-asked.crt");
+    let Ok(current) = std::fs::read(&certificate) else {
+        return;
+    };
+    if std::fs::read(&asked).is_ok_and(|previous| previous == current)
+        || trusted(state) != Some(false)
+    {
+        return;
+    }
+    // Recorded first, so a declined prompt is not asked again on every `up`.
+    if crate::private::write_bytes(&asked, &current).is_err() {
+        return;
+    }
+    if let Err(error) = install_trust(state, "caddy") {
+        eprintln!(
+            "parcela: the certificate authority is not trusted ({error:#}); run `parcela trust` to try again"
+        );
+    }
 }
 
 #[cfg(test)]

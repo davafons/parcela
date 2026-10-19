@@ -211,6 +211,9 @@ pub fn detached(
     if share.lan {
         command.arg("--lan");
     }
+    if let Some(ip) = share.lan_ip {
+        command.arg("--lan-ip").arg(ip.to_string());
+    }
     if share.tailscale {
         command.arg("--tailscale");
     }

@@ -41,6 +41,9 @@ pub struct Service {
     /// Hostname prefix; `None` only for the default service.
     pub subdomain: Option<String>,
     pub readiness_path: String,
+    /// Also routes every subdomain of the service's host, for subdomain-per-tenant apps.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wildcard: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -167,6 +170,9 @@ struct Http {
     /// A path that answers 2xx once the service is ready, like `/up`.
     #[cfg_attr(test, schemars(regex(pattern = "^/")))]
     healthcheck: String,
+    /// Also send every subdomain of this service's host to it, like `https://kobe.shop.localhost`, for subdomain-per-tenant apps.
+    #[serde(default)]
+    wildcard: bool,
 }
 
 pub fn dns_label(value: &str) -> Result<()> {
@@ -314,6 +320,7 @@ impl Manifest {
                     Service {
                         subdomain: http.subdomain,
                         readiness_path: http.healthcheck,
+                        wildcard: http.wildcard,
                     },
                 );
             }

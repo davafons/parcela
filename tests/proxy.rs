@@ -90,7 +90,7 @@ fn the_saved_profile_beats_the_default_and_parcela_https_port_only_replaces_the_
     assert!(stderr(&print).ends_with("start the proxy with `parcela proxy start`\n"));
     assert!(!state.exists(), "trust --print creates no state");
 
-    parcela::frontdoor::FrontDoor { https: 2000 }
+    parcela::frontdoor::FrontDoor::on(2000)
         .save(&state)
         .unwrap();
     let saved = Command::new(env!("CARGO_BIN_EXE_parcela"))

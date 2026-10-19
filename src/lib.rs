@@ -13,6 +13,7 @@ pub mod private;
 pub mod process;
 pub mod proxy;
 pub mod registry;
+pub mod relay;
 pub mod router;
 pub mod runtime;
 pub mod share;

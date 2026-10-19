@@ -179,6 +179,7 @@ pub fn run(
         request,
     )?;
     let router = crate::proxy::ensure_running(registry.state_path(), &workspace.hostname)?;
+    crate::proxy::offer_trust(registry.state_path());
     let path = runtime(registry, workspace)?;
     let owner_lock = Lock::acquire(&path.join("owner.lock"))?;
     converge_crashed_session(registry, workspace, &owner_lock)?;

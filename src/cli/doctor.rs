@@ -157,6 +157,16 @@ fn proxy(state: &Path) -> Check {
             );
         }
     };
+    if front_door.relay && !parcela::relay::installed() {
+        return Check::fail(
+            "proxy",
+            format!(
+                "URLs use port 443, but {} is missing",
+                parcela::relay::PLIST
+            ),
+            "parcela proxy install",
+        );
+    }
     match parcela::proxy::status(state) {
         Ok(Status::Running(router)) => match parcela::proxy::version_warning(&router) {
             Some(warning) => Check::fail("proxy", warning, "parcela proxy restart"),
