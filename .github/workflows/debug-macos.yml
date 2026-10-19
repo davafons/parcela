@@ -16,13 +16,8 @@ jobs:
           t = time.time()
           print(sys.argv[1], socket.getfqdn('127.0.0.1'), round(time.time() - t, 2), flush=True)
           PY
-          python3 /tmp/fq.py direct
-          cat > /tmp/pc.yaml <<'YML'
-          processes:
-            fq:
-              command: python3 /tmp/fq.py under-pc
-          YML
-          process-compose -f /tmp/pc.yaml -t=false --port 31777 2>/dev/null | head -5 &
-          sleep 45; kill %1 || true
-          env -i PATH=$PATH HOME=$HOME python3 /tmp/fq.py env-i
-          setsid true 2>/dev/null; python3 -c "import os; os.setsid(); import subprocess; subprocess.run(['python3','/tmp/fq.py','setsid'])"
+          env | cut -d= -f1 | sort | tr '\n' ' '; echo
+          for v in $(env | cut -d= -f1); do
+            out=$(env -i PATH=$PATH HOME=$HOME "$v=${!v}" perl -e 'alarm 3; exec @ARGV' python3 /tmp/fq.py "$v" 2>/dev/null) && echo "FAST $out"
+          done
+          echo done-bisect
