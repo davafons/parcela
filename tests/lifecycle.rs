@@ -60,6 +60,25 @@ fn unavailable_owner_is_unknown_and_inspection_creates_no_runtime() {
 }
 
 #[test]
+fn down_converges_a_start_that_died_before_launching() {
+    let (_temp, registry, workspace, session) = fixture();
+    let path = registry.runtime_path(&workspace);
+    private::directory(&path).unwrap();
+    let held = private::Lock::acquire(&path.join("owner.lock")).unwrap();
+    assert!(lifecycle::down(&registry, &workspace).is_err());
+    drop(held);
+    fs::write(path.join("launched"), session.generation.to_string()).unwrap();
+    assert!(lifecycle::down(&registry, &workspace).is_err());
+    fs::remove_file(path.join("launched")).unwrap();
+    assert_eq!(
+        lifecycle::down(&registry, &workspace).unwrap()["state"],
+        "stopped"
+    );
+    let current = registry.session(&workspace.id).unwrap().unwrap();
+    assert_eq!(current.status, SessionStatus::Stopped);
+}
+
+#[test]
 fn repeated_down_is_noop_without_runtime_or_process_signaling() {
     let (_temp, mut registry, workspace, session) = fixture();
     registry

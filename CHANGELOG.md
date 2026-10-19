@@ -29,6 +29,7 @@
 
 - Process Compose probes only services that another service or hook waits for, so health checks no longer fill every HTTP service's log.
 - Errors that show `owner.log` lines no longer include Process Compose's terminal-title escape.
+- An `up` interrupted or killed before it launched anything no longer leaves the environment stuck as starting: Ctrl-C during startup stops it cleanly, and the next `up` or `down` releases its ports.
 
 ## 0.3.0 - 2026-10-18
 

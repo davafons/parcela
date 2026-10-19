@@ -199,6 +199,9 @@ pub fn run(
         Launch::Command(_) => "run",
         Launch::Compose(_) => "compose",
     };
+    // Registered before the session exists: an interrupt during startup reaches the owner loop
+    // instead of killing Parcela with leased ports and no owner record.
+    let signals = Signals::new()?;
     let session = registry.begin_endpoints(
         workspace,
         &router.token,
@@ -208,7 +211,7 @@ pub fn run(
         &endpoints,
         &ports,
     )?;
-    // Until the child exists no route can be published, so a failure only marks the run stopped.
+    // Until owner.json exists recovery cannot find the child, so a failure stops it and marks the run stopped.
     let launched = (|| -> Result<_> {
         let mut workspace = registry.current(&workspace.source, manifest)?;
         workspace.generation = session.generation;
@@ -218,6 +221,7 @@ pub fn run(
             &path.join("context.json"),
             &json!({"session":session,"environment":env,"source":workspace.source,"sockets":{"control":sockets.control,"compose":sockets.compose},"isolation":"routing-only; project must consume declared private paths"}),
         )?;
+        let mut native = None;
         let mut command = match launch {
             Launch::Command(argv) => {
                 ensure!(!argv.is_empty(), "literal command argv required after --");
@@ -255,7 +259,13 @@ pub fn run(
                     &path.join("pc.token"),
                     Uuid::new_v4().to_string().as_bytes(),
                 )?;
-                let mut command = Command::new(resolve_binary(binary, &workspace.source)?);
+                let resolved = resolve_binary(binary, &workspace.source)?;
+                native = Some(crate::owner::Native {
+                    binary: resolved.to_string_lossy().into(),
+                    token: private::Identity::read(&path.join("pc.token"))?,
+                    socket: None,
+                });
+                let mut command = Command::new(resolved);
                 command
                     .arg("--token-file")
                     .arg(path.join("pc.token"))
@@ -277,8 +287,16 @@ pub fn run(
         };
         command.current_dir(&workspace.source);
         command_env(&mut command, &env);
-        let signals = Signals::new()?;
         let control = control::Server::bind(&path)?;
+        let owner = crate::process::Identity::read(std::process::id())?
+            .context("owner birth unavailable")?;
+        let lock = owner_lock.identity()?;
+        let control_identity = private::Identity::read(&sockets.control)?;
+        // Without this marker recovery knows no child of this generation can exist.
+        private::write_bytes(
+            &path.join(LAUNCHED),
+            session.generation.to_string().as_bytes(),
+        )?;
         // This is not an atomic socket handoff. Durable lease and native ownership inspection prevent publishing a foreign listener.
         drop(probes);
         let child = match launch {
@@ -297,9 +315,28 @@ pub fn run(
             }
             Launch::Command(_) => OwnedChild::spawn(&mut command)?,
         };
-        Ok((workspace, signals, control, child))
+        let mut supervisor = Supervisor::retained(child, native.is_some())?;
+        let record = Record {
+            session: session.clone(),
+            phase: Phase::Starting,
+            owner,
+            lock,
+            control: control_identity,
+            supervisor: supervisor.identity().clone(),
+            processes: vec![supervisor.identity().clone()],
+            native,
+            manifest: manifest.clone(),
+            diagnostic: None,
+            share,
+        };
+        if let Err(error) = record.save(&path) {
+            // A dropped native supervisor is detached, not stopped.
+            let _ = supervisor.shutdown(&record, &path, &workspace, libc::SIGTERM);
+            return Err(error);
+        }
+        Ok((workspace, control, supervisor, record))
     })();
-    let (workspace, signals, control, child) = match launched {
+    let (workspace, control, supervisor, record) = match launched {
         Ok(launched) => launched,
         Err(error) => {
             registry.session_status(&session, SessionStatus::Stopped)?;
@@ -307,32 +344,6 @@ pub fn run(
         }
     };
     let setup = matches!(launch, Launch::Compose(_)) && setup_pending(manifest, &path);
-    let supervisor = Supervisor::retained(child, matches!(launch, Launch::Compose(_)))?;
-    let native = match launch {
-        Launch::Compose(binary) => Some(crate::owner::Native {
-            binary: resolve_binary(binary, &workspace.source)?
-                .to_string_lossy()
-                .into(),
-            token: private::Identity::read(&path.join("pc.token"))?,
-            socket: None,
-        }),
-        Launch::Command(_) => None,
-    };
-    let record = Record {
-        session: session.clone(),
-        phase: Phase::Starting,
-        owner: crate::process::Identity::read(std::process::id())?
-            .context("owner birth unavailable")?,
-        lock: owner_lock.identity()?,
-        control: private::Identity::read(&crate::sockets::environment(&path)?.control)?,
-        supervisor: supervisor.identity().clone(),
-        processes: vec![supervisor.identity().clone()],
-        native,
-        manifest: manifest.clone(),
-        diagnostic: None,
-        share,
-    };
-    record.save(&path)?;
     Owner {
         registry,
         workspace: &workspace,
@@ -353,6 +364,8 @@ fn setup_pending(manifest: &Manifest, runtime: &std::path::Path) -> bool {
 
 /// Written once `hooks.setup` has run and every service answered. `up --setup` removes it.
 pub const SETUP_DONE: &str = "setup-complete";
+/// Names the generation whose child may have been spawned before owner.json recorded it.
+const LAUNCHED: &str = "launched";
 /// Each hook writes `<name>.exit` here when it finishes.
 const HOOKS_DIR: &str = "hooks";
 
@@ -1209,7 +1222,15 @@ fn converge_crashed(
     lock: &Lock,
 ) -> Result<bool> {
     let Ok(mut record) = Record::read(path, session) else {
-        return Ok(false);
+        // The owner died after leasing ports and before launching anything: the caller holds
+        // owner.lock, and no launch marker names this generation. A launched child stays unknown.
+        let launched = std::fs::read_to_string(path.join(LAUNCHED))
+            .is_ok_and(|generation| generation == session.generation.to_string());
+        if session.status != SessionStatus::Starting || launched {
+            return Ok(false);
+        }
+        registry.session_status(session, SessionStatus::Stopped)?;
+        return Ok(true);
     };
     if !record.abandoned(lock)? || !record.quiescent() {
         return Ok(false);
@@ -1235,13 +1256,13 @@ pub fn converge_crashed_session(
     registry: &mut Registry,
     workspace: &Workspace,
     lock: &Lock,
-) -> Result<()> {
+) -> Result<bool> {
     if let Some(session) = registry.session(&workspace.id)?
         && session.status != SessionStatus::Stopped
     {
-        converge_crashed(registry, &registry.runtime_path(workspace), &session, lock)?;
+        return converge_crashed(registry, &registry.runtime_path(workspace), &session, lock);
     }
-    Ok(())
+    Ok(false)
 }
 
 pub fn task(

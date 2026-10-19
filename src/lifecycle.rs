@@ -99,6 +99,18 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         && let Err(error) = control::request(&path, &session, Action::Stop)
     {
         let current = current_session(registry, &session)?;
+        if current.status == SessionStatus::Starting
+            && path.join("owner.lock").exists()
+            && let Some(lock) = private::Lock::try_acquire(&path.join("owner.lock"))?
+        {
+            let mut writer =
+                Registry::open(registry.state_path(), true)?.context("registry missing")?;
+            if crate::runtime::converge_crashed_session(&mut writer, workspace, &lock)? {
+                return Ok(
+                    json!({"environment_id": workspace.id, "generation": session.generation, "state": "stopped", "already_stopped": false}),
+                );
+            }
+        }
         if current.status != SessionStatus::Stopping && current.status != SessionStatus::Stopped {
             let evidence = crate::owner::Record::read(&path, &session).with_context(|| {
                 format!("{error:#}; authenticated recovery evidence unavailable")

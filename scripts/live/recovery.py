@@ -508,15 +508,17 @@ os.execv(''' + repr(f.compose) + ''', [''' + repr(f.compose) + ''', *sys.argv[1:
     owner.kill()
     owner.wait(timeout=5)
     (f.root / 'gate-enabled').unlink()
+    assert not (app['runtime'] / 'launched').exists(), 'the owner died before launching a child'
     down = f.cli(app['path'], 'down')
-    assert down.returncode != 0, 'missing launch evidence must not authorize lease release'
-    retry = f.cli(app['path'], 'up', '--process-compose', str(wrapper), '--backend-port', str(app['port']))
-    assert retry.returncode != 0, 'uncertain allocation must not be silently replayed'
-    assert f.session(app)['token'] == session['token'] and f.session(app)['status'] == 'starting'
+    assert down.returncode == 0, down.stderr
+    assert f.session(app)['token'] == session['token'] and f.session(app)['status'] == 'stopped'
     assert marker.read_text() == 'preserve allocation fixture'
     assert not socket_path(app, 'compose').exists() and not listening(app['port'])
-    assert f.probe(app)[0] == 503
-    return {'unknown_allocation_refused': True, 'lease_retained': True, 'source_data_preserved': True}
+    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    assert retry.returncode == 0, retry.stderr
+    assert f.probe(app)[0] == 200
+    assert f.cli(app['path'], 'down').returncode == 0
+    return {'unlaunched_allocation_released': True, 'retry_exit': 0, 'source_data_preserved': True}
 
 
 def recover_racing_stop(f):
