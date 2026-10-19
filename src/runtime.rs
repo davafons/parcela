@@ -724,6 +724,7 @@ impl Owner<'_> {
         let mut published = None;
         let mut hooks_checked = Instant::now();
         let mut proxy_checked = Instant::now();
+        let mut proxy_error: Option<String> = None;
         loop {
             if *requested_stop {
                 return Ok(0);
@@ -818,10 +819,20 @@ impl Owner<'_> {
                 proxy_checked = Instant::now();
                 if router::current(self.registry.state_path()).is_err() {
                     match crate::proxy::revive(self.registry.state_path()) {
-                        Ok(true) => eprintln!("parcela: the proxy had stopped; started it again"),
+                        Ok(true) => {
+                            proxy_error = None;
+                            eprintln!("parcela: the proxy had stopped; started it again")
+                        }
                         Ok(false) => {}
+                        // Retried every 2s until the port frees up; said once per cause.
                         Err(error) => {
-                            eprintln!("parcela: the proxy is down and did not restart: {error:#}")
+                            let error = format!("{error:#}");
+                            if proxy_error.as_ref() != Some(&error) {
+                                eprintln!(
+                                    "parcela: the proxy is down and did not restart: {error}"
+                                );
+                                proxy_error = Some(error);
+                            }
                         }
                     }
                 }
