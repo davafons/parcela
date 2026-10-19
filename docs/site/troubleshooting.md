@@ -54,6 +54,14 @@ Run `parcela status` and look at the `parcela-lan-*` and `parcela-tailscale-*` p
 - **The page says the host is not allowed.** The dev server refuses the shared name. Add `PARCELA_SHARE_HOSTS` to its allowed hosts, as shown in [the CLI guide](cli.md#let-the-dev-server-accept-the-names).
 - **`--tailscale` refuses to start.** It says what is missing: the CLI, `tailscale up`, or HTTPS certificates in the tailnet's DNS settings.
 
+## The dev server rejects the host
+
+Rails, Django and Vite accept `*.localhost` names in development by default, but not the `.local` and tailnet names of `--lan` and `--tailscale`, nor any name once you set an allow list yourself. Add the names from `PARCELA_SHARE_HOSTS`, or derive them from `PARCELA_URL`. [Frameworks and data](frameworks.md#host-checks) shows the setting for each framework.
+
+## Safari searches instead of opening the URL
+
+Type the scheme: `https://shop.localhost:1443`. Without it, Safari may treat `shop.localhost:1443` as a search.
+
 ## A preview name is taken
 
 ```text

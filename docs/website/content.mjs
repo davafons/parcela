@@ -10,9 +10,11 @@ export const groups = [
   { label: 'Introduction', pages: [
     ['index', 'Home', 'docs/site/index.md'],
     ['getting-started', 'Getting started', 'docs/site/getting-started.md'],
+    ['faq', 'FAQ', 'docs/site/faq.md'],
   ] },
   { label: 'Guides', pages: [
     ['worktrees', 'Parallel worktrees and agents', 'docs/site/worktrees.md'],
+    ['frameworks', 'Frameworks and data', 'docs/site/frameworks.md'],
     ['cli', 'CLI guide', 'docs/site/cli.md'],
     ['troubleshooting', 'Troubleshooting', 'docs/site/troubleshooting.md'],
   ] },

@@ -23,7 +23,12 @@ export default defineConfig({
   cleanUrls: true,
   title: 'Parcela',
   description: 'Deployable dev environments for your AI agents.',
-  head: [['link', { rel: 'icon', href: `${base}assets/logo.svg?v=picket-a` }]],
+  head: [
+    ['link', { rel: 'icon', href: `${base}assets/logo.svg?v=picket-a` }],
+    ['meta', { property: 'og:title', content: 'Parcela' }],
+    ['meta', { property: 'og:description', content: 'Deployable dev environments for your AI agents. Every worktree runs the whole app at its own HTTPS URL.' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+  ],
   transformHead({ pageData }) {
     if (pageData.relativePath === '404.md') return [];
     const path = pageData.relativePath.replace(/index\.md$/, '');
