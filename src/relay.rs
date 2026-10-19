@@ -16,7 +16,21 @@ fn user() -> Result<String> {
         ensure!(!entry.is_null(), "cannot find the current user");
         std::ffi::CStr::from_ptr((*entry).pw_name)
     };
-    Ok(name.to_str().context("non-UTF-8 user name")?.to_owned())
+    let name = name.to_str().context("non-UTF-8 user name")?;
+    ensure!(
+        plain_user(name),
+        "unsupported user name for the relay: {name:?}"
+    );
+    Ok(name.to_owned())
+}
+
+/// A name that goes into the plist as is: no XML markup and no launchd surprises.
+fn plain_user(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
 fn plist(user: &str, target: u16) -> String {
@@ -110,6 +124,16 @@ mod tests {
             "<key>SockServiceName</key><string>443</string>",
         ] {
             assert!(plist.contains(part), "{part}\n{plist}");
+        }
+    }
+
+    #[test]
+    fn the_relay_refuses_a_user_name_that_could_change_the_plist() {
+        for name in ["dav", "first.last", "_www", "a-b_1"] {
+            assert!(super::plain_user(name), "{name}");
+        }
+        for name in ["", "-x", "a<b", "a&b", "a b", "root</string>", "ü"] {
+            assert!(!super::plain_user(name), "{name}");
         }
     }
 }
