@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `up` and `proxy status` suggest `parcela trust` only while the certificate authority is not trusted. `proxy status --json` reports it as `trusted` instead of the always-false `browser_trust_verified`.
+- Rerunning `install.sh` over an earlier version says so and how to finish the upgrade. The FAQ shows how to upgrade each kind of install.
+
 ## 0.4.0 - 2026-10-19
 
 Parcela runs each environment's processes itself, so Process Compose is no longer needed; only Caddy is. `parcela.yaml` does not change. Before upgrading, run `parcela down --all-projects` and `parcela proxy stop`: environments and a proxy started by 0.3 or earlier cannot be stopped, taken over or reached by 0.4.

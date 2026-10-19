@@ -160,6 +160,8 @@ main() {
     esac
   done
 
+  # Rerunning this script is how an install.sh install upgrades.
+  previous=$("$BIN/parcela" --version 2>/dev/null || true)
   if [ -n "$nightly" ]; then
     install_parcela https://github.com/davafons/parcela/releases/download/nightly
   else
@@ -185,7 +187,13 @@ main() {
 
   path_hint
   echo
-  echo "Next, in your project: parcela init, then parcela up"
+  current=$("$BIN/parcela" --version)
+  if [ -n "$previous" ] && [ "$previous" != "$current" ]; then
+    echo "Upgraded from ${previous#parcela }. Run parcela proxy restart to use it; running"
+    echo "environments keep running. Breaking changes: https://github.com/davafons/parcela/blob/main/CHANGELOG.md"
+  elif [ -z "$previous" ]; then
+    echo "Next, in your project: parcela init, then parcela up"
+  fi
   uninstall_hint
 }
 

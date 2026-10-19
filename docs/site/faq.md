@@ -79,6 +79,20 @@ So improvements to Parcela stay open, including in hosted versions of it. It cov
 
 `parcela.yaml` has `version: 1`. Parcela is experimental, so it may still change, and every change is in the [changelog](https://github.com/davafons/parcela/blob/main/CHANGELOG.md). A file without `version: 1` is refused, never misread, and the error says which version this Parcela reads.
 
+## How do I upgrade?
+
+Upgrade the way you installed:
+
+```sh
+brew upgrade parcela                                       # Homebrew
+curl -fsSL https://parcela.davafons.com/install.sh | sh    # install.sh: run it again
+cargo install --git https://github.com/davafons/parcela --locked --force   # from source
+```
+
+Then run `parcela proxy restart`, so the proxy runs the new version. Running environments keep going through it; `up` and `proxy status` warn while an older proxy is still running. Read the [changelog](https://github.com/davafons/parcela/blob/main/CHANGELOG.md) first: a release with breaking changes, like 0.4, says what to stop before upgrading.
+
+Parcela never updates itself or checks for new versions, so it makes no network calls of its own.
+
 ## How do I uninstall it?
 
 ```sh
