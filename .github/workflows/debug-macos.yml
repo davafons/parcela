@@ -1,0 +1,29 @@
+name: debug macos
+on: workflow_dispatch
+jobs:
+  debug:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/ci-tools
+      - run: cargo build --locked
+      - name: probe
+        run: |
+          set -x
+          python3 -m http.server 31001 --bind 127.0.0.1 >/dev/null 2>&1 &
+          sleep 2
+          /usr/sbin/lsof -nP -iTCP:31001 -sTCP:LISTEN -Fptn; echo "lsof=$?"
+          sudo /usr/sbin/lsof -nP -iTCP:31001 -sTCP:LISTEN -Fptn; echo "sudo lsof=$?"
+          ps -o ppid= -p $!; echo "ps=$?"
+          id; ulimit -a | head -3
+          kill %1
+          D=$(mktemp -d /tmp/dbg.XXXX); cp -R examples/docs-demo $D/hello
+          P="target/debug/parcela --path $D/hello --state-dir $D/state"
+          $P proxy start --port 31555
+          timeout 40 $P up --detach --readiness-timeout 25; echo "up=$?"
+          $P status --json | head -80
+          /usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fptn | head -40
+          tail -30 $D/state/environments/*/log/owner.log
+          $P down; $P proxy stop
