@@ -107,6 +107,6 @@ fn a_terminal_gets_aligned_text() {
     );
     assert_eq!(
         terminal(&path, &state, &["down"]),
-        "✓ demo was already stopped\n"
+        "✓ demo is not running\n"
     );
 }

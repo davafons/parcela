@@ -12,9 +12,7 @@ const STYLES: Styles = Styles::styled()
     .valid(AnsiColor::Green.on_default())
     .invalid(AnsiColor::Yellow.on_default());
 
-/// Run each checkout's services at named HTTPS URLs (experimental).
-///
-/// Start with `parcela init`, then `parcela up`.
+/// Run dev environments side by side at their own HTTPS URLs
 #[derive(Parser)]
 #[command(version, styles = STYLES)]
 pub struct Args {
@@ -26,16 +24,16 @@ pub struct Args {
 
 #[derive(clap::Args, Clone)]
 pub struct Global {
-    /// Checkout directory to act on.
+    /// Checkout directory
     #[arg(long, global = true, default_value = ".")]
     pub path: PathBuf,
-    /// Private state directory. Defaults to PARCELA_STATE_DIR, then XDG_STATE_HOME/parcela, then ~/.local/state/parcela.
+    /// State directory [env: PARCELA_STATE_DIR]
     #[arg(long, global = true)]
     pub state_dir: Option<PathBuf>,
-    /// Select a registered environment by ID instead of --path (see parcela ls).
+    /// Environment ID, instead of --path
     #[arg(long, global = true, conflicts_with = "path")]
     pub workspace: Option<uuid::Uuid>,
-    /// Print JSON. The default when stdout is not a terminal.
+    /// Print JSON (default when not a terminal)
     #[arg(long, global = true)]
     pub json: bool,
 }
@@ -63,103 +61,103 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Write a minimal parcela.yaml here, guessing the dev server command.
+    /// Create a parcela.yaml
     Init {
-        /// Project name. Defaults to the main checkout's directory name.
+        /// Project name
         #[arg(long)]
         name: Option<String>,
-        /// Command that starts the web service on 127.0.0.1:$PORT.
+        /// Web service command
         #[arg(long)]
         command: Option<String>,
     },
-    /// Start this checkout's services. Registers it on first use; reattaches to services left running.
+    /// Start the environment
     Up {
-        /// Preview name for this checkout. Defaults to the jj workspace or Git worktree name.
+        /// Environment name (default: the worktree name)
         #[arg(long, conflicts_with_all = ["primary", "workspace"])]
         name: Option<String>,
-        /// Use the project's base URL, even from a linked checkout.
+        /// Use the project's main URL
         #[arg(long, conflicts_with = "workspace")]
         primary: bool,
-        /// Return once the services are ready and keep them running in the background.
-        #[arg(long)]
+        /// Run in the background
+        #[arg(short, long)]
         detach: bool,
-        /// Run hooks.setup again, as on a new environment.
+        /// Run the setup hook again
         #[arg(long)]
         setup: bool,
-        /// Port for the default service. Other services get free ports.
+        /// Port for the main service
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
         /// Process Compose binary.
         #[arg(long, default_value = "process-compose", hide = true)]
         process_compose: String,
-        /// Seconds to wait for every service to answer HTTP.
+        /// Readiness timeout in seconds
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
         readiness_timeout: u64,
         #[arg(long, hide = true)]
         launch_file: Option<PathBuf>,
     },
-    /// Stop the selected environment. Source and data are kept.
+    /// Stop the environment
     #[command(visible_alias = "stop")]
     Down {
-        /// Stop every running environment of this project.
+        /// Stop all of this project's environments
         #[arg(long, conflicts_with = "workspace")]
         all: bool,
-        /// Stop every running environment of every project.
+        /// Stop all environments
         #[arg(long, conflicts_with_all = ["workspace", "all"])]
         all_projects: bool,
     },
-    /// Stop all services, then start them again from the current parcela.yaml.
+    /// Restart the environment
     Restart {
-        /// Return once the services are ready and keep them running in the background.
-        #[arg(long)]
+        /// Run in the background
+        #[arg(short, long)]
         detach: bool,
-        /// Run hooks.setup again, as on a new environment.
+        /// Run the setup hook again
         #[arg(long)]
         setup: bool,
-        /// Port for the default service. Other services get free ports.
+        /// Port for the main service
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
         /// Process Compose binary.
         #[arg(long, default_value = "process-compose", hide = true)]
         process_compose: String,
-        /// Seconds to wait for every service to answer HTTP.
+        /// Readiness timeout in seconds
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
         readiness_timeout: u64,
         #[arg(long, hide = true)]
         launch_file: Option<PathBuf>,
     },
-    /// Show whether this checkout's services are running and answering, with each process.
+    /// Show the environment's status
     Status {
-        /// Show every environment (same as parcela ls).
+        /// Show all environments
         #[arg(long, conflicts_with = "workspace")]
         all: bool,
     },
-    /// List every registered environment, plus this project's checkouts that were never started.
+    /// List environments
     Ls,
-    /// Print recent output of every service and worker, or of one.
+    /// Show logs
     Logs {
-        /// Service or worker name. Without it, every process's lines are prefixed with its name.
+        /// Service name
         service: Option<String>,
-        /// Number of lines per process, 1 to 10000.
+        /// Lines to show per service
         #[arg(long, default_value_t = 100, value_parser = clap::value_parser!(u32).range(1..=10000))]
         tail: u32,
-        /// Keep printing new lines until Ctrl-C or the environment stops.
+        /// Follow log output
         #[arg(short, long)]
         follow: bool,
     },
-    /// Print the environment URL. It may not be reachable yet.
+    /// Print the environment's URL
     Url {
-        /// Print this service's URL instead of the default service's.
+        /// Service name
         #[arg(long)]
         service: Option<String>,
     },
-    /// Forget a stopped environment and release its hostnames. Source and data stay on disk.
+    /// Remove a stopped environment
     Rm {
-        /// Forget every stopped environment whose checkout directory no longer exists.
+        /// Remove environments whose checkout is gone
         #[arg(long, conflicts_with = "workspace")]
         prune: bool,
     },
-    /// Check whether this machine and checkout are ready for parcela up. Changes nothing.
+    /// Check the setup
     Doctor {
         /// Caddy binary to probe instead of caddy on PATH.
         #[arg(long, hide = true)]
@@ -168,79 +166,78 @@ pub enum Command {
         #[arg(long, hide = true)]
         process_compose: Option<String>,
     },
-    /// Start, stop or check the HTTPS proxy that serves every environment's URL.
+    /// Manage the HTTPS proxy
     Proxy {
         #[command(subcommand)]
         command: ProxyCommand,
     },
-    /// Trust Parcela's local certificate authority so browsers accept its URLs. Asks for your password.
+    /// Trust the local certificate authority
     Trust {
-        /// Print the CA certificate path (for curl --cacert) and change nothing.
+        /// Print the CA certificate path
         #[arg(long)]
         print: bool,
         /// Caddy binary.
         #[arg(long, default_value = "caddy", hide = true)]
         caddy: String,
     },
-    /// Run one literal command as the web service instead of parcela.yaml's services.
+    /// Run a command as the web service
     Run {
-        /// Preview name for this checkout. Defaults to the jj workspace or Git worktree name.
+        /// Environment name (default: the worktree name)
         #[arg(long, conflicts_with_all = ["primary", "workspace"])]
         name: Option<String>,
-        /// Use the project's base URL, even from a linked checkout.
+        /// Use the project's main URL
         #[arg(long, conflicts_with = "workspace")]
         primary: bool,
-        /// Port for the command to listen on.
+        /// Port for the command
         #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
         backend_port: Option<u16>,
-        /// Seconds to wait for the command to answer HTTP.
+        /// Readiness timeout in seconds
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
         readiness_timeout: u64,
-        /// The command and its arguments, after --.
+        /// Command and arguments
         #[arg(last = true, required = true, allow_hyphen_values = true)]
         argv: Vec<String>,
     },
-    /// Run a task from parcela.yaml with this environment's variables.
+    /// Run a task
     Task {
-        /// Task name from parcela.yaml.
+        /// Task name
         name: String,
-        /// Extra arguments for the task, after --.
+        /// Task arguments
         #[arg(last = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Take back control of services that kept running after Parcela was interrupted.
-    /// `up` does this automatically.
+    /// Reattach to services left running
     #[command(hide = true)]
     Recover {
-        /// Return once control is restored and keep the services in the background.
-        #[arg(long)]
+        /// Run in the background
+        #[arg(short, long)]
         detach: bool,
     },
-    /// Print this checkout's environment: URLs, paths and ID.
+    /// Print the environment's details
     #[command(hide = true)]
     Context,
-    /// Print the agent skill bundled with this binary.
+    /// Print the agent skill
     #[command(long_flag = "skill")]
     Skill,
 }
 
 #[derive(Subcommand)]
 pub enum ProxyCommand {
-    /// Start the HTTPS proxy in the background. parcela up does this when it isn't running.
+    /// Start the proxy
     Start {
         #[command(flatten)]
         listen: Listen,
     },
-    /// Stop the proxy. Running services keep running but lose their URLs until it starts again.
+    /// Stop the proxy
     Stop,
-    /// Stop the proxy and start it again, for example after upgrading Parcela or to change --port.
+    /// Restart the proxy
     Restart {
         #[command(flatten)]
         listen: Listen,
     },
-    /// Show whether the proxy is running, where it listens and which Parcela started it.
+    /// Show the proxy's status
     Status,
-    /// Run the proxy in the foreground, for debugging or a boot service. Never uses sudo or trusts a CA.
+    /// Run the proxy in the foreground
     #[command(hide = true)]
     Run {
         #[command(flatten)]
@@ -250,7 +247,7 @@ pub enum ProxyCommand {
 
 #[derive(clap::Args)]
 pub struct Listen {
-    /// HTTPS port to serve on, saved for later starts. Defaults to the saved port, then PARCELA_HTTPS_PORT, then 1443.
+    /// HTTPS port (default: 1443) [env: PARCELA_HTTPS_PORT]
     #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
     pub port: Option<u16>,
     /// Caddy binary.

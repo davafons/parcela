@@ -84,9 +84,9 @@ pub fn ensure_running(state: &Path, host: &str) -> Result<Router> {
 pub fn started_hint(router: &Router, host: &str) -> String {
     match router.front_door {
         FrontDoor::Port { https } => format!(
-            "Started the Parcela proxy on :{https} (run `parcela trust` once so browsers trust https://{host}:{https})"
+            "Started the proxy on :{https}. Run `parcela trust` to trust https://{host}:{https}"
         ),
-        FrontDoor::Standard { .. } => "Started the Parcela proxy on standard ports".into(),
+        FrontDoor::Standard { .. } => "Started the proxy on ports 80 and 443".into(),
     }
 }
 

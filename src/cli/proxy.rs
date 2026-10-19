@@ -138,7 +138,7 @@ pub fn trust(state: &Path, print: bool, caddy: &str) -> Result<i32> {
     Registry::open(state, true)?.context("cannot create the registry")?;
     proxy::ensure_running(state, "<name>.localhost")?;
     eprintln!(
-        "parcela: adding Parcela's local certificate authority to the system trust store, so browsers accept its https://*.localhost URLs.\n  certificate  {}\n  command      {caddy} trust (Caddy may ask for your password)\n  undo         {caddy} untrust --cert {}",
+        "Adding Parcela's certificate authority to the system trust store. It may ask for your password.\n  certificate  {}\n  undo         {caddy} untrust --cert {}",
         certificate.display(),
         certificate.display(),
     );
@@ -146,6 +146,6 @@ pub fn trust(state: &Path, print: bool, caddy: &str) -> Result<i32> {
         .status()
         .with_context(|| format!("run {caddy} trust"))?;
     anyhow::ensure!(status.success(), "{caddy} trust failed ({status})");
-    eprintln!("parcela: trusted. Restart the browser if it still warns.");
+    eprintln!("Trusted. Restart the browser if it still warns.");
     Ok(0)
 }

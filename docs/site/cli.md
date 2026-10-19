@@ -107,9 +107,9 @@ Stops the environment's services and workers. `stop` is the same command. Source
 
 ```text
 $ parcela down
-✓ Stopped hello; source and data preserved
+✓ Stopped hello
 $ parcela down
-✓ hello was already stopped
+✓ hello is not running
 ```
 
 ### parcela restart
@@ -246,7 +246,7 @@ $ parcela proxy status
   pid      95029 (Caddy 95034)
   version  Parcela 0.3.0
   log      /Users/you/.local/state/parcela/proxy/proxy.log
-  Run `parcela trust` once so browsers trust these URLs.
+  Run `parcela trust` to trust these URLs
 ```
 
 If the port is busy, `start` fails and names the process that holds it. It never stops that process and never picks another port.

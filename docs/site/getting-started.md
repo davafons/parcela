@@ -137,7 +137,7 @@ parcela up
 ```
 
 ```text
-parcela: Started the Parcela proxy on :1443 (run `parcela trust` once so browsers trust https://hello.localhost:1443)
+parcela: Started the proxy on :1443. Run `parcela trust` to trust https://hello.localhost:1443
 [web	] 127.0.0.1 - - [17/Oct/2026 20:40:13] "GET / HTTP/1.1" 200 -
 ✓ hello is running at https://hello.localhost:1443
   Press Ctrl-C to stop
@@ -158,11 +158,10 @@ parcela trust
 ```
 
 ```text
-parcela: adding Parcela's local certificate authority to the system trust store, so browsers accept its https://*.localhost URLs.
+Adding Parcela's certificate authority to the system trust store. It may ask for your password.
   certificate  /Users/you/.local/state/parcela/proxy/data/pki/authorities/local/root.crt
-  command      caddy trust (Caddy may ask for your password)
   undo         caddy untrust --cert /Users/you/.local/state/parcela/proxy/data/pki/authorities/local/root.crt
-parcela: trusted. Restart the browser if it still warns.
+Trusted. Restart the browser if it still warns.
 ```
 
 To use the certificate with `curl` without trusting it system-wide, pass its path:
@@ -442,8 +441,8 @@ Stopping 2 environments:
   NAME            URL
   signup (hello)  https://signup-hello.localhost:1443
   hello           https://hello.localhost:1443
-✓ Stopped signup (hello); source and data preserved
-✓ Stopped hello; source and data preserved
+✓ Stopped signup (hello)
+✓ Stopped hello
 ```
 
 Remove the worktree, then tell Parcela to forget checkouts that no longer exist:

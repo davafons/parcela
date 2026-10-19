@@ -110,12 +110,9 @@ pub fn name(workspace: &Value) -> String {
 
 pub fn down(value: &Value, label: &str, style: &Style) -> String {
     if value["already_stopped"] == true {
-        format!("{} {label} was already stopped\n", style.ok())
+        format!("{} {label} is not running\n", style.ok())
     } else {
-        format!(
-            "{} Stopped {label}; source and data preserved\n",
-            style.ok()
-        )
+        format!("{} Stopped {label}\n", style.ok())
     }
 }
 
@@ -151,10 +148,10 @@ pub fn started(value: &Value, style: &Style) -> String {
 
 pub fn recovered(value: &Value, style: &Style) -> String {
     if value["state"] == "stopped" {
-        format!("{} Finished the interrupted stop\n", style.ok())
+        format!("{} Stopped\n", style.ok())
     } else {
         format!(
-            "{} Recovered the running services at {}\n",
+            "{} Reattached at {}\n",
             style.ok(),
             style.url(&cell(&value["session"]["public_url"]))
         )
@@ -182,7 +179,7 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
         )
     } else {
         let mut text = format!(
-            "{} Proxy not running; it will serve {listening}\n  {:<9}{}\n",
+            "{} Proxy not running ({listening})\n  {:<9}{}\n",
             style.bad(),
             "urls",
             style.url(&cell(&value["url"])),
@@ -191,9 +188,8 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
             text.push_str(&format!("  {:<9}{error}\n", "problem"));
         }
         text.push_str(&format!(
-            "  Start it with {}; {} starts it automatically.\n",
-            style.bold("parcela proxy start"),
-            style.bold("parcela up")
+            "  Start it with {}\n",
+            style.bold("parcela proxy start")
         ));
         text
     };
@@ -204,7 +200,7 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
     if value["front_door"]["mode"] == "port" {
         text.push_str(&format!(
             "  {}\n",
-            style.dim("Run `parcela trust` once so browsers trust these URLs.")
+            style.dim("Run `parcela trust` to trust these URLs")
         ));
     }
     text
@@ -212,11 +208,8 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
 
 pub fn proxy_stopped(value: &Value, style: &Style) -> String {
     if value["stopped"] == true {
-        format!(
-            "{} Stopped the Parcela proxy. Services keep running without URLs until it starts again.\n",
-            style.ok()
-        )
+        format!("{} Stopped the proxy\n", style.ok())
     } else {
-        format!("{} The Parcela proxy was not running\n", style.ok())
+        format!("{} The proxy is not running\n", style.ok())
     }
 }
