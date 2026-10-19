@@ -73,6 +73,10 @@ impl Share {
                 }
                 None => lan_address()?,
             };
+            ensure!(
+                private_network(ip),
+                "{ip} is a public address; --lan only serves a private network"
+            );
             let mdns = ["dns-sd", "avahi-publish"]
                 .into_iter()
                 .find_map(on_path)
@@ -251,6 +255,11 @@ fn lan_address() -> Result<Ipv4Addr> {
     Ok(address)
 }
 
+/// RFC 1918 and link-local addresses. A public address would serve the app to the internet.
+fn private_network(ip: Ipv4Addr) -> bool {
+    ip.is_private() || ip.is_link_local()
+}
+
 /// Refuse a LAN port someone else holds. The proxy's own LAN listener is fine.
 fn probe_lan(state: &Path, ip: Ipv4Addr, port: u16) -> Result<()> {
     if TcpListener::bind((ip, port)).is_ok() || crate::router::lan_listening(state, ip, port) {
@@ -374,6 +383,16 @@ mod tests {
                 host: "mb.tail1.ts.net".into(),
                 ports: BTreeMap::from([("web".into(), 443), ("api".into(), 8443)]),
             }),
+        }
+    }
+
+    #[test]
+    fn lan_refuses_public_addresses() {
+        for ip in ["192.168.1.20", "10.0.0.5", "172.16.4.1", "169.254.10.2"] {
+            assert!(private_network(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["203.0.113.7", "8.8.8.8", "172.32.0.1", "100.100.1.1"] {
+            assert!(!private_network(ip.parse().unwrap()), "{ip}");
         }
     }
 

@@ -13,7 +13,7 @@
 - The first `up` in a terminal trusts Parcela's certificate authority when it is not trusted yet, behind the system password prompt, once per authority. Never without a terminal; `PARCELA_NO_TRUST=1` turns it off.
 - `parcela proxy install` on macOS makes URLs portless (`https://hello.localhost`): launchd owns 127.0.0.1:443 and relays each connection to the proxy as you. `uninstall` removes it.
 - `http.wildcard: true` sends every subdomain of a service's host to it, for subdomain-per-tenant apps.
-- `--lan-ip` picks the LAN address for `--lan`. `PARCELA_LAN=1` and `PARCELA_TAILSCALE=1` work like the flags.
+- `--lan-ip` picks the LAN address for `--lan`. Both refuse a public address. `PARCELA_LAN=1` and `PARCELA_TAILSCALE=1` work like the flags.
 - A JSON Schema for `parcela.yaml` at `https://parcela.davafons.com/schema/v1.json`, generated from the parser. `parcela init` adds the line editors use to find it.
 
 ### Changed
