@@ -61,7 +61,14 @@ impl Request {
         } else if self.primary {
             main_identity()
         } else {
-            infer(&source).context("cannot infer checkout identity; choose --name NAME for a preview or --primary explicitly")?
+            let identity = infer(&source).context("cannot infer checkout identity; choose --name NAME for a preview or --primary explicitly")?;
+            match identity.role {
+                Role::Preview => Identity {
+                    label: crate::config::fit_label(&identity.label, manifest.label_budget()),
+                    ..identity
+                },
+                Role::Primary => identity,
+            }
         };
         manifest.hostname(identity.role == Role::Primary, &identity.label)?;
         Ok(identity)

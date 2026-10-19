@@ -225,6 +225,24 @@ pub fn sanitize_label(name: &str) -> Option<String> {
     (!label.is_empty()).then_some(label)
 }
 
+/// Cuts an inferred checkout label to `budget` bytes, ending in a hash of the full label so
+/// long names that share a prefix stay distinct.
+pub fn fit_label(label: &str, budget: usize) -> String {
+    if label.len() <= budget {
+        return label.to_owned();
+    }
+    let hash = label.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    let hash = format!("{:04x}", hash & 0xffff);
+    let head = label[..budget.saturating_sub(hash.len() + 1)].trim_end_matches('-');
+    if head.is_empty() {
+        hash
+    } else {
+        format!("{head}-{hash}")
+    }
+}
+
 /// The project is named after the main checkout, so every jj workspace and Git worktree agrees.
 pub fn inferred_project_name(source: &Path) -> Result<String> {
     let source = source.canonicalize()?;
@@ -522,8 +540,28 @@ impl Manifest {
         } else {
             format!("{label}-{}", self.project.name)
         };
+        ensure!(
+            primary || base.len() + self.longest_prefix() <= 63,
+            "{label}: too long for a hostname with project {}; choose a shorter --name",
+            self.project.name
+        );
         dns_label(&base)?;
         Ok(format!("{base}.localhost"))
+    }
+
+    /// The most bytes a preview label can have so every service host is one DNS label.
+    pub fn label_budget(&self) -> usize {
+        63usize.saturating_sub(self.project.name.len() + 1 + self.longest_prefix())
+    }
+
+    /// `admin-` in `admin-signup-shop`: the longest subdomain prefix a service adds.
+    fn longest_prefix(&self) -> usize {
+        self.services
+            .iter()
+            .filter(|(name, _)| *name != &self.default_service)
+            .map(|(name, service)| service.subdomain.as_deref().unwrap_or(name).len() + 1)
+            .max()
+            .unwrap_or(0)
     }
 }
 

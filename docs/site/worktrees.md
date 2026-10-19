@@ -17,6 +17,7 @@ Other services add their name in front again, so the `api` service of `signup` i
 
 - The project name comes from the main checkout's directory. All jj workspaces and Git worktrees of a repository share it. Set `project: shop` in `parcela.yaml` to choose it yourself.
 - Parcela remembers the name on the first `up`. Renaming a branch or a workspace keeps the same URL.
+- A hostname is at most 63 characters. A longer branch or workspace name is cut and ends in a short hash, like `add-mobile-checkout-flow-with-apple-pay-3f2a`. `--name` sets a shorter one.
 - A name that another checkout already uses is refused. Parcela never takes over another environment's URL.
 - Use `parcela up --primary` to give a linked checkout the project URL, when no other checkout holds it.
 

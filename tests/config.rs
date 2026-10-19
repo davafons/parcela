@@ -318,3 +318,29 @@ fn sharing_publishers_join_the_graph_and_retry() {
             "availability": {"restart": "on_failure", "backoff_seconds": 1, "max_restarts": 10}})
     );
 }
+
+#[test]
+fn long_inferred_labels_fit_every_service_host() {
+    let manifest = Manifest::parse(
+        "version: 1\nproject: shop\nservices:\n  web: {command: bin/web, http: {healthcheck: /}}\n  admin: {command: bin/admin, http: {healthcheck: /, subdomain: admin}}\n",
+    )
+    .unwrap();
+    let branch = "add-mobile-checkout-flow-with-apple-pay-and-google-pay-v2";
+    let label = parcela::config::fit_label(branch, manifest.label_budget());
+    let other = parcela::config::fit_label(
+        "add-mobile-checkout-flow-with-apple-pay-and-google-pay-v3",
+        manifest.label_budget(),
+    );
+    assert_ne!(label, other);
+    assert!(label.starts_with("add-mobile-checkout"));
+    let hostname = manifest.hostname(false, &label).unwrap();
+    let hosts = manifest.service_hosts(&hostname).unwrap();
+    assert!(
+        hosts
+            .values()
+            .all(|host| host.len() - ".localhost".len() <= 63)
+    );
+    assert_eq!(parcela::config::fit_label("signup", 40), "signup");
+    let error = manifest.hostname(false, branch).unwrap_err().to_string();
+    assert!(error.contains("choose a shorter --name"), "{error}");
+}
