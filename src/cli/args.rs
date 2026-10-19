@@ -12,7 +12,7 @@ const STYLES: Styles = Styles::styled()
     .valid(AnsiColor::Green.on_default())
     .invalid(AnsiColor::Yellow.on_default());
 
-/// Run dev environments side by side at their own HTTPS URLs
+/// Deployable dev environments for your AI agents
 #[derive(Parser)]
 #[command(version, styles = STYLES)]
 pub struct Args {
