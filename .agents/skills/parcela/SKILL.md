@@ -75,7 +75,7 @@ parcela --workspace "$ENVIRONMENT_ID" logs api --tail 100
 
 `logs` without a name prints every process, each line prefixed with `name |`. `logs --follow` streams until interrupted, so do not use it in a command that must return.
 
-If `status` says `interrupted` or `unknown`, and starting is authorized, run `up --detach`: it takes back services that are still running instead of starting a second copy, and says so on stderr. If it says the run was being stopped, run `parcela down` first. When Parcela refuses, report its message. Never kill processes by PID, use broad `pkill`, delete sockets or locks, or edit the state directory.
+If `status` says `unknown`, and starting is authorized, run `up --detach`: it takes back services that are still running instead of starting a second copy, and says so on stderr. If it says the run was being stopped, run `parcela down` first. When Parcela refuses, report its message. Never kill processes by PID, use broad `pkill`, delete sockets or locks, or edit the state directory.
 
 ## Restart, stop and tasks
 
@@ -89,7 +89,7 @@ parcela --workspace "$ENVIRONMENT_ID" down
 - `restart` checks the new configuration, then restarts every service. It cannot restart one service alone.
 - `down` stops the services and keeps source and data. Do not stop other environments as cleanup. A refused stop is not a successful one.
 - `down --all` stops the project's environments and `--all-projects` every one; use them only when asked.
-- `rm` forgets a stopped environment and frees its URLs; `rm --prune` does so for every one whose checkout is gone. Both keep data. Use them only on an explicit cleanup request.
+- `rm` forgets a stopped environment and frees its URLs; `rm --prune` does so for every one whose checkout is gone. Both keep the runtime directory, but `hooks.teardown`, if declared, runs first and may delete data; read it before `rm`. Use them only on an explicit cleanup request.
 - Before `task NAME -- ARGS`, read that task's command and effects in `parcela.yaml`. Run only the requested task.
 
 ## Limits

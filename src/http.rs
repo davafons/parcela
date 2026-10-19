@@ -34,7 +34,8 @@ pub fn status(address: SocketAddr, host: &str, path: &str) -> Result<u16> {
     )?;
     let mut head = Vec::new();
     let mut buffer = [0u8; 256];
-    while !head.windows(2).any(|w| w == b"\r\n") {
+    // Up to the first line feed; some servers end lines with a bare LF, or close right away.
+    while !head.contains(&b'\n') {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         ensure!(
             !left.is_zero() && head.len() < 4096,
@@ -42,7 +43,13 @@ pub fn status(address: SocketAddr, host: &str, path: &str) -> Result<u16> {
         );
         stream.set_read_timeout(Some(left))?;
         let count = stream.read(&mut buffer)?;
-        ensure!(count > 0, "connection closed before the HTTP status line");
+        if count == 0 {
+            ensure!(
+                !head.is_empty(),
+                "connection closed before the HTTP status line"
+            );
+            break;
+        }
         head.extend_from_slice(&buffer[..count]);
     }
     let line = String::from_utf8_lossy(&head);

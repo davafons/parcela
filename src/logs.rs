@@ -5,7 +5,7 @@ use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
 
@@ -14,16 +14,23 @@ pub fn directory(runtime: &Path) -> PathBuf {
     runtime.join("log/processes")
 }
 
-/// The file `name` writes to, opened for appending.
+/// The file `name` writes to, opened for appending: a private regular file, never a link or FIFO.
 pub fn open(directory: &Path, name: &str) -> Result<File> {
     ensure!(valid(name), "invalid process name {name:?}");
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .create(true)
         .append(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(directory.join(format!("{name}.log")))
-        .with_context(|| format!("open the log of {name}"))
+        .with_context(|| format!("open the log of {name}"))?;
+    let metadata = file.metadata()?;
+    // SAFETY: getuid has no pointers or failure case.
+    ensure!(
+        metadata.is_file() && metadata.uid() == unsafe { libc::getuid() },
+        "the log of {name} must be a regular file you own"
+    );
+    Ok(file)
 }
 
 /// Empties the directory for a new run, so `logs` shows only processes of the latest one.
@@ -75,8 +82,9 @@ pub fn tail(directory: &Path, name: &str, count: usize) -> Result<Vec<String>> {
 pub struct Follower {
     directory: PathBuf,
     files: BTreeMap<String, Followed>,
-    /// Logs present when following started are read from their end.
-    from_end: bool,
+    /// Logs present when following started are read from this many lines before their end, or
+    /// from the start with None.
+    back: Option<usize>,
     /// Copy a log to `<name>.log.1` and empty it once it grows past this many bytes.
     limit: Option<u64>,
 }
@@ -86,11 +94,11 @@ struct Followed {
     partial: Vec<u8>,
 }
 impl Follower {
-    pub fn new(directory: &Path, from_end: bool, limit: Option<u64>) -> Self {
+    pub fn new(directory: &Path, back: Option<usize>, limit: Option<u64>) -> Self {
         Self {
             directory: directory.to_owned(),
             files: BTreeMap::new(),
-            from_end,
+            back,
             limit,
         }
     }
@@ -102,10 +110,13 @@ impl Follower {
                 let Ok(mut file) = read_private(&self.directory.join(format!("{name}.log"))) else {
                     continue;
                 };
-                let offset = if self.from_end {
-                    file.seek(SeekFrom::End(0))?
-                } else {
-                    0
+                let offset = match self.back {
+                    Some(lines) => {
+                        let mut bytes = Vec::new();
+                        file.read_to_end(&mut bytes)?;
+                        start_of_last(&bytes, lines) as u64
+                    }
+                    None => 0,
                 };
                 self.files.insert(
                     name.clone(),
@@ -117,7 +128,7 @@ impl Follower {
                 );
             }
         }
-        self.from_end = false;
+        self.back = None;
         for (name, followed) in &mut self.files {
             let length = followed.file.metadata()?.len();
             // Emptied by rotation or a new run: start again from the top.
@@ -134,11 +145,27 @@ impl Follower {
                 let line: Vec<u8> = followed.partial.drain(..=end).collect();
                 emit(name, &clean(&String::from_utf8_lossy(&line[..end])));
             }
+            // Output without newlines is shown in pieces rather than held without bound.
+            if followed.partial.len() > LINE_LIMIT {
+                let line = std::mem::take(&mut followed.partial);
+                emit(name, &clean(&String::from_utf8_lossy(&line)));
+            }
             if let Some(limit) = self.limit
                 && followed.offset > limit
             {
                 let path = self.directory.join(format!("{name}.log"));
-                std::fs::copy(&path, self.directory.join(format!("{name}.log.1")))?;
+                // Through a new file and a rename, so a link at `.log.1` is replaced, not followed.
+                let previous = self.directory.join(format!("{name}.log.1"));
+                let partial = self.directory.join(format!(".{name}.log.1.part"));
+                let _ = std::fs::remove_file(&partial);
+                let mut copy = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(&partial)?;
+                std::io::copy(&mut read_private(&path)?, &mut copy)?;
+                std::fs::rename(&partial, &previous)?;
                 // The writer appends, so it continues at the start of the emptied file.
                 OpenOptions::new()
                     .write(true)
@@ -151,6 +178,27 @@ impl Follower {
         Ok(())
     }
 }
+
+/// Where the last `lines` complete lines of `bytes` begin; the end for none.
+fn start_of_last(bytes: &[u8], lines: usize) -> usize {
+    let complete = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |end| end + 1);
+    if lines == 0 {
+        return complete;
+    }
+    bytes[..complete]
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, byte)| **byte == b'\n')
+        .nth(lines)
+        .map_or(0, |(index, _)| index + 1)
+}
+
+/// Longest piece of output shown without a newline.
+const LINE_LIMIT: usize = 64 * 1024;
 
 fn read_private(path: &Path) -> Result<File> {
     Ok(OpenOptions::new()
@@ -167,40 +215,62 @@ fn valid(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-/// A line without a trailing carriage return or control characters other than tabs and color
-/// codes, so a process cannot move the reader's cursor or set its terminal title.
+/// A line safe to print on a terminal: control characters and escape sequences are dropped,
+/// except plain SGR colors, which are reset at the end so they never reach the next line. Process
+/// output can carry anything a client sent, so nothing may move the cursor, set a title or reach
+/// the clipboard.
 fn clean(line: &str) -> String {
     let line = line.strip_suffix('\r').unwrap_or(line);
     let mut text = String::with_capacity(line.len());
+    let mut colored = false;
     let mut chars = line.chars().peekable();
     while let Some(c) = chars.next() {
-        match c {
-            // Keep SGR color sequences, drop every other escape sequence.
-            '\x1b' if chars.peek() == Some(&'[') => {
-                let mut sequence = String::from("\x1b[");
-                chars.next();
-                while let Some(&next) = chars.peek() {
-                    sequence.push(next);
+        if c != '\x1b' {
+            if c == '\t' || !c.is_control() {
+                text.push(c);
+            }
+            continue;
+        }
+        match chars.next() {
+            // CSI: parameters 0x30-0x3F, intermediates 0x20-0x2F, one final byte 0x40-0x7E.
+            Some('[') => {
+                let mut parameters = String::new();
+                while let Some(&next) = chars.peek().filter(|c| ('\x30'..='\x3f').contains(*c)) {
+                    parameters.push(next);
                     chars.next();
-                    if next.is_ascii_alphabetic() || next == '~' {
-                        break;
-                    }
                 }
-                if sequence.ends_with('m') {
-                    text.push_str(&sequence);
+                let mut intermediates = false;
+                while chars.next_if(|c| ('\x20'..='\x2f').contains(c)).is_some() {
+                    intermediates = true;
+                }
+                // A malformed sequence is dropped up to here; what follows is read as text.
+                if let Some(last) = chars.next_if(|c| ('\x40'..='\x7e').contains(c))
+                    && last == 'm'
+                    && !intermediates
+                    && parameters
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c == ';' || c == ':')
+                {
+                    text.push_str("\x1b[");
+                    text.push_str(&parameters);
+                    text.push('m');
+                    colored = true;
                 }
             }
-            '\x1b' if chars.peek() == Some(&']') => {
+            // OSC, DCS, SOS, PM and APC strings run to BEL or ST.
+            Some(']' | 'P' | 'X' | '^' | '_') => {
                 while let Some(next) = chars.next() {
                     if next == '\x07' || (next == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
                         break;
                     }
                 }
             }
-            '\t' => text.push(c),
-            c if c.is_control() => {}
-            c => text.push(c),
+            // Two-character escapes, such as ESC 7 or ESC (.
+            _ => {}
         }
+    }
+    if colored {
+        text.push_str("\x1b[0m");
     }
     text
 }
@@ -212,9 +282,15 @@ mod tests {
 
     #[test]
     fn lines_keep_colors_and_lose_titles_and_cursor_moves() {
-        assert_eq!(clean("\x1b[32mok\x1b[0m\r"), "\x1b[32mok\x1b[0m");
+        assert_eq!(clean("\x1b[32mok\x1b[0m\r"), "\x1b[32mok\x1b[0m\x1b[0m");
         assert_eq!(clean("\x1b]0;title\x07[setup]\tbroken"), "[setup]\tbroken");
         assert_eq!(clean("a\x1b[2Kb\x1b]2;t\x1b\\c"), "abc");
+        // Sequences hidden inside a would-be color code never survive.
+        assert_eq!(clean("\x1b[\x1b(0mx"), "0mx");
+        assert_eq!(clean("\x1b[\x1b]52;;0000\x07mx"), "mx");
+        assert_eq!(clean("\x1b[\r\x08mspoof"), "mspoof");
+        assert_eq!(clean("a\x1b7b\u{9b}2Jc"), "ab2Jc");
+        assert_eq!(clean("\x1bPq#0\x1b\\d"), "d");
     }
 
     #[test]
@@ -223,7 +299,7 @@ mod tests {
         let directory = temp.path();
         let mut web = open(directory, "web").unwrap();
         writeln!(web, "old").unwrap();
-        let mut follower = Follower::new(directory, true, Some(16));
+        let mut follower = Follower::new(directory, Some(0), Some(16));
         let mut seen = Vec::new();
         follower
             .poll(|name, line| seen.push(format!("{name}:{line}")))
@@ -253,5 +329,11 @@ mod tests {
         assert_eq!(seen.last().unwrap(), "web:after");
         assert_eq!(names(directory).unwrap(), ["api", "web"]);
         assert_eq!(tail(directory, "web", 5).unwrap(), ["after"]);
+        let mut from_tail = Vec::new();
+        Follower::new(directory, Some(1), None)
+            .poll(|name, line| from_tail.push(format!("{name}:{line}")))
+            .unwrap();
+        assert_eq!(from_tail, ["api:up", "web:after"]);
+        assert_eq!(start_of_last(b"a\nb\nc\npartial", 2), 2);
     }
 }

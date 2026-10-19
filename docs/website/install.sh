@@ -54,7 +54,8 @@ install_parcela() {
   for attempt in 1 2; do
     download "$release/parcela-$target.tar.gz" "$work/parcela.tar.gz"
     download "$release/parcela-$target.tar.gz.sha256" "$work/sha256"
-    [ "$(digest 256 "$work/parcela.tar.gz")" = "$(cut -d' ' -f1 "$work/sha256")" ] && break
+    expected=$(cut -d' ' -f1 "$work/sha256")
+    [ -n "$expected" ] && [ "$(digest 256 "$work/parcela.tar.gz")" = "$expected" ] && break
     if [ "$attempt" = 2 ]; then
       echo "parcela: checksum mismatch; nothing installed" >&2
       rm -rf "$work"

@@ -538,12 +538,30 @@ fn birth(_: u32) -> Result<Option<u64>> {
     anyhow::bail!("process identity requires macOS or Linux")
 }
 
-/// Every live process descending from a live root, the roots included.
+/// Every live process descending from a live root, the roots included. A pid can exit and be
+/// reused between listing it and reading its identity, so each identity read is confirmed by a
+/// second listing that still shows it under a parent in the tree.
 pub fn tree(roots: &[Identity]) -> Result<Vec<Identity>> {
     let roots: Vec<&Identity> = roots.iter().filter(|root| root.alive()).collect();
     if roots.is_empty() {
         return Ok(Vec::new());
     }
+    let root_pids: std::collections::BTreeSet<u32> = roots.iter().map(|root| root.pid).collect();
+    let pids = descendants(&parents()?, &root_pids);
+    let identities: Vec<Identity> = pids
+        .iter()
+        .filter_map(|pid| Identity::read(*pid).transpose())
+        .collect::<Result<_>>()?;
+    let confirmed = parents()?;
+    let members = descendants(&confirmed, &root_pids);
+    Ok(identities
+        .into_iter()
+        .filter(|identity| members.contains(&identity.pid) && identity.alive())
+        .collect())
+}
+
+/// Every process's parent, from one `ps` listing.
+fn parents() -> Result<Vec<(u32, u32)>> {
     let output = capture(
         Command::new("ps").args(["-A", "-o", "pid=,ppid="]),
         Duration::from_secs(2),
@@ -553,29 +571,32 @@ pub fn tree(roots: &[Identity]) -> Result<Vec<Identity>> {
         output.status.success(),
         "cannot inspect supervised process tree"
     );
-    let text = String::from_utf8(output.stdout)?;
-    let pairs: Vec<(u32, u32)> = text
+    Ok(String::from_utf8(output.stdout)?
         .lines()
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
         })
-        .collect();
-    let mut pids: std::collections::BTreeSet<u32> = roots.iter().map(|root| root.pid).collect();
+        .collect())
+}
+
+/// `roots` and every pid descending from one of them in `pairs`.
+fn descendants(
+    pairs: &[(u32, u32)],
+    roots: &std::collections::BTreeSet<u32>,
+) -> std::collections::BTreeSet<u32> {
+    let mut pids = roots.clone();
     loop {
         let before = pids.len();
-        for (pid, parent) in &pairs {
+        for (pid, parent) in pairs {
             if pids.contains(parent) {
                 pids.insert(*pid);
             }
         }
         if pids.len() == before {
-            break;
+            return pids;
         }
     }
-    pids.into_iter()
-        .filter_map(|pid| Identity::read(pid).transpose())
-        .collect()
 }
 
 #[cfg(test)]

@@ -124,6 +124,7 @@ pub fn remove_dead(runtime: &Path) -> Result<()> {
     let Ok(metadata) = fs::symlink_metadata(&path) else {
         return Ok(());
     };
+    crate::sockets::verify(&path)?;
     // SAFETY: getuid has no pointers or failure case.
     ensure!(
         metadata.file_type().is_socket() && metadata.uid() == unsafe { libc::getuid() },

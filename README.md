@@ -33,9 +33,9 @@ Parcela starts a checkout's whole dev stack, its web server, API and workers, on
   api       https://api-signup-shop.localhost:1443
 
 ~/signup $ parcela ls
-PROJECT  NAME     STATE  URL
-shop     signup   ready  https://signup-shop.localhost:1443
-shop     primary  ready  https://shop.localhost:1443
+PROJECT  NAME     STATE  URL                                 PATH
+shop     signup   ready  https://signup-shop.localhost:1443  /Users/you/signup
+shop     primary  ready  https://shop.localhost:1443         /Users/you/shop
 ```
 
 No Docker and no root. Parcela runs the processes itself and uses [Caddy](https://caddyserver.com) for HTTPS and routing.
@@ -86,7 +86,7 @@ Each HTTP service gets a free port in `$PORT` and its own URL. `hooks.setup` run
 ## What it does
 
 - **Names from checkouts.** The main checkout is `https://shop.localhost:1443`. The `signup` worktree is `https://signup-shop.localhost:1443`, and its `api` service `https://api-signup-shop.localhost:1443`.
-- **Ports that never collide.** Each service and named port gets a loopback port from 20000–29999, leased across every project and checkout.
+- **Ports that never collide.** Each HTTP service and named port gets a loopback port from 20000–29999, leased across every project and checkout.
 - **Readiness, then routing.** `up` waits until every HTTP service answers its health check, then routes its URL. `--detach` returns once it is ready.
 - **Processes that stop.** `parcela down` stops everything the run started. `parcela ls` lists every environment, `down --all-projects` stops them all and `rm --prune` forgets deleted checkouts.
 - **A CLI agents can drive.** Every command prints JSON when piped. `parcela --skill` prints instructions for coding agents.

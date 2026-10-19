@@ -23,6 +23,14 @@ Another program listens on the port. Parcela never stops it. Stop it yourself, o
 
 ```text
 parcela: not ready after 60s: web: GET /up returned 404
+```
+
+With `--detach`, the same message comes from the background owner, under the last lines of its log:
+
+```text
+parcela: last lines of /Users/you/.local/state/parcela/environments/<id>/log/owner.log:
+  web | Listening on http://127.0.0.1:3000
+  parcela: not ready after 60s: web: GET /up returned 404
 parcela: services stopped before they were ready; full log: /Users/you/.local/state/parcela/environments/<id>/log/owner.log
 ```
 
@@ -32,7 +40,7 @@ The message says what each service did instead: `nothing listens on its $PORT`, 
 - binds `127.0.0.1`,
 - answers its `http.healthcheck` path with a 2xx status.
 
-Read the log file named in the message for the service's own error.
+`parcela logs web` shows the service's own output, also after the environment stopped.
 
 ## A hook failed
 
@@ -40,7 +48,7 @@ Read the log file named in the message for the service's own error.
 parcela: hooks.setup failed with exit code 1; its output is above
 ```
 
-The setup or prestart command exited nonzero, so no other service started and the environment stopped. Its output is printed above the error, prefixed with `[setup]`, and the whole run is in the `owner.log` file the error names. Fix the cause and run `parcela up` again. A setup that failed runs again on the next `up`. `parcela up --setup` reruns one that already succeeded.
+The setup or prestart command exited nonzero, so no other service started and the environment stopped. Its output is printed above the error, prefixed with `setup |`, and `parcela logs setup` shows it again. Fix the cause and run `parcela up` again. A setup that failed runs again on the next `up`. `parcela up --setup` reruns one that already succeeded.
 
 ## The URL answers 503
 
@@ -80,7 +88,7 @@ Parcela remembers a checkout's name after the first `up`. To rename it, run `par
 parcela: no logs yet; run parcela up first
 ```
 
-`logs` reads what the latest run's processes wrote, so it works while the environment runs and after it stops, until the next `up`. A checkout that never started has none. Parcela's own messages from a detached start are in the `owner.log` file that the error names.
+`logs` reads what the latest run's processes wrote, so it works while the environment runs and after it stops, until the next `up`. A checkout that never started has none. Parcela's own messages from a detached start are in `log/owner.log` in the environment's runtime directory.
 
 ## The proxy is from another Parcela version
 
@@ -90,9 +98,11 @@ parcela: the running proxy is from Parcela <old>, this is <new>; run `parcela pr
 
 You upgraded Parcela while the old proxy was running. It keeps serving. Run `parcela proxy restart` when nothing needs the URLs for a moment.
 
-## The state is `interrupted` or `unknown`
+## The state is `unknown`
 
 Parcela lost contact with the process that supervises the environment, for example after a crash. Run `parcela up`. If the services are still running, `up` takes control of them again without restarting them. If they are all gone, it starts them fresh. If `up` says the run was being stopped, finish the stop with `parcela down`, then run `parcela up`.
+
+If `down` says `shutdown incomplete: a process did not exit`, a process outlived the shutdown timeout. Run `parcela down` again: it stops whatever is left, by the process identity Parcela recorded.
 
 Don't kill processes by PID or delete files in the state directory to fix this. Parcela refuses to act when it cannot prove which processes it started, and it keeps the record so nothing is lost.
 

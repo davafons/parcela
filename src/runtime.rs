@@ -281,11 +281,13 @@ pub fn run(
         }
     };
     let setup = matches!(launch, Launch::Up) && setup_pending(manifest, &path);
+    let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let echo = Echo::start(
         &path,
         supervisor.names(),
         matches!(launch, Launch::Up),
         false,
+        ready.clone(),
     );
     let result = Owner {
         registry,
@@ -296,6 +298,7 @@ pub fn run(
         control,
         signals,
         setup,
+        ready,
     }
     .monitor(timeout);
     echo.finish();
@@ -303,33 +306,54 @@ pub fn run(
 }
 
 /// Prints what every process writes, as `name | line`, while the owner runs: to the terminal in
-/// the foreground, to `owner.log` when detached.
+/// the foreground, and to `owner.log` when detached, there only until the run is first ready, so
+/// the file stays small.
 struct Echo {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: thread::JoinHandle<()>,
 }
 impl Echo {
-    /// `from_end` skips what the processes wrote before, for an owner that takes over a run.
+    /// `takeover` is for an owner that takes over a run: it skips what the processes wrote
+    /// before and prints to stderr, so the command's own output stays one document.
     fn start<'a>(
         runtime: &std::path::Path,
         names: impl Iterator<Item = &'a str>,
         prefixed: bool,
-        from_end: bool,
+        takeover: bool,
+        ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         use std::io::Write;
+        use std::sync::atomic::Ordering;
         let mut names: Vec<String> = names.map(str::to_owned).collect();
         names.sort();
         let width = names.iter().map(String::len).max().unwrap_or(0);
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = stop.clone();
-        let mut follower =
-            crate::logs::Follower::new(&crate::logs::directory(runtime), from_end, Some(LOG_LIMIT));
+        let detached = stdout_is(&runtime.join("log/owner.log"));
+        let mut follower = crate::logs::Follower::new(
+            &crate::logs::directory(runtime),
+            takeover.then_some(0),
+            Some(LOG_LIMIT),
+        );
         let thread = thread::spawn(move || {
-            let paint = crate::paint::Paint::stdout();
+            let paint = if takeover {
+                crate::paint::Paint::stderr()
+            } else {
+                crate::paint::Paint::stdout()
+            };
             loop {
-                let last = stopped.load(std::sync::atomic::Ordering::Relaxed);
-                let mut out = std::io::stdout().lock();
+                let last = stopped.load(Ordering::Relaxed);
+                let quiet = detached && ready.load(Ordering::Relaxed);
+                let mut out: Box<dyn Write> = if takeover {
+                    Box::new(std::io::stderr().lock())
+                } else {
+                    Box::new(std::io::stdout().lock())
+                };
+                // Still read when quiet, so the logs keep rotating.
                 let _ = follower.poll(|name, line| {
+                    if quiet {
+                        return;
+                    }
                     let _ = if prefixed {
                         let index = names.iter().position(|known| known == name).unwrap_or(0);
                         writeln!(out, "{} {line}", paint.log_prefix(index, name, width))
@@ -352,6 +376,20 @@ impl Echo {
         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = self.thread.join();
     }
+}
+
+/// Whether stdout is `path`, as for the owner `up --detach` starts with its output in owner.log.
+fn stdout_is(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let (Ok(file), Ok(out)) = (
+        std::fs::metadata(path),
+        std::io::stdout().as_fd().try_clone_to_owned(),
+    ) else {
+        return false;
+    };
+    std::fs::File::from(out)
+        .metadata()
+        .is_ok_and(|out| out.dev() == file.dev() && out.ino() == file.ino())
 }
 
 /// A process log is copied to `<name>.log.1` and emptied past this size.
@@ -592,6 +630,8 @@ struct Owner<'a> {
     signals: Signals,
     /// Whether this generation runs `hooks.setup`, so readiness marks it done.
     setup: bool,
+    /// Set once every service answered; an adopted run that was ready starts set.
+    ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 impl Owner<'_> {
     /// Supervise until a stop request, a signal, the supervisor's exit or a failure, then stop
@@ -618,7 +658,7 @@ impl Owner<'_> {
         let mut deadline = Instant::now() + Duration::from_secs(timeout);
         let mut ready = false;
         // A process that exits after the first ready is reported, not fatal.
-        let mut became_ready = false;
+        let mut became_ready = self.ready.load(std::sync::atomic::Ordering::Relaxed);
         let mut listener = BTreeMap::new();
         let mut published = None;
         let mut proxy_checked = Instant::now();
@@ -702,6 +742,9 @@ impl Owner<'_> {
             if healthy != ready {
                 ready = healthy;
                 became_ready |= ready;
+                if ready {
+                    self.ready.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 self.enter(if ready {
                     Phase::Running
                 } else {
@@ -950,6 +993,10 @@ pub fn recover(
     record.owner = crate::process::Identity::read(std::process::id())?
         .context("recovery owner birth unavailable")?;
     record.control = private::Identity::read(&sockets.control)?;
+    // Exits recorded after the first ready are not startup failures for the new owner either.
+    let was_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        record.phase == Phase::Running,
+    ));
     record.phase = if stop
         || session.status == SessionStatus::Stopping
         || matches!(record.phase, Phase::Stopping | Phase::Interrupted)
@@ -967,8 +1014,15 @@ pub fn recover(
     let supervisor = Supervisor::adopt(nodes, &path, &record.children);
     let setup = record.session.kind == "up" && setup_pending(&record.manifest, &path);
     // A stop prints nothing, so `down` stays one JSON document.
-    let echo =
-        (!stop).then(|| Echo::start(&path, supervisor.names(), record.session.kind == "up", true));
+    let echo = (!stop).then(|| {
+        Echo::start(
+            &path,
+            supervisor.names(),
+            record.session.kind == "up",
+            true,
+            was_ready.clone(),
+        )
+    });
     let result = Owner {
         registry,
         workspace: &resolved,
@@ -978,6 +1032,7 @@ pub fn recover(
         control,
         signals: Signals::new()?,
         setup,
+        ready: was_ready,
     }
     .monitor(60);
     if let Some(echo) = echo {

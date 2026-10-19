@@ -480,6 +480,12 @@ impl Supervisor {
                 continue;
             }
             slot.state = State::Exited(code);
+            if !self.stopping && node.kind == Kind::Publisher && code != Some(0) {
+                eprintln!(
+                    "parcela: {} stopped after {} restarts; that share is no longer published",
+                    node.name, slot.restarts
+                );
+            }
             if !self.stopping && node.kind == Kind::Service {
                 match code {
                     Some(code) => eprintln!("parcela: {} exited with code {code}", node.name),
@@ -597,7 +603,7 @@ impl Supervisor {
                 )),
                 _ if !starting || matches!(node.program, Program::Argv(_)) => None,
                 // A one-shot process, like an asset build, may finish during startup.
-                (Kind::Service, State::Exited(Some(0)))
+                (Kind::Service, State::Exited(Some(0) | None))
                     if !matches!(node.probe, Some(Probe::Http { .. })) =>
                 {
                     None

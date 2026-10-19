@@ -140,7 +140,7 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         }
         ensure!(
             current.status != SessionStatus::Interrupted,
-            "shutdown incomplete; authenticated recovery is required, no PID was signaled"
+            "shutdown incomplete: a process did not exit; run parcela down again"
         );
         if current.status == SessionStatus::Stopped
             && let Ok(_released) = private::Lock::acquire(&path.join("owner.lock"))
@@ -489,14 +489,8 @@ pub fn follow_logs(
             writeln!(out, "{line}")
         };
     };
-    for name in &names {
-        for line in crate::logs::tail(&directory, name, tail as usize)? {
-            print(&names, name, &line);
-        }
-    }
-    let _ = std::io::stdout().flush();
-    let mut follower = crate::logs::Follower::new(&directory, true, None);
-    follower.poll(|_, _| {})?;
+    // The tail and what follows come from the same reads, so no line falls between them.
+    let mut follower = crate::logs::Follower::new(&directory, Some(tail as usize), None);
     let mut running = true;
     while signals.received() == 0 {
         // One more read after the environment stops, for its last lines.

@@ -73,7 +73,7 @@ parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--
 Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. On an environment that is already ready, `up` prints its URLs and exits 0. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
 
 - Without `--detach`, `up` stays in the foreground and prints each process's output, prefixed with its name. Ctrl-C stops everything.
-- Until the environment is first ready, a hook that fails, an HTTP service that exits, or any process that exits nonzero stops `up` and says which one, with its exit code. A process that finishes with 0, like an asset build, is fine. After that, an exited process is reported and nothing restarts it; if an HTTP service stops answering for longer than the readiness timeout, 60 seconds, `up` stops the whole environment.
+- Until the environment is first ready, a hook that fails, an HTTP service that exits, or any process that exits nonzero stops `up` and says which one, with its exit code. A process that finishes with 0, like an asset build, is fine. After that, an exited process is reported and nothing restarts it; if an HTTP service stops listening on its port for longer than the readiness timeout, 60 seconds, the environment stops.
 - `--detach` returns once the services are ready and leaves them running.
 - `--setup` runs `hooks.setup` again, as on a new environment.
 - `--name NAME` names this checkout on its first `up`. `--primary` gives a linked checkout the project URL.
@@ -147,7 +147,7 @@ hello primary  ready
   path /Users/you/code/hello
 ```
 
-The state is one of `ready`, `starting`, `unhealthy`, `stopped`, `interrupted` or `unknown`. [Troubleshooting](troubleshooting.md) says what to do for each. A process is `pending`, `running`, `stopping`, `restarting`, `completed` (exited 0, like a finished hook), `exited` or `skipped` (a dependency stopped before it could start).
+The state is one of `ready`, `starting`, `unhealthy`, `stopping`, `stopped` or `unknown`. [Troubleshooting](troubleshooting.md) says what to do for each. A process is `pending`, `running`, `stopping`, `restarting`, `completed` (exited 0, like a finished hook), `exited` or `skipped` (a dependency stopped before it could start).
 
 ### parcela ls
 

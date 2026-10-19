@@ -84,7 +84,7 @@ parcela doctor
 ✓ caddy   v2.11.7 at /opt/homebrew/bin/caddy
 ✓ lsof    /usr/sbin/lsof
 ✓ ps      /bin/ps
-✗ config  no parcela.yaml in /Users/you/code/hello or above
+✗ config  no parcela.yaml in /Users/you/code/hello or above; create one with `parcela init`, or pass --path to a configured checkout
 ✓ state   /Users/you/.local/state/parcela (private)
 ✓ proxy   not running; `parcela up` starts it on HTTPS on :1443
 · HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.
@@ -139,14 +139,14 @@ parcela up
 
 ```text
 parcela: started the proxy on :1443; run `parcela trust` to trust https://hello.localhost:1443
-[web	] 127.0.0.1 - - [17/Oct/2026 20:40:13] "GET / HTTP/1.1" 200 -
+web | 127.0.0.1 - - [17/Oct/2026 20:40:13] "GET / HTTP/1.1" 200 -
 ✓ hello is running at https://hello.localhost:1443
   Press Ctrl-C to stop
 ```
 
 The first time, `up` also starts Parcela's HTTPS proxy in the background. The proxy keeps running for every project until you run `parcela proxy stop`.
 
-Open `https://hello.localhost:1443` in your browser. You see "Hello from Parcela". The browser warns about the certificate first. The next section fixes that.
+Open `https://hello.localhost:1443` in your browser. You see "Hello from Parcela". The first `up` in a terminal also asks for your password to trust Parcela's certificate authority. If you skipped that, the browser warns about the certificate first; the next section covers it.
 
 Press Ctrl-C to stop the app.
 
