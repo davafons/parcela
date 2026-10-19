@@ -27,5 +27,7 @@ jobs:
           $P --json status | head -120
           /usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fptn
           ps -A -o pid,ppid,command | grep -v grep | grep -E "parcela|python|process-compose"
-          curl -sv http://127.0.0.1:$(/usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fn -a -c Python | grep -o ':[0-9]*$' | head -1 | tr -d :)/ 2>&1 | head -12
+          W=$(pgrep -f "http.server" | head -1); echo "web pid $W"
+          /usr/sbin/lsof -nP -p $W | grep -iE "tcp|ipv4|sock" 
+          sample $W 1 2>&1 | grep -vE "^\s*$" | sed -n '1,80p'
           wait
