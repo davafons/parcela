@@ -58,7 +58,8 @@ fn running(state: &Path, router: &Router) -> Value {
         "version_warning": proxy::version_warning(router),
         "log": proxy::log_path(state),
         "owned_admin_verified": true,
-        "browser_trust_verified": false,
+        // Whether the system trust store accepts the CA; null before it exists.
+        "trusted": proxy::trusted(state),
     })
 }
 

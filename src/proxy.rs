@@ -76,12 +76,19 @@ pub fn ensure_running(state: &Path, host: &str) -> Result<Router> {
     };
     match &started {
         Started::Already(router) => warn_version(router),
-        Started::Launched(router) => eprintln!("parcela: {}", started_hint(router, host)),
+        Started::Launched(router) => eprintln!(
+            "parcela: {}",
+            started_hint(router, host, trusted(state) == Some(true))
+        ),
     }
     Ok(started.router().clone())
 }
 
-pub fn started_hint(router: &Router, host: &str) -> String {
+/// The notice for a proxy `up` just started, naming `parcela trust` only while it is needed.
+pub fn started_hint(router: &Router, host: &str, trusted: bool) -> String {
+    if trusted {
+        return format!("started the proxy on :{}", router.front_door.https);
+    }
     format!(
         "started the proxy on :{}; run `parcela trust` to trust {}",
         router.front_door.https,

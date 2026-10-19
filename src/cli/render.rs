@@ -229,10 +229,12 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
     if let Some(warning) = value["version_warning"].as_str() {
         text.push_str(&format!("  {} {warning}\n", style.bad()));
     }
-    text.push_str(&format!(
-        "  {}\n",
-        style.dim("Run `parcela trust` to trust these URLs")
-    ));
+    if value["trusted"] != true {
+        text.push_str(&format!(
+            "  {}\n",
+            style.dim("Run `parcela trust` to trust these URLs")
+        ));
+    }
     text
 }
 
