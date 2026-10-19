@@ -29,7 +29,7 @@ pub(crate) fn allocate(
         .iter()
         .filter(|session| session.status != SessionStatus::Stopped)
         .flat_map(Session::leased_ports)
-        .chain(router.front_door.listeners())
+        .chain([router.front_door.https])
         .collect();
     let mut endpoints = Vec::new();
     let mut probes = Vec::new();

@@ -2,7 +2,6 @@
 use super::{args::ProxyCommand, output::Output, render};
 use anyhow::{Context, Result};
 use parcela::{
-    forward,
     frontdoor::FrontDoor,
     proxy::{self, Started, Status},
     registry::Registry,
@@ -14,7 +13,7 @@ use std::path::Path;
 /// An explicit `--port` is a port profile; otherwise the saved profile or the default.
 fn requested(state: &Path, port: Option<u16>) -> Result<FrontDoor> {
     match port {
-        Some(https) => Ok(FrontDoor::Port { https }),
+        Some(https) => Ok(FrontDoor { https }),
         None => FrontDoor::load(state),
     }
 }
@@ -93,51 +92,11 @@ pub fn run(state: &Path, command: ProxyCommand, out: Output) -> Result<i32> {
                 (None, None) => FrontDoor::load(state)?,
             };
             // Refuse a busy new port before stopping the proxy that works.
-            let kept = running
-                .map(|running| running.listeners())
-                .unwrap_or_default();
-            for port in front_door.listeners() {
-                if !kept.contains(&port) {
-                    parcela::router::probe_listener(port)?;
-                }
+            if running.map(|running| running.https) != Some(front_door.https) {
+                parcela::router::probe_listener(front_door.https)?;
             }
             proxy::stop(state)?;
             let started = proxy::start(state, &listen.caddy, front_door, true)?;
-            report_started(state, &started, out)
-        }
-        ProxyCommand::Forward { remove, caddy } => {
-            Registry::open(state, true)?.context("cannot create the registry")?;
-            let current = FrontDoor::load(state)?;
-            let https = current.https_listener();
-            if remove {
-                eprintln!(
-                    "Removing the forward from ports 443 and 80. It may ask for your password."
-                );
-                forward::remove()?;
-                FrontDoor::Port { https }.save(state)?;
-            } else {
-                if matches!(current, FrontDoor::Port { .. }) {
-                    for port in [443, 80] {
-                        anyhow::ensure!(
-                            !forward::answers(port),
-                            "port {port} is already in use; stop whatever serves it, then run this again"
-                        );
-                    }
-                    parcela::router::probe_listener(forward::HTTP_PORT)?;
-                }
-                eprintln!(
-                    "Forwarding ports 443 and 80 to :{https} and :{} with pf. It may ask for your password.\n  undo  parcela proxy forward --remove",
-                    forward::HTTP_PORT
-                );
-                forward::install(https, forward::HTTP_PORT)?;
-                FrontDoor::Standard {
-                    https,
-                    http: forward::HTTP_PORT,
-                }
-                .save(state)?;
-            }
-            proxy::stop(state)?;
-            let started = proxy::start(state, &caddy, FrontDoor::load(state)?, true)?;
             report_started(state, &started, out)
         }
         ProxyCommand::Stop => {

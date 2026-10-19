@@ -121,12 +121,9 @@ fn flat_planned_urls_and_explicit_no_runtime_claims() {
         context.planned_urls["api"],
         "https://api-auth-demo.localhost:1443"
     );
-    parcela::frontdoor::FrontDoor::Standard {
-        https: 8443,
-        http: 8080,
-    }
-    .save(registry.state_path())
-    .unwrap();
+    parcela::frontdoor::FrontDoor { https: 443 }
+        .save(registry.state_path())
+        .unwrap();
     let standard = ResolvedContext::new(&registry, &m, preview).unwrap();
     assert_eq!(standard.planned_urls["web"], "https://auth-demo.localhost");
     assert!(!context.capabilities.routing && !context.capabilities.data_isolation_verified);

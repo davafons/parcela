@@ -82,12 +82,11 @@ pub fn ensure_running(state: &Path, host: &str) -> Result<Router> {
 }
 
 pub fn started_hint(router: &Router, host: &str) -> String {
-    match router.front_door {
-        FrontDoor::Port { https } => format!(
-            "Started the proxy on :{https}. Run `parcela trust` to trust https://{host}:{https}"
-        ),
-        FrontDoor::Standard { .. } => "Started the proxy on ports 443 and 80".into(),
-    }
+    format!(
+        "Started the proxy on :{}. Run `parcela trust` to trust {}",
+        router.front_door.https,
+        router.front_door.url(host)
+    )
 }
 
 pub fn version_warning(router: &Router) -> Option<String> {
@@ -134,7 +133,6 @@ fn launch(
     explicit: bool,
     revive: bool,
 ) -> Result<Started> {
-    front_door.validate()?;
     let directory = router::proxy_dir(state);
     private::directory(&directory)?;
     let _start = Lock::wait_for(&directory.join("start.lock"), STARTUP)?;
@@ -145,9 +143,9 @@ fn launch(
     }
     match status(state)? {
         Status::Running(router) if explicit && router.front_door != front_door => bail!(
-            "the proxy is already running with {}; switch with `parcela proxy restart{}`",
+            "the proxy is already running with {}; switch with `parcela proxy restart --port {}`",
             router.front_door.describe(),
-            port_flag(front_door)
+            front_door.https
         ),
         Status::Running(router) => return Ok(Started::Already(router)),
         Status::Unhealthy(error) => {
@@ -155,10 +153,6 @@ fn launch(
         }
         Status::Stopped => {}
     }
-    ensure!(
-        matches!(front_door, FrontDoor::Port { .. }) || front_door == FrontDoor::load(state)?,
-        "ports 443 and 80 need `parcela proxy forward`"
-    );
     let log_file = log_path(state);
     let log = OpenOptions::new()
         .append(true)
@@ -184,9 +178,7 @@ fn launch(
         .stdin(Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log);
-    if let FrontDoor::Port { https } = front_door {
-        command.args(["--port", &https.to_string()]);
-    }
+    command.args(["--port", &front_door.https.to_string()]);
     // SAFETY: setsid is async-signal-safe and touches no memory; a new session keeps terminal
     // signals for the caller away from the daemon.
     unsafe {
@@ -220,13 +212,6 @@ fn launch(
             );
         }
         std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-fn port_flag(front_door: FrontDoor) -> String {
-    match front_door {
-        FrontDoor::Port { https } => format!(" --port {https}"),
-        FrontDoor::Standard { .. } => String::new(),
     }
 }
 

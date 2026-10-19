@@ -113,7 +113,7 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
     let (_temp, mut registry, _manifest, workspace) = fixture();
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        front_door: FrontDoor::Port { https: 34443 },
+        front_door: FrontDoor { https: 34443 },
         version: router::VERSION.into(),
     };
     let session = registry
@@ -269,14 +269,11 @@ fn old_registry_migration_is_explicit_and_preserves_ids() {
 }
 
 #[test]
-fn explicit_forwarding_keeps_public_url_port_free_without_changing_listeners() {
+fn port_443_urls_carry_no_port() {
     let (_temp, registry, _manifest, _workspace) = fixture();
     let router = Router {
         token: Uuid::new_v4().to_string(),
-        front_door: FrontDoor::Standard {
-            https: 8443,
-            http: 8080,
-        },
+        front_door: FrontDoor { https: 443 },
         version: router::VERSION.into(),
     };
     assert_eq!(
@@ -286,12 +283,9 @@ fn explicit_forwarding_keeps_public_url_port_free_without_changing_listeners() {
     let config = router::configuration(&registry, &router).unwrap();
     assert_eq!(
         config["apps"]["http"]["servers"]["https"]["listen"][0],
-        "127.0.0.1:8443"
+        "127.0.0.1:443"
     );
-    assert_eq!(
-        config["apps"]["http"]["servers"]["redirect"]["routes"][1]["handle"][0]["body"],
-        format!("parcela-{}", router.token)
-    );
+    assert!(config["apps"]["http"]["servers"].get("redirect").is_none());
 }
 
 #[test]

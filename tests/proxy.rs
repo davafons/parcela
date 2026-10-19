@@ -75,10 +75,7 @@ fn the_saved_profile_beats_the_default_and_parcela_https_port_only_replaces_the_
     let state = t.path().join("state");
     let status = cli(&state, &["--json", "proxy", "status"]);
     assert_eq!(status.status.code(), Some(1));
-    assert_eq!(
-        json_of(&status)["front_door"],
-        json!({"mode": "port", "https": 1443})
-    );
+    assert_eq!(json_of(&status)["front_door"], json!({"https": 1443}));
     let overridden = Command::new(env!("CARGO_BIN_EXE_parcela"))
         .arg("--state-dir")
         .arg(&state)
@@ -93,7 +90,7 @@ fn the_saved_profile_beats_the_default_and_parcela_https_port_only_replaces_the_
     assert!(stderr(&print).ends_with("start the proxy with `parcela proxy start`\n"));
     assert!(!state.exists(), "trust --print creates no state");
 
-    parcela::frontdoor::FrontDoor::Port { https: 2000 }
+    parcela::frontdoor::FrontDoor { https: 2000 }
         .save(&state)
         .unwrap();
     let saved = Command::new(env!("CARGO_BIN_EXE_parcela"))
@@ -131,10 +128,7 @@ fn proxy_start_runs_in_the_background_until_proxy_stop() {
     let started = json_of(&started);
     assert_eq!(started["running"], true);
     assert_eq!(started["already_running"], false);
-    assert_eq!(
-        started["front_door"],
-        json!({"mode": "port", "https": port})
-    );
+    assert_eq!(started["front_door"], json!({"https": port}));
     assert_eq!(started["url"], format!("https://<name>.localhost:{port}"));
     assert_eq!(started["version"], env!("CARGO_PKG_VERSION"));
     let pid = started["pid"].as_u64().unwrap();
@@ -144,7 +138,7 @@ fn proxy_start_runs_in_the_background_until_proxy_stop() {
         fs::read_to_string(proxy.state.join("proxy/frontdoor.json"))
             .map(|text| serde_json::from_str::<Value>(&text).unwrap())
             .unwrap(),
-        json!({"mode": "port", "https": port})
+        json!({"https": port})
     );
     assert!(
         TcpListener::bind(("127.0.0.1", port)).is_err(),
@@ -416,4 +410,36 @@ fn parallel_ups_in_two_checkouts_start_one_proxy_and_both_urls_answer() {
         assert_eq!(String::from_utf8_lossy(&curl.stdout), "200", "{url}");
     }
     drop(environments);
+}
+
+#[test]
+fn a_port_only_root_may_use_is_refused_with_the_reason() {
+    // macOS lets only root listen on loopback ports below 1024.
+    if !cfg!(target_os = "macos") || unsafe { libc::getuid() } == 0 {
+        return;
+    }
+    let Some(caddy) = caddy() else {
+        eprintln!("skipped: caddy is not on PATH");
+        return;
+    };
+    let proxy = Proxy::new();
+    let started = cli(
+        &proxy.state,
+        &[
+            "proxy",
+            "start",
+            "--port",
+            "443",
+            "--caddy",
+            caddy.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(started.status.code(), Some(1));
+    assert!(
+        stderr(&started).contains(
+            "this system only lets root listen on port 443; Parcela runs without root, so pick a port of 1024 or higher (the default is 1443)"
+        ),
+        "{}",
+        stderr(&started)
+    );
 }

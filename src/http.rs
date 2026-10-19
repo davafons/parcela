@@ -22,19 +22,6 @@ pub fn readiness(address: SocketAddr, host: &str, path: &str) -> Result<bool> {
     let (code, _) = exchange(&mut stream, "GET", path, host, &[])?;
     Ok((200..300).contains(&code))
 }
-pub fn front_door(port: u16, marker: &str) -> Result<()> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(1))?;
-    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
-    let (code, body) = exchange(&mut stream, "GET", "/", "localhost", &[])?;
-    ensure!(
-        code == 404 && body == marker.as_bytes(),
-        "standard front door does not match the owned router"
-    );
-    Ok(())
-}
-
 fn exchange(
     stream: &mut (impl Read + Write),
     method: &str,

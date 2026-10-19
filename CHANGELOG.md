@@ -4,7 +4,6 @@
 
 ### Added
 
-- `parcela proxy forward` serves URLs on ports 443 and 80 on macOS, without a port in the URL. It asks for your password once to install a pf rule and its boot daemon; `--remove` undoes it.
 - Colors on a terminal: help, errors, and a color per process in `parcela logs`. `NO_COLOR` turns them off.
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
 - `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when they are missing, checking each download against its release checksums.
@@ -13,6 +12,7 @@
 
 ### Changed
 
+- The proxy listens on one HTTPS port, and URLs leave it out when it is 443. The forwarded "standard ports" mode and its port-80 listener are gone. `--port` accepts any port the system lets a normal user listen on.
 - If the proxy dies while environments run, they start it again within a few seconds. `parcela proxy stop` still stops it for good.
 - `restart` picks up added, removed and renamed services; `down` and `up` are no longer needed for that.
 

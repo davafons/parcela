@@ -35,7 +35,7 @@ impl Router {
     }
     /// Whether Caddy itself listens on `port`, so no backend may use it.
     pub fn listens_on(&self, port: u16) -> bool {
-        self.front_door.listeners().contains(&port)
+        self.front_door.https == port
     }
     fn id(&self) -> String {
         format!("parcela-{}", self.token)
@@ -66,14 +66,10 @@ pub fn current(state: &Path) -> Result<Router> {
         }
     })?;
     ensure!(
-        Uuid::parse_str(&router.token).is_ok() && router.front_door.validate().is_ok(),
+        Uuid::parse_str(&router.token).is_ok(),
         "malformed router ownership record"
     );
     verify(state, &router)?;
-    if router.front_door.http_listener().is_some() {
-        http::front_door(80, &router.id())
-            .context("ports 443 and 80 do not reach the proxy; run `parcela proxy forward` again, or `parcela proxy forward --remove`")?;
-    }
     Ok(router)
 }
 fn verify(state: &Path, router: &Router) -> Result<()> {
@@ -240,7 +236,6 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
     let state = registry.state_path();
     let workspaces = registry.list(None)?;
     let mut routes = Vec::new();
-    let mut redirects = Vec::new();
     let mut hosts = std::collections::BTreeSet::new();
     for workspace in &workspaces {
         hosts.extend(registry.hosts(&workspace.id)?.into_values());
@@ -271,29 +266,18 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
                 "handler":"reverse_proxy", "upstreams":[{"dial":address.to_string()}],
                 "headers":{"request":{"set":{"X-Parcela-Environment":[session.environment_id], "X-Parcela-Generation":[session.generation.to_string()]}}}
             }], "terminal": true}));
-            redirects.push(json!({"match":[{"host":[endpoint.hostname]}], "handle":[{"handler":"static_response", "status_code":308,
-                "headers":{"Location":[format!("{}{{http.request.uri}}",endpoint.public_url)]}}], "terminal": true}));
         }
     }
     if !hosts.is_empty() {
         routes.push(json!({"match":[{"host":hosts}], "handle":[{"handler":"static_response","status_code":503,"body":"Parcela environment unavailable\n"}], "terminal":true}));
-        redirects.push(json!({"match":[{"host":hosts}], "handle":[{"handler":"static_response","status_code":503}], "terminal":true}));
     }
     routes.push(json!({"@id":router.id(), "handle":[{"handler":"static_response", "status_code":404, "body":"No ready Parcela route\n"}], "terminal":true}));
-    redirects.push(
-        json!({"handle":[{"handler":"static_response", "status_code":404,"body":router.id()}], "terminal":true}),
-    );
-    let https_port = router.front_door.https_listener();
-    let mut servers = json!({
+    let https_port = router.front_door.https;
+    let servers = json!({
         "https":{"listen":[format!("127.0.0.1:{https_port}")], "protocols":["h1","h2"],
             "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":routes}
     });
-    let mut http_app = json!({"https_port": https_port});
-    if let Some(http_port) = router.front_door.http_listener() {
-        servers["redirect"] = json!({"listen":[format!("127.0.0.1:{http_port}")], "protocols":["h1"], "automatic_https":{"disable":true}, "routes":redirects});
-        http_app["http_port"] = json!(http_port);
-    }
-    http_app["servers"] = servers;
+    let http_app = json!({"https_port": https_port, "servers": servers});
     let mut config = json!({
         "admin":{"listen":format!("unix/{}", socket(state)?.display()), "config":{"persist":false}},
         "storage":{"module":"file_system", "root":proxy_dir(state).join("data")},
@@ -310,7 +294,6 @@ fn render(registry: &Registry, router: &Router, ready: &[Route]) -> Result<Value
 /// Run Caddy in the foreground for `front_door` until a signal arrives. Saves the profile once
 /// Caddy answers, so the profile always names the last proxy that started.
 pub fn run(registry: &Registry, binary: &str, front_door: FrontDoor) -> Result<i32> {
-    front_door.validate()?;
     let backend = version(binary, "version")?;
     ensure!(
         backend.starts_with("v2."),
@@ -343,9 +326,7 @@ pub fn run(registry: &Registry, binary: &str, front_door: FrontDoor) -> Result<i
         }
     }
     if recovered.is_none() {
-        for port in front_door.listeners() {
-            probe_listener(port)?;
-        }
+        probe_listener(front_door.https)?;
     }
     let router = Router {
         token: Uuid::new_v4().to_string(),
@@ -470,8 +451,12 @@ pub(crate) struct ProxyEvidence {
 
 /// Refuse a busy port, naming who holds it. Parcela never takes a listener over or falls back.
 pub fn probe_listener(port: u16) -> Result<()> {
-    if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-        return Ok(());
+    match TcpListener::bind(("127.0.0.1", port)) {
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => anyhow::bail!(
+            "this system only lets root listen on port {port}; Parcela runs without root, so pick a port of 1024 or higher (the default is 1443)"
+        ),
+        Err(_) => {}
     }
     anyhow::bail!(
         "port {port} is already in use by {}; choose another port with `parcela proxy start --port <n>`",

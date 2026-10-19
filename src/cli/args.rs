@@ -237,15 +237,6 @@ pub enum ProxyCommand {
     },
     /// Show the proxy's status
     Status,
-    /// Serve URLs on ports 443 and 80 (asks for your password)
-    Forward {
-        /// Stop forwarding and go back to the proxy's own port
-        #[arg(long)]
-        remove: bool,
-        /// Caddy binary.
-        #[arg(long, default_value = "caddy", hide = true)]
-        caddy: String,
-    },
     /// Run the proxy in the foreground
     #[command(hide = true)]
     Run {
@@ -257,7 +248,7 @@ pub enum ProxyCommand {
 #[derive(clap::Args)]
 pub struct Listen {
     /// HTTPS port (default: 1443) [env: PARCELA_HTTPS_PORT]
-    #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub port: Option<u16>,
     /// Caddy binary.
     #[arg(long, default_value = "caddy", hide = true)]

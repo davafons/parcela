@@ -176,10 +176,8 @@ fn proxy(state: &Path) -> Check {
                 format!("running, {}", router.front_door.describe()),
             ),
         },
-        Ok(Status::Stopped) => match front_door
-            .listeners()
-            .into_iter()
-            .find(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_err())
+        Ok(Status::Stopped) => match Some(front_door.https)
+            .filter(|port| std::net::TcpListener::bind(("127.0.0.1", *port)).is_err())
         {
             None => Check::pass(
                 "proxy",
