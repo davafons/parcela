@@ -79,13 +79,17 @@ pub fn status(row: &Value, style: &Style) -> String {
 
 /// One line per named port: the name, its number and the variable that carries it.
 fn ports(value: &Value) -> String {
-    value
-        .as_object()
-        .into_iter()
-        .flatten()
+    let ports = value.as_object().into_iter().flatten();
+    let width = ports
+        .clone()
+        .map(|(name, _)| name.len() + 2)
+        .max()
+        .unwrap_or(0)
+        .max(10);
+    ports
         .map(|(name, port)| {
             format!(
-                "  {name:<10}{:<7}{}\n",
+                "  {name:<width$}{:<7}{}\n",
                 cell(port),
                 parcela::config::port_variable(name)
             )
