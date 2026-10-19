@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 pub const LEASE_MS: u64 = 3000;
 /// The Parcela release that started a proxy; another release warns instead of reusing silently.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("PARCELA_VERSION");
 
 /// The running proxy: its ownership token, the front door it serves and the release that started it.
 #[derive(Debug, Clone, Serialize, Deserialize)]

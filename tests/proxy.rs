@@ -130,7 +130,7 @@ fn proxy_start_runs_in_the_background_until_proxy_stop() {
     assert_eq!(started["already_running"], false);
     assert_eq!(started["front_door"], json!({"https": port}));
     assert_eq!(started["url"], format!("https://<name>.localhost:{port}"));
-    assert_eq!(started["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(started["version"], env!("PARCELA_VERSION"));
     let pid = started["pid"].as_u64().unwrap();
     let caddy_pid = started["caddy_pid"].as_u64().unwrap();
     assert!(alive(pid) && alive(caddy_pid));
@@ -258,7 +258,7 @@ fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
 
     let warning = format!(
         "the running proxy is from Parcela 0.0.1, this is {}; run `parcela proxy restart` to update it",
-        env!("CARGO_PKG_VERSION")
+        env!("PARCELA_VERSION")
     );
     let status = json_of(&cli(&proxy.state, &["--json", "proxy", "status"]));
     assert_eq!(status["version_warning"], warning);
@@ -272,7 +272,7 @@ fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
     );
     assert!(restarted.status.success(), "{}", stderr(&restarted));
     let restarted = json_of(&restarted);
-    assert_eq!(restarted["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(restarted["version"], env!("PARCELA_VERSION"));
     assert_eq!(restarted["version_warning"], Value::Null);
     assert_ne!(restarted["pid"], status["pid"]);
 }

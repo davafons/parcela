@@ -1,0 +1,86 @@
+name: Nightly
+# Every main commit that passes the Rust checks replaces the assets of the `nightly` prerelease.
+# Tagged releases come from release.yml; `releases/latest` never points here.
+on:
+  workflow_run:
+    workflows: [Rust checks]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-14 }
+          - { target: x86_64-apple-darwin, runner: macos-14 }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parcela-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/parcela
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: built
+      - name: Generate third-party notices
+        run: |
+          cargo install --locked --features cli cargo-about@0.9.2
+          mkdir -p target/notices
+          cargo about generate --locked --fail about.hbs -o target/notices/THIRD_PARTY_NOTICES.txt
+      - name: Package
+        run: |
+          mkdir dist
+          for dir in built/parcela-*; do
+            name=$(basename "$dir")
+            stage="stage/$name"
+            mkdir -p "$stage"
+            install -m 755 "$dir/parcela" "$stage/parcela"
+            cp LICENSE COPYRIGHT target/notices/THIRD_PARTY_NOTICES.txt "$stage/"
+            tar -czf "dist/$name.tar.gz" -C stage "$name"
+            (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          done
+          version=$(tar -xOzf dist/parcela-x86_64-unknown-linux-gnu.tar.gz parcela-x86_64-unknown-linux-gnu/parcela > parcela && chmod +x parcela && ./parcela --version)
+          echo "VERSION=${version#parcela }" >> "$GITHUB_ENV"
+      - name: Move the nightly tag and replace its assets
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" -f sha="$SHA" -F force=true \
+            || gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/tags/nightly -f sha="$SHA"
+          notes="Parcela $VERSION, built from $SHA. Install: curl -fsSL https://parcela.davafons.com/install.sh | sh -s -- --nightly"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --prerelease --title "Nightly $VERSION" --notes "$notes"
+          else
+            gh release create nightly --prerelease --latest=false --verify-tag --title "Nightly $VERSION" --notes "$notes"
+          fi
+          gh release upload nightly dist/* --clobber

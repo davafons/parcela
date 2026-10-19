@@ -9,7 +9,7 @@ repository = "https://github.com/davafons/parcela"
 homepage = "https://github.com/davafons/parcela"
 publish = false
 readme = "README.md"
-include = ["src/**", ".agents/skills/parcela/SKILL.md", "Cargo.lock", "LICENSE", "COPYRIGHT", "/README.md"]
+include = ["build.rs", "src/**", ".agents/skills/parcela/SKILL.md", "Cargo.lock", "LICENSE", "COPYRIGHT", "/README.md"]
 
 [package.metadata.dist]
 dist = true

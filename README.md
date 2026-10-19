@@ -31,6 +31,12 @@ curl -fsSL https://parcela.davafons.com/install.sh | sh
 
 It also installs [Caddy](https://caddyserver.com) and [Process Compose](https://f1bonacc1.github.io/process-compose/) into `~/.local/bin` when they are missing. With Homebrew: `brew install davafons/tap/parcela`. Builds cover macOS and Linux; from source, run `cargo install --git https://github.com/davafons/parcela --locked`.
 
+Releases are tagged, and `parcela --version` prints `0.3.0`. The newest build of `main` is the nightly, which adds the commit date and hash, like `0.3.0+20261019.4fed620`:
+
+```sh
+curl -fsSL https://parcela.davafons.com/install.sh | sh -s -- --nightly
+```
+
 ## Quickstart
 
 In your project:

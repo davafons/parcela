@@ -14,7 +14,7 @@ const STYLES: Styles = Styles::styled()
 
 /// Deployable dev environments for your AI agents
 #[derive(Parser)]
-#[command(version, styles = STYLES)]
+#[command(version = env!("PARCELA_VERSION"), styles = STYLES)]
 pub struct Args {
     #[command(flatten)]
     pub global: Global,
