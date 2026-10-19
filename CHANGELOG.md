@@ -7,7 +7,7 @@
 - `up --lan` and `up --tailscale` (and `restart`) also serve one environment to other devices: at `.local` names on the LAN through mDNS, or on the tailnet through `tailscale serve`. `PARCELA_SHARE_HOSTS` lists the shared hostnames for a dev server's host check.
 - Colors on a terminal: help, errors, and a color per process in `parcela logs`. `NO_COLOR` turns them off.
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
-- `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when they are missing, checking each download against its release checksums.
+- `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when no supported version is on `PATH`, checking each download against its release checksums. It checks Parcela's own download the same way, on macOS too, prints how to add `~/.local/bin` to `PATH` instead of editing shell profiles, and lists the files it wrote. `--help` lists its options.
 - `parcela logs --follow` streams new lines from every process, or one.
 - Nightly builds of `main`: `install.sh --nightly` installs the newest one. Builds other than a release tag report the commit in `--version`, like `0.3.0+20261019.4fed620`.
 - The first `up` in a terminal trusts Parcela's certificate authority when it is not trusted yet, behind the system password prompt, once per authority. Never without a terminal; `PARCELA_NO_TRUST=1` turns it off.
@@ -27,6 +27,7 @@
 
 ### Fixed
 
+- `parcela proxy install` refuses a user name that could change the launchd service it installs.
 - Process Compose probes only services that another service or hook waits for, so health checks no longer fill every HTTP service's log.
 - Errors that show `owner.log` lines no longer include Process Compose's terminal-title escape.
 - `--backend-port` also refuses a port another program holds on `0.0.0.0` or `[::]`, naming the holder before anything starts.
