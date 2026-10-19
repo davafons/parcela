@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import socketserver
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -40,4 +41,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-ThreadingHTTPServer((os.environ['HOST'], int(os.environ['PORT'])), Handler).serve_forever()
+
+class Server(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind does a reverse DNS lookup, which takes 35s on some CI runners.
+        socketserver.TCPServer.server_bind(self)
+
+
+Server((os.environ['HOST'], int(os.environ['PORT'])), Handler).serve_forever()

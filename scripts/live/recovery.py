@@ -11,12 +11,19 @@ import subprocess
 import threading
 import time
 import traceback
+import socketserver
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.client import HTTPResponse
 
 from live.common import BINARY, Live, free_port, wait_for
 
-SERVICE = '''import json, os, signal, time
+class Server(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind does a reverse DNS lookup, which takes 35s on some CI runners.
+        socketserver.TCPServer.server_bind(self)
+
+
+SERVICE = '''import json, os, signal, socketserver, time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 root = Path(os.environ['PARCELA_RUNTIME_DIR'])
@@ -44,7 +51,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
     def log_message(self, *_): pass
-server = ThreadingHTTPServer(('127.0.0.1', int(os.environ['PORT'])), Handler)
+class Server(ThreadingHTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+server = Server(('127.0.0.1', int(os.environ['PORT'])), Handler)
 (root / 'service-started').write_text(str(os.getpid()))
 server.serve_forever()
 '''
@@ -178,7 +188,7 @@ def owner_crash(f):
             self.end_headers()
             self.wfile.write(data)
         def log_message(self, *_): pass
-    server = ThreadingHTTPServer(('127.0.0.1', app['port']), Foreign)
+    server = Server(('127.0.0.1', app['port']), Foreign)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     try:
