@@ -18,7 +18,7 @@ const READINESS_PORT: u16 = 47334;
 fn ipv6_loopback_listener_owned_by_the_environment_is_accepted() {
     let _listener = TcpListener::bind((Ipv6Addr::LOCALHOST, IPV6_ONLY_PORT)).unwrap();
     assert_eq!(
-        listener_identity(IPV6_ONLY_PORT, std::process::id()).unwrap(),
+        listener_identity(IPV6_ONLY_PORT, &[std::process::id()]).unwrap(),
         vec![std::process::id()]
     );
 }
@@ -28,7 +28,7 @@ fn localhost_listener_on_both_loopback_families_is_accepted() {
     let _v4 = TcpListener::bind(("127.0.0.1", DUAL_STACK_PORT)).unwrap();
     let _v6 = TcpListener::bind((Ipv6Addr::LOCALHOST, DUAL_STACK_PORT)).unwrap();
     assert_eq!(
-        listener_identity(DUAL_STACK_PORT, std::process::id()).unwrap(),
+        listener_identity(DUAL_STACK_PORT, &[std::process::id()]).unwrap(),
         vec![std::process::id()]
     );
 }
@@ -37,7 +37,7 @@ fn localhost_listener_on_both_loopback_families_is_accepted() {
 fn loopback_listener_outside_the_environment_tree_is_foreign() {
     let _listener = TcpListener::bind((Ipv6Addr::LOCALHOST, FOREIGN_PORT)).unwrap();
     let mut sibling = Command::new("sleep").arg("30").spawn().unwrap();
-    let error = listener_identity(FOREIGN_PORT, sibling.id()).unwrap_err();
+    let error = listener_identity(FOREIGN_PORT, &[sibling.id()]).unwrap_err();
     sibling.kill().unwrap();
     sibling.wait().unwrap();
     assert_eq!(

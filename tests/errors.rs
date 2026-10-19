@@ -20,8 +20,9 @@ fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
 fn up(path: &Path, state: &Path, flags: &[&str]) -> String {
     let mut args = vec![
         "up",
-        "--process-compose",
-        "/nonexistent/parcela-test-process-compose",
+        // Registers the checkout, then preflight refuses the proxy's port before anything starts.
+        "--backend-port",
+        "1443",
     ];
     args.extend_from_slice(flags);
     let output = cli(path, state, &args);

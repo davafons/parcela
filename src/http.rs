@@ -18,12 +18,39 @@ pub fn admin(socket: &Path, method: &str, path: &str, body: &[u8]) -> Result<(u1
 pub fn readiness(address: SocketAddr, host: &str, path: &str) -> Result<bool> {
     Ok((200..300).contains(&status(address, host, path)?))
 }
-/// The status code of `GET path` with a short timeout.
+/// The status code of `GET path`, from the status line alone, within about half a second, so a
+/// slow or streaming response never holds up the caller.
 pub fn status(address: SocketAddr, host: &str, path: &str) -> Result<u16> {
+    ensure!(
+        !path.contains(['\r', '\n', ' ']) && !host.contains(['\r', '\n', ' ']),
+        "invalid HTTP request target"
+    );
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(150))?;
-    stream.set_read_timeout(Some(Duration::from_millis(300)))?;
     stream.set_write_timeout(Some(Duration::from_millis(300)))?;
-    Ok(exchange(&mut stream, "GET", path, host, &[])?.0)
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    )?;
+    let mut head = Vec::new();
+    let mut buffer = [0u8; 256];
+    while !head.windows(2).any(|w| w == b"\r\n") {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        ensure!(
+            !left.is_zero() && head.len() < 4096,
+            "no HTTP status line in time"
+        );
+        stream.set_read_timeout(Some(left))?;
+        let count = stream.read(&mut buffer)?;
+        ensure!(count > 0, "connection closed before the HTTP status line");
+        head.extend_from_slice(&buffer[..count]);
+    }
+    let line = String::from_utf8_lossy(&head);
+    Ok(line
+        .split_whitespace()
+        .nth(1)
+        .context("missing HTTP status")?
+        .parse()?)
 }
 fn exchange(
     stream: &mut (impl Read + Write),

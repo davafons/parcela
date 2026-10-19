@@ -327,7 +327,7 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
             &workspace,
             &token,
             32010,
-            "compose",
+            "up",
             "https://auth-app.localhost",
             &endpoints,
             &BTreeMap::from([("db".into(), 32013)]),
@@ -372,7 +372,7 @@ fn service_hosts_and_port_leases_are_atomic_for_the_whole_set() {
                 &other,
                 &token,
                 32012,
-                "compose",
+                "up",
                 "https://other-app.localhost",
                 &other_endpoints,
                 &BTreeMap::new()
@@ -481,7 +481,7 @@ fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
             &workspace,
             &token,
             32030,
-            "compose",
+            "up",
             "https://auth-app.localhost",
         )
         .unwrap();
@@ -531,11 +531,11 @@ fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
 }
 
 #[test]
-fn task_runtime_has_only_generic_dirs_and_strips_only_supervisor_controls() {
+fn task_runtime_has_only_generic_dirs_and_strips_only_parcela_variables() {
     let temp = TempDir::new().unwrap();
     let source = temp.path().join("source");
     fs::create_dir(&source).unwrap();
-    let yaml = "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\ntasks:\n  probe:\n    command: 'cd \"$PARCELA_RUNTIME_DIR\" && ls -p && find tmp -mindepth 1 && echo \"${PORTLESS_PROBE-unset} ${PC_PROBE-unset} ${PARCELA_PROBE-unset}\"'\n    timeout_seconds: 10\n";
+    let yaml = "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\ntasks:\n  probe:\n    command: 'cd \"$PARCELA_RUNTIME_DIR\" && ls -p && find tmp -mindepth 1 && echo \"${PORTLESS_PROBE-unset} ${PARCELA_PROBE-unset}\"'\n    timeout_seconds: 10\n";
     fs::write(source.join("parcela.yaml"), yaml).unwrap();
     let manifest: Manifest = Manifest::parse(yaml).unwrap();
     let state = temp.path().join("state");
@@ -551,7 +551,6 @@ fn task_runtime_has_only_generic_dirs_and_strips_only_supervisor_controls() {
         .arg(&state)
         .args(["task", "probe"])
         .env("PORTLESS_PROBE", "inherited")
-        .env("PC_PROBE", "inherited")
         .env("PARCELA_PROBE", "inherited")
         .output()
         .unwrap();
@@ -562,7 +561,7 @@ fn task_runtime_has_only_generic_dirs_and_strips_only_supervisor_controls() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
-        "cache/\ndata/\nlog/\ntask.lock\ntmp/\ninherited unset unset\n"
+        "cache/\ndata/\nlog/\ntask.lock\ntmp/\ninherited unset\n"
     );
 }
 
@@ -575,7 +574,7 @@ fn schema_3_registry_migrates_to_named_ports_without_losing_the_active_lease() {
             &workspace,
             &token,
             32040,
-            "compose",
+            "up",
             "https://auth-app.localhost",
         )
         .unwrap();
@@ -608,7 +607,7 @@ fn schema_3_registry_migrates_to_named_ports_without_losing_the_active_lease() {
             &workspace,
             &token,
             32041,
-            "compose",
+            "up",
             "https://auth-app.localhost",
             &[],
             &BTreeMap::from([("db".into(), 32042)]),

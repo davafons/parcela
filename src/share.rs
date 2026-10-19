@@ -1,6 +1,6 @@
 //! Opening a run beyond this machine, only when `up` asks: `.local` names on the LAN through
-//! Caddy, and `tailscale serve` on the tailnet. Publishers run inside the run's Process Compose
-//! graph, so they stop with it.
+//! Caddy, and `tailscale serve` on the tailnet. Publishers are processes of the run's graph, so
+//! they stop with it.
 use crate::{config::Manifest, process::on_path, registry::Endpoint};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};

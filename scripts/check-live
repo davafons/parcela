@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Parcela's live suites against real Caddy and Process Compose.
+"""Run Parcela's live suites against real Caddy.
 
 Each fixture gets its own /tmp root, state directory, test CA and ports in 30000-32767.
 Nothing is installed or trusted. A passing fixture removes its root; a failing one keeps it.
@@ -23,15 +23,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('suites', nargs='*', metavar='suite', help=f'any of {", ".join(SUITES)} (default: all)')
     parser.add_argument('--caddy', default=shutil.which('caddy'), help='Caddy binary (default: caddy on PATH)')
-    parser.add_argument('--process-compose', default=shutil.which('process-compose'), help='Process Compose binary (default: on PATH)')
     parser.add_argument('--output', type=Path, help='report directory (default: a new temporary directory)')
     parser.add_argument('--case', action='append', help='run only this recovery case; repeatable')
     args = parser.parse_args()
     unknown = set(args.suites) - set(SUITES)
     if unknown:
         parser.error(f'unknown suite: {", ".join(sorted(unknown))}')
-    if not args.caddy or not args.process_compose:
-        parser.error('caddy and process-compose must be on PATH or passed with --caddy and --process-compose')
+    if not args.caddy:
+        parser.error('caddy must be on PATH or passed with --caddy')
     output = args.output or Path(tempfile.mkdtemp(prefix='pcl-live-reports-'))
     output.mkdir(parents=True, exist_ok=True)
     subprocess.run(['cargo', 'build', '--locked'], cwd=ROOT, check=True)
@@ -42,7 +41,7 @@ def main():
         started = time.monotonic()
         try:
             module = importlib.import_module(f'live.{SUITES[suite]}')
-            record = {'ok': True, 'report': module.run(args.caddy, args.process_compose, cases=args.case)}
+            record = {'ok': True, 'report': module.run(args.caddy, cases=args.case)}
         except Exception:
             record = {'ok': False, 'error': traceback.format_exc()}
             failed.append(suite)

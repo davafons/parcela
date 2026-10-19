@@ -61,12 +61,6 @@ fn long_state_directories_bind_short_private_sockets() {
         format!("{prefix}-ctl.sock")
     );
     assert_eq!(
-        environment.compose,
-        environment
-            .control
-            .with_file_name(format!("{prefix}-pc.sock"))
-    );
-    assert_eq!(
         admin,
         environment.control.with_file_name("proxy-admin.sock")
     );

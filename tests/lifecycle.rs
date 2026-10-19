@@ -14,6 +14,20 @@ use std::{
 use tempfile::TempDir;
 use uuid::Uuid;
 
+/// A record's children: one `web` process with this identity.
+fn web(
+    identity: &process::Identity,
+) -> std::collections::BTreeMap<String, parcela::supervisor::Child> {
+    std::collections::BTreeMap::from([(
+        "web".to_owned(),
+        parcela::supervisor::Child {
+            identity: Some(identity.clone()),
+            exit: None,
+            restarts: 0,
+        },
+    )])
+}
+
 fn control_socket(runtime: &std::path::Path) -> std::path::PathBuf {
     parcela::sockets::environment(runtime).unwrap().control
 }
@@ -42,7 +56,7 @@ fn fixture() -> (
             &workspace,
             &Uuid::new_v4().to_string(),
             32001,
-            "compose",
+            "up",
             "https://auth-app.localhost",
         )
         .unwrap();
@@ -60,20 +74,23 @@ fn unavailable_owner_is_unknown_and_inspection_creates_no_runtime() {
 }
 
 #[test]
-fn down_converges_a_start_that_died_before_launching() {
-    let (_temp, registry, workspace, session) = fixture();
+fn down_converges_a_start_that_died_before_saving_its_record() {
+    let (_temp, registry, workspace, _session) = fixture();
     let path = registry.runtime_path(&workspace);
     private::directory(&path).unwrap();
     let held = private::Lock::acquire(&path.join("owner.lock")).unwrap();
     assert!(lifecycle::down(&registry, &workspace).is_err());
     drop(held);
-    fs::write(path.join("launched"), session.generation.to_string()).unwrap();
-    assert!(lifecycle::down(&registry, &workspace).is_err());
-    fs::remove_file(path.join("launched")).unwrap();
-    assert_eq!(
-        lifecycle::down(&registry, &workspace).unwrap()["state"],
-        "stopped"
-    );
+    // A child forked by a parallel test can share the lock's file for a moment.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let stopped = loop {
+        match lifecycle::down(&registry, &workspace) {
+            Ok(stopped) => break stopped,
+            Err(error) => assert!(std::time::Instant::now() < deadline, "{error:#}"),
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(stopped["state"], "stopped");
     let current = registry.session(&workspace.id).unwrap().unwrap();
     assert_eq!(current.status, SessionStatus::Stopped);
 }
@@ -241,7 +258,7 @@ fn malformed_owner_health_response_stays_unknown() {
 }
 
 #[test]
-fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
+fn an_interrupted_stop_finishes_by_stopping_recorded_survivors() {
     use parcela::owner::{Phase, Record};
 
     let (_temp, mut registry, workspace, session) = fixture();
@@ -259,9 +276,8 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
         owner: identity.clone(),
         lock: lock.identity().unwrap(),
         control: private::Identity::read(&control_socket(&path)).unwrap(),
-        supervisor: identity.clone(),
+        children: web(&identity),
         processes: vec![identity],
-        native: None,
         manifest: Manifest::parse(
             "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
@@ -281,17 +297,13 @@ fn quiescent_interrupted_stop_converges_without_native_reauthentication() {
     registry
         .session_status(&session, SessionStatus::Stopping)
         .unwrap();
-    assert!(lifecycle::down(&registry, &workspace).is_err());
-    assert!(survivor_identity.alive());
-    assert_eq!(
-        registry.session(&workspace.id).unwrap().unwrap().status,
-        SessionStatus::Stopping
-    );
-    survivor.stop(libc::SIGTERM).unwrap();
+    // The survivor is signaled through its recorded identity, never through a bare pid.
     assert_eq!(
         lifecycle::down(&registry, &workspace).unwrap()["state"],
         "stopped"
     );
+    assert!(!survivor_identity.alive());
+    survivor.stop(libc::SIGKILL).unwrap();
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().status,
         SessionStatus::Stopped
@@ -331,9 +343,8 @@ fn contending_stop(replace_session: bool) {
         owner: identity.clone(),
         lock: lock.identity().unwrap(),
         control: private::Identity::read(&control_socket(&path)).unwrap(),
-        supervisor: identity.clone(),
+        children: web(&identity),
         processes: vec![identity],
-        native: None,
         manifest: Manifest::parse(
             "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
@@ -363,7 +374,7 @@ fn contending_stop(replace_session: bool) {
                     &target,
                     &expected.router_token,
                     32002,
-                    "compose",
+                    "up",
                     &expected.public_url,
                 )
                 .unwrap()
@@ -417,9 +428,8 @@ fn waiting_stop(replace_control: bool) {
         owner: process::Identity::read(std::process::id()).unwrap().unwrap(),
         lock: lock.identity().unwrap(),
         control: private::Identity::read(&control_socket(&path)).unwrap(),
-        supervisor: identity.clone(),
+        children: web(&identity),
         processes: vec![identity],
-        native: None,
         manifest: Manifest::parse(
             "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
@@ -554,8 +564,8 @@ fn unfinished_open_owner_request_is_rejected_within_a_bounded_wait() {
 }
 
 #[test]
-fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
-    use parcela::owner::{Native, Phase, Record};
+fn down_stops_what_survives_a_crashed_owner_by_recorded_identity() {
+    use parcela::owner::{Phase, Record};
 
     let (_temp, mut registry, workspace, session) = fixture();
     registry
@@ -567,8 +577,6 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     let sockets = parcela::sockets::environment(&path).unwrap();
     parcela::sockets::prepare(&sockets.control).unwrap();
     let control = UnixListener::bind(&sockets.control).unwrap();
-    let native_socket = UnixListener::bind(&sockets.compose).unwrap();
-    private::write_bytes(&path.join("pc.token"), b"crash-test-token").unwrap();
 
     let mut owner = Command::new("sleep").arg("60").spawn().unwrap();
     let owner_identity = process::Identity::read(owner.id()).unwrap().unwrap();
@@ -578,7 +586,7 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
         .unwrap();
     let supervisor_identity = process::Identity::read(supervisor.id()).unwrap().unwrap();
     let tree = loop {
-        let tree = process::tree(&supervisor_identity).unwrap();
+        let tree = process::tree(std::slice::from_ref(&supervisor_identity)).unwrap();
         if tree.len() == 3 {
             break tree;
         }
@@ -590,13 +598,8 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
         owner: owner_identity.clone(),
         lock: lock.identity().unwrap(),
         control: private::Identity::read(&sockets.control).unwrap(),
-        supervisor: supervisor_identity.clone(),
+        children: web(&supervisor_identity),
         processes: tree.clone(),
-        native: Some(Native {
-            binary: "/nonexistent/process-compose".into(),
-            token: private::Identity::read(&path.join("pc.token")).unwrap(),
-            socket: Some(private::Identity::read(&sockets.compose).unwrap()),
-        }),
         manifest: Manifest::parse(
             "version: 1\nproject: app\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
         )
@@ -606,7 +609,6 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     };
     record.save(&path).unwrap();
     drop(control);
-    drop(native_socket);
     drop(lock);
     owner.kill().unwrap();
     owner.wait().unwrap();
@@ -623,34 +625,22 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     }
     supervisor.wait().unwrap();
     assert!(!supervisor_identity.alive() && survivor.alive());
-    assert!(lifecycle::down(&registry, &workspace).is_err());
-    assert!(
-        survivor.alive(),
-        "a recorded survivor keeps the run active and is never signaled"
-    );
-    assert_eq!(
-        registry.session(&workspace.id).unwrap().unwrap().status,
-        SessionStatus::Ready
-    );
-
-    unsafe { libc::kill(survivor.pid as i32, libc::SIGKILL) };
-    while survivor.alive() {
-        thread::sleep(Duration::from_millis(10));
-    }
     assert!(
         registry
             .begin_session(
                 &workspace,
                 &Uuid::new_v4().to_string(),
                 32001,
-                "compose",
+                "up",
                 "https://auth-app.localhost",
             )
             .is_err(),
         "a crashed environment blocks up until it converges"
     );
+    // The survivor outlived its parent, so it is stopped by its recorded identity.
     let stopped = lifecycle::down(&registry, &workspace).unwrap();
     assert_eq!(stopped["state"], "stopped");
+    assert!(!survivor.alive());
     assert_eq!(stopped["generation"], session.generation);
     assert_eq!(
         registry.session(&workspace.id).unwrap().unwrap().status,
@@ -659,7 +649,6 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
     record = Record::read(&path, &record.session).unwrap();
     assert_eq!(record.phase, Phase::Stopped);
     assert!(!sockets.control.exists());
-    assert!(!sockets.compose.exists());
     assert_eq!(
         lifecycle::down(&registry, &workspace).unwrap()["already_stopped"],
         true
@@ -669,7 +658,7 @@ fn crashed_owner_and_supervisor_tree_converge_to_stopped_without_signals() {
             &workspace,
             &Uuid::new_v4().to_string(),
             32001,
-            "compose",
+            "up",
             "https://auth-app.localhost",
         )
         .unwrap();

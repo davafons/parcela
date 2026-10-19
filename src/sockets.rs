@@ -9,7 +9,6 @@ use std::{
 
 pub struct Environment {
     pub control: PathBuf,
-    pub compose: PathBuf,
 }
 
 pub fn proxy_admin(state: &Path) -> Result<PathBuf> {
@@ -34,7 +33,6 @@ pub fn environment(runtime: &Path) -> Result<Environment> {
     let directory = directory(state)?;
     Ok(Environment {
         control: directory.join(format!("{prefix}-ctl.sock")),
-        compose: directory.join(format!("{prefix}-pc.sock")),
     })
 }
 

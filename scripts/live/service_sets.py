@@ -20,7 +20,8 @@ services:
     http:
       healthcheck: /ready
   backend:
-    command: python3 {SERVICE} backend
+    # Restarts the server when the test kills it, so its listener changes within the same run.
+    command: while :; do python3 {SERVICE} backend; done
     working_dir: backend
     http:
       subdomain: api
@@ -52,8 +53,8 @@ hooks:
 BY_UUID = {'status', 'url', 'logs', 'restart', 'recover', 'down', 'task'}
 
 
-def run(caddy, compose, **_):
-    with Live('sets', caddy, compose) as live:
+def run(caddy, **_):
+    with Live('sets', caddy) as live:
         workspaces, cases = {}, []
 
         def cli(path, *argv, check=True, timeout=20):
@@ -92,7 +93,7 @@ def run(caddy, compose, **_):
             directory.mkdir(mode=0o700, exist_ok=True)
         gate = runtime / 'unhealthy-backend'
         gate.touch()
-        launcher = live.spawn(primary, 'up', '--detach', '--process-compose', compose)
+        launcher = live.spawn(primary, 'up', '--detach')
 
         def waiting_for_api():
             observed = status(primary)
@@ -125,13 +126,13 @@ def run(caddy, compose, **_):
         assert json.loads(cli(primary, 'task', 'probe', '--', 'literal argument with spaces').stdout) == ['literal argument with spaces']
         cases.append('agent-context-inventory-uuid-health-logs-and-explicit-task')
 
-        second = json.loads(cli(preview, 'up', '--detach', '--process-compose', compose).stdout)
+        second = json.loads(cli(preview, 'up', '--detach').stdout)
         remember(second['session'])
         assert request('review-sets.localhost')['id'] != workspace['id']
         assert request('api-review-sets.localhost')['id'] != workspace['id']
         cases.append('independent-worktree-service-set')
         collision = live.checkout('collision', MANIFEST)
-        refused = cli(collision, 'up', '--name', 'api', '--process-compose', '/nonexistent/parcela-register-only', check=False)
+        refused = cli(collision, 'up', '--name', 'api', '--lan-ip', '192.0.2.1', check=False)
         assert refused.returncode == 1 and 'is already used by' in refused.stderr, refused
         assert request('api-sets.localhost')['id'] == workspace['id']
         cases.append('secondary-host-cannot-be-another-worktree-base')
@@ -143,10 +144,9 @@ def run(caddy, compose, **_):
         unhealthy.unlink()
         cases.append('per-endpoint-health')
         frontend_pid = request('sets.localhost')['pid']
+        backend_pid = request('api-sets.localhost')['pid']
         unhealthy.touch()
-        subprocess.run([compose, '--use-uds', '--unix-socket', json.loads((runtime / 'context.json').read_text())['sockets']['compose'],
-                        '--token-file', str(runtime / 'pc.token'), '--log-file', str(runtime / 'log/probe.log'),
-                        'process', 'restart', 'backend'], check=True, capture_output=True, timeout=10)
+        os.kill(backend_pid, signal.SIGTERM)
         wait_for(lambda: status(primary)['state'] == 'starting', [proxy])
         wait_for(lambda: request('sets.localhost', 503), [proxy])
         request('api-sets.localhost', 503)
@@ -171,11 +171,11 @@ def run(caddy, compose, **_):
         with socket.socket() as foreign:
             foreign.bind(('127.0.0.1', 0))
             foreign.listen()
-            refused = cli(primary, 'restart', '--detach', '--process-compose', compose,
+            refused = cli(primary, 'restart', '--detach',
                           '--backend-port', str(foreign.getsockname()[1]), check=False)
             assert refused.returncode != 0
             assert request('api-sets.localhost')['pid'] == before_pid
-        restarted = json.loads(cli(primary, 'restart', '--detach', '--process-compose', compose).stdout)
+        restarted = json.loads(cli(primary, 'restart', '--detach').stdout)
         remember(restarted['session'])
         assert restarted['session']['generation'] == 3 and restarted['session']['token'] != first['session']['token']
         assert request('api-sets.localhost')['pid'] != before_pid
@@ -190,7 +190,7 @@ def run(caddy, compose, **_):
         cli(primary, 'down')
         cases.append('group-stop-is-idempotent-and-preserves-other-worktree-and-data')
         (primary / 'parcela.yaml').write_text(MANIFEST.replace(f'python3 {SERVICE} backend', "python3 -c 'import time; time.sleep(600)'"))
-        failed = cli(primary, 'up', '--detach', '--process-compose', compose, '--readiness-timeout', '2', check=False)
+        failed = cli(primary, 'up', '--detach', '--readiness-timeout', '2', check=False)
         assert failed.returncode != 0
         request('sets.localhost', 503)
         request('api-sets.localhost', 503)
@@ -200,7 +200,7 @@ def run(caddy, compose, **_):
         cases.append('partial-startup-failure-never-publishes-and-stops-group')
         hooks = live.checkout('hooks', HOOKS)
         workspaces[hooks] = live.register(hooks, 'preview', 'hooks')
-        first = json.loads(cli(hooks, 'up', '--detach', '--process-compose', compose).stdout)
+        first = json.loads(cli(hooks, 'up', '--detach').stdout)
         live.ports.append(first['session']['backend_port'])
         runtime = live.state / 'environments' / workspaces[hooks]['id']
         assert (runtime / 'data' / 'setup-runs').read_text() == 'x', 'setup ran once before the service'
@@ -214,17 +214,17 @@ def run(caddy, compose, **_):
       healthcheck: /ready
 hooks:
 ''', 1))
-        added = json.loads(cli(hooks, 'restart', '--detach', '--process-compose', compose).stdout)
+        added = json.loads(cli(hooks, 'restart', '--detach').stdout)
         live.ports.extend(endpoint['backend_port'] for endpoint in added['session']['endpoints'])
         assert request('api-hooks-sets.localhost')['id'] == workspaces[hooks]['id'], 'restart reserves an added service'
         (hooks / 'parcela.yaml').write_text(HOOKS)
-        cli(hooks, 'restart', '--detach', '--process-compose', compose)
+        cli(hooks, 'restart', '--detach')
         assert set(json.loads(cli(hooks, 'status').stdout)['live']['endpoints']) == {'web'}, 'restart drops a removed service'
         assert (runtime / 'data' / 'setup-runs').read_text() == 'x', 'restart skips setup'
         assert cli(hooks, 'logs', 'prestart').stdout.strip().endswith('migrated 1')
         assert cli(hooks, 'down').returncode == 0
         (hooks / 'parcela.yaml').write_text(HOOKS.replace('echo seeded', 'echo broken; exit 7'))
-        failed = cli(hooks, 'up', '--detach', '--setup', '--process-compose', compose, check=False)
+        failed = cli(hooks, 'up', '--detach', '--setup', check=False)
         assert failed.returncode != 0 and 'hooks.setup failed with exit code 7; its output is above' in failed.stderr, failed.stderr
         assert cli(hooks, 'rm').returncode == 0
         assert (runtime / 'data' / 'teardown').read_text() == 'dropped hooks\n', 'rm runs hooks.teardown'

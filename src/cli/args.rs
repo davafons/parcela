@@ -97,9 +97,6 @@ pub enum Command {
         /// Also serve on your tailnet with tailscale serve
         #[arg(long, env = "PARCELA_TAILSCALE", value_parser = clap::builder::FalseyValueParser::new())]
         tailscale: bool,
-        /// Process Compose binary.
-        #[arg(long, default_value = "process-compose", hide = true)]
-        process_compose: String,
         /// Readiness timeout in seconds
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
         readiness_timeout: u64,
@@ -136,9 +133,6 @@ pub enum Command {
         /// Also serve on your tailnet with tailscale serve
         #[arg(long, env = "PARCELA_TAILSCALE", value_parser = clap::builder::FalseyValueParser::new())]
         tailscale: bool,
-        /// Process Compose binary.
-        #[arg(long, default_value = "process-compose", hide = true)]
-        process_compose: String,
         /// Readiness timeout in seconds
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
         readiness_timeout: u64,
@@ -177,9 +171,6 @@ pub enum Command {
         /// Caddy binary to probe instead of caddy on PATH.
         #[arg(long, hide = true)]
         caddy: Option<String>,
-        /// Process Compose binary to probe instead of process-compose on PATH.
-        #[arg(long, hide = true)]
-        process_compose: Option<String>,
     },
     /// Manage the HTTPS proxy
     Proxy {

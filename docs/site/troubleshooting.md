@@ -74,13 +74,13 @@ Another checkout owns that name. Start this one with another name: `parcela up -
 
 Parcela remembers a checkout's name after the first `up`. To rename it, run `parcela down`, `parcela rm`, then `parcela up --name NEW`. The renamed checkout gets a new runtime directory, so move any files you keep in `PARCELA_RUNTIME_DIR` yourself.
 
-## `logs` needs a running environment
+## `logs` has nothing to show
 
 ```text
-parcela: service inspection requires a running Process Compose environment
+parcela: no logs yet; run parcela up first
 ```
 
-`logs` reads from the running process group. Start the environment first. Output from a failed detached start is in the `owner.log` file that the error names.
+`logs` reads what the latest run's processes wrote, so it works while the environment runs and after it stops, until the next `up`. A checkout that never started has none. Parcela's own messages from a detached start are in the `owner.log` file that the error names.
 
 ## The proxy is from another Parcela version
 

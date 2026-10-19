@@ -1,4 +1,4 @@
-//! Parcela's Rust control plane. No proxy or supervisor is implemented here.
+//! Parcela's Rust control plane. Caddy is the proxy; `supervisor` runs each environment's processes.
 pub mod config;
 pub mod context;
 pub mod control;
@@ -6,6 +6,7 @@ pub mod discovery;
 pub mod frontdoor;
 pub mod http;
 pub mod lifecycle;
+pub mod logs;
 pub mod owner;
 pub mod paint;
 pub mod ports;
@@ -19,3 +20,4 @@ pub mod runtime;
 pub mod share;
 pub mod sockets;
 pub mod startup;
+pub mod supervisor;

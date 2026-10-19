@@ -3,12 +3,12 @@
 ## What does Parcela change on my machine?
 
 - **Files.** State in `~/.local/state/parcela`, or `$XDG_STATE_HOME/parcela` (mode 700), and sockets in `/tmp/parcela-<uid>`. Nothing in your checkout except the `parcela.yaml` that `parcela init` writes.
-- **Binaries.** `install.sh` puts `parcela`, and Caddy and Process Compose when they are missing, in `~/.local/bin`. It never uses `sudo`.
+- **Binaries.** `install.sh` puts `parcela`, and Caddy when it is missing, in `~/.local/bin`. It never uses `sudo`.
 - **Listeners.** One Caddy on `127.0.0.1:1443`, and your services on loopback ports from 20000–29999. Nothing listens on your network unless you run `up --lan` or `up --tailscale`, and only for that run.
 - **Trust.** Parcela's certificate authority is added to the system trust store only by `parcela trust` or the first `up` in a terminal, behind the system password prompt. Scripts, agents and CI never change trust.
 - **System services.** None, unless you run `parcela proxy install` on macOS for URLs without a port.
 
-Parcela itself sends nothing over the network. Process Compose checks GitHub for a newer release when it starts. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
+Parcela sends nothing over the network. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
 
 ## Is trusting the certificate authority safe?
 
@@ -91,4 +91,4 @@ rm -rf ~/.local/state/parcela /tmp/parcela-$(id -u)  # all state, including envi
 rm ~/.local/bin/parcela
 ```
 
-Remove `~/.local/bin/caddy` and `~/.local/bin/process-compose` too if `install.sh` installed them and nothing else uses them. With Homebrew, run `brew uninstall parcela`. Parcela writes nothing into your checkouts except the `parcela.yaml` from `init`. Data your hooks put elsewhere, such as databases on a shared server, stays until you drop it.
+Remove `~/.local/bin/caddy` too if `install.sh` installed it and nothing else uses it. With Homebrew, run `brew uninstall parcela`. Parcela writes nothing into your checkouts except the `parcela.yaml` from `init`. Data your hooks put elsewhere, such as databases on a shared server, stays until you drop it.

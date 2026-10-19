@@ -45,13 +45,12 @@ pub fn status(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     )
 }
 
-/// One environment's status plus `processes`: every Process Compose service and worker with
-/// its `name`, lowercase `state` and `pid` (null when not running). The list is empty unless a
-/// live supervisor answers.
+/// One environment's status plus `processes`: every service, hook and worker of the run with its
+/// `name`, `state` and `pid` (null when not running). The list is empty unless a live owner answers.
 pub fn status_with_processes(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     let mut status = status(registry, workspace)?;
     let mut processes = Vec::new();
-    if status["live_health_verified"] == true && status["recorded_session"]["kind"] == "compose" {
+    if status["live_health_verified"] == true && status["recorded_session"]["kind"] == "up" {
         match service_request(registry, workspace, Action::Services) {
             Ok(listed) => {
                 processes = listed["services"]
@@ -182,7 +181,6 @@ fn owner_log(runtime: &std::path::Path) -> Result<(std::path::PathBuf, std::fs::
 pub fn detached(
     registry: &Registry,
     workspace: &Workspace,
-    binary: &str,
     port: Option<u16>,
     timeout: u64,
     share: crate::share::Request,
@@ -210,13 +208,7 @@ pub fn detached(
         .arg(&workspace.source)
         .arg("--state-dir")
         .arg(registry.state_path())
-        .args([
-            "up",
-            "--process-compose",
-            binary,
-            "--readiness-timeout",
-            &timeout.to_string(),
-        ]);
+        .args(["up", "--readiness-timeout", &timeout.to_string()]);
     if let Some(port) = port {
         command.args(["--backend-port", &port.to_string()]);
     }
@@ -282,8 +274,8 @@ pub fn service_request(
         .session(&workspace.id)?
         .context("environment is not running")?;
     ensure!(
-        session.status != SessionStatus::Stopped && session.kind == "compose",
-        "service inspection requires a running Process Compose environment"
+        session.status != SessionStatus::Stopped && session.kind == "up",
+        "environment is not running"
     );
     control::request(&registry.runtime_path(workspace), &session, action)
 }
@@ -361,13 +353,13 @@ pub struct LaunchSnapshot {
     pub predecessor: Option<Session>,
 }
 
-/// A running Process Compose session whose owner died while recorded processes survive, by
+/// A running `up` session whose owner died while recorded processes survive, by
 /// birth identity. `up` takes it back through the recover path instead of starting a duplicate.
 pub fn orphaned(registry: &Registry, workspace: &Workspace) -> Result<Option<Session>> {
     let Some(session) = registry.session(&workspace.id)? else {
         return Ok(None);
     };
-    if session.kind != "compose"
+    if session.kind != "up"
         || !matches!(
             session.status,
             SessionStatus::Starting | SessionStatus::Ready
@@ -384,16 +376,13 @@ pub fn orphaned(registry: &Registry, workspace: &Workspace) -> Result<Option<Ses
 pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Value> {
     let session = registry
         .session(&workspace.id)?
-        .context("no native session to recover")?;
+        .context("no session to recover")?;
     let path = registry.runtime_path(workspace);
     let evidence = crate::owner::Record::read(&path, &session)?;
     ensure!(
         !evidence.owner.alive(),
         "owner is still alive; use status/down"
     );
-    if !evidence.quiescent() {
-        evidence.authenticate(&path, workspace)?;
-    }
     let _launch = private::Lock::acquire(&path.join("launch.lock"))?;
     let (log_path, log) = owner_log(&path)?;
     let mut command = Command::new(std::env::current_exe()?);
@@ -436,90 +425,96 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
     }
 }
 
-/// Stream new log lines from a running environment's processes, each prefixed with its name unless
-/// one is named. Reads Process Compose directly, read-only, so the owner is never blocked.
+/// The last `tail` lines of each process of the latest run, or of `service`, as (name, lines).
+pub fn logs(
+    registry: &Registry,
+    workspace: &Workspace,
+    service: Option<&str>,
+    tail: usize,
+) -> Result<Vec<(String, Vec<String>)>> {
+    ensure!(
+        (1..=10000).contains(&tail),
+        "log tail must be between 1 and 10000"
+    );
+    let directory = crate::logs::directory(&registry.runtime_path(workspace));
+    let names = selected(&directory, service)?;
+    names
+        .into_iter()
+        .map(|name| {
+            let lines = crate::logs::tail(&directory, &name, tail)?;
+            Ok((name, lines))
+        })
+        .collect()
+}
+
+/// Every process with a log, or only `service`, which must be one of them.
+fn selected(directory: &std::path::Path, service: Option<&str>) -> Result<Vec<String>> {
+    let names = crate::logs::names(directory)?;
+    ensure!(!names.is_empty(), "no logs yet; run parcela up first");
+    match service {
+        Some(service) => {
+            ensure!(
+                names.iter().any(|name| name == service),
+                "unknown service {service}; the latest run has {}",
+                names.join(", ")
+            );
+            Ok(vec![service.to_owned()])
+        }
+        None => Ok(names),
+    }
+}
+
+/// Prints the last `tail` lines, then new lines as they come, until the environment stops or a
+/// signal arrives. Each line is prefixed with its process's name unless one is named.
 pub fn follow_logs(
     registry: &Registry,
     workspace: &Workspace,
     service: Option<&str>,
     tail: u32,
 ) -> Result<()> {
-    use std::io::{BufRead, Write};
-    let listed = service_request(registry, workspace, Action::Services)?;
-    let mut names: Vec<String> = listed["services"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|process| process["name"].as_str().map(str::to_owned))
-        .collect();
-    names.sort();
-    if let Some(service) = service {
-        ensure!(
-            names.iter().any(|name| name == service),
-            "unknown service {service}; this run has {}",
-            names.join(", ")
-        );
-        names = vec![service.to_owned()];
-    }
-    let session = registry
-        .session(&workspace.id)?
-        .context("environment is not running")?;
-    let runtime = registry.runtime_path(workspace);
-    let record = crate::owner::Record::read(&runtime, &session)?;
-    let native = record
-        .native
-        .context("logs require a Process Compose environment")?;
-    let socket = crate::sockets::environment(&runtime)?.compose;
-    let width = names.iter().map(String::len).max().unwrap_or(0);
+    use std::io::Write;
+    // Before the first line, so Ctrl-C always ends the loop below.
+    let signals = Signals::new()?;
+    let directory = crate::logs::directory(&registry.runtime_path(workspace));
+    let mut names = selected(&directory, service)?;
     let prefixed = service.is_none();
     let paint = crate::paint::Paint::stdout();
-    let output = std::sync::Mutex::new(std::io::stdout());
-    let signals = Signals::new()?;
-    let mut children = Vec::new();
-    std::thread::scope(|scope| -> Result<()> {
-        let mut readers = Vec::new();
-        for (index, name) in names.iter().enumerate() {
-            let mut child = std::process::Command::new(&native.binary)
-                .args(["--use-uds", "--unix-socket"])
-                .arg(&socket)
-                .arg("--token-file")
-                .arg(runtime.join("pc.token"))
-                .arg("--log-file")
-                .arg(runtime.join("log/control.log"))
-                .args(["--read-only", "process", "logs", "--follow", "--tail"])
-                .arg(tail.to_string())
-                .arg("--")
-                .arg(name)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .context("start Process Compose log reader")?;
-            let stdout = child.stdout.take().context("log reader has no output")?;
-            children.push(child);
-            let output = &output;
-            readers.push(scope.spawn(move || {
-                for line in std::io::BufReader::new(stdout).lines() {
-                    let Ok(line) = line else { break };
-                    let mut out = output.lock().unwrap_or_else(|poison| poison.into_inner());
-                    let written = if prefixed {
-                        writeln!(out, "{} {line}", paint.log_prefix(index, name, width))
-                    } else {
-                        writeln!(out, "{line}")
-                    };
-                    if written.and_then(|()| out.flush()).is_err() {
-                        break;
-                    }
+    let width = names.iter().map(String::len).max().unwrap_or(0);
+    let print = |names: &[String], name: &str, line: &str| {
+        let mut out = std::io::stdout().lock();
+        let index = names.iter().position(|known| known == name).unwrap_or(0);
+        let _ = if prefixed {
+            writeln!(out, "{} {line}", paint.log_prefix(index, name, width))
+        } else {
+            writeln!(out, "{line}")
+        };
+    };
+    for name in &names {
+        for line in crate::logs::tail(&directory, name, tail as usize)? {
+            print(&names, name, &line);
+        }
+    }
+    let _ = std::io::stdout().flush();
+    let mut follower = crate::logs::Follower::new(&directory, true, None);
+    follower.poll(|_, _| {})?;
+    let mut running = true;
+    while signals.received() == 0 {
+        // One more read after the environment stops, for its last lines.
+        let last = !running;
+        follower.poll(|name, line| {
+            if service.is_none_or(|service| service == name) {
+                if !names.iter().any(|known| known == name) {
+                    names.push(name.to_owned());
                 }
-            }));
+                print(&names, name, line);
+            }
+        })?;
+        let _ = std::io::stdout().flush();
+        if last {
+            break;
         }
-        // Readers end when the environment stops; a signal ends them here.
-        while signals.received() == 0 && !readers.iter().all(|reader| reader.is_finished()) {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        for child in &mut children {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        Ok(())
-    })
+        running = active(registry, workspace)?.is_some();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
 }

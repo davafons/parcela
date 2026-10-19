@@ -15,9 +15,9 @@ def digests():
     return {name: hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() for name in INPUTS}
 
 
-def run(caddy, compose, **_):
+def run(caddy, **_):
     before = digests()
-    with Live('docs', caddy, compose) as live:
+    with Live('docs', caddy) as live:
         primary, signup = live.checkout('hello'), live.root / 'signup'
         live.sources.append(signup)
 
@@ -40,7 +40,7 @@ def run(caddy, compose, **_):
         proxy = live.start_proxy()
         sessions = []
         for path, base, name in [(primary, 'hello.localhost', 'primary'), (signup, 'signup-hello.localhost', 'signup')]:
-            sessions.append(remember(live.json(path, 'up', '--detach', '--process-compose', compose)))
+            sessions.append(remember(live.json(path, 'up', '--detach')))
             status = live.json(path, 'status')
             assert status['state'] == 'ready' and status['live_health_verified']
             assert all(endpoint['listener_owned'] and endpoint['http_ready'] for endpoint in status['live']['endpoints'].values())
@@ -54,7 +54,7 @@ def run(caddy, compose, **_):
             assert 'setup  | database ready' in live.cli(path, 'logs', '--tail', '5').stdout
         listed = live.json(primary, 'ls')['workspaces']
         assert {Path(entry['workspace']['source']).resolve() for entry in listed} >= {primary, signup}
-        restarted = remember(live.json(primary, 'restart', '--detach', '--process-compose', compose))
+        restarted = remember(live.json(primary, 'restart', '--detach'))
         assert restarted['generation'] == sessions[0]['generation'] + 1 and restarted['token'] != sessions[0]['token']
         assert live.cli(primary, 'task', 'messages').stdout == 'hello from primary\n', 'restart keeps the database and skips setup'
         live.cli(primary, 'down')

@@ -72,7 +72,7 @@ Visit `https://shop.localhost:1443`. `parcela logs` shows what every process pri
 
 **No port bookkeeping.** Ports are leased from 20000–29999 and never collide, across projects and checkouts. Services find each other through variables like `PARCELA_SERVICE_API_URL`.
 
-**Processes that stop.** Process Compose supervises the graph, so `parcela down` stops everything a run started, including what an agent forgot.
+**Processes that stop.** Parcela supervises the graph itself, so `parcela down` stops everything a run started, including what an agent forgot.
 
 **A CLI agents can drive.** Every command answers in JSON when piped, and `parcela --skill` prints instructions for coding agents.
 

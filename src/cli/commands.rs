@@ -7,7 +7,6 @@ use anyhow::{Context, Result, ensure};
 use parcela::{
     config::{Manifest, locate},
     context::ResolvedContext,
-    control::Action,
     frontdoor::FrontDoor,
     lifecycle,
     registry::{Registry, Workspace},
@@ -117,7 +116,7 @@ fn print_new_log_lines(log: &Path, start: u64, count: usize) {
     }
     eprintln!("parcela: last lines of {}:", log.display());
     for line in &lines[lines.len().saturating_sub(count)..] {
-        let line: String = without_title(line)
+        let line: String = line
             .chars()
             .filter(|c| !c.is_control() || *c == '\t')
             .collect();
@@ -125,23 +124,6 @@ fn print_new_log_lines(log: &Path, start: u64, count: usize) {
     }
 }
 
-/// Drops the terminal-title sequences (`ESC ] ... BEL`) Process Compose writes before its output.
-fn without_title(line: &str) -> String {
-    let mut rest = line;
-    let mut text = String::new();
-    while let Some(start) = rest.find("\x1b]") {
-        text.push_str(&rest[..start]);
-        let tail = &rest[start..];
-        let end = tail
-            .find('\x07')
-            .map(|end| end + 1)
-            .or_else(|| tail.find("\x1b\\").map(|end| end + 2))
-            .unwrap_or(tail.len());
-        rest = &tail[end..];
-    }
-    text.push_str(rest);
-    text
-}
 pub fn run(mut cli: Cli) -> Result<i32> {
     let out = Output::detect(cli.json);
     if matches!(cli.command, Command::Skill) {
@@ -176,16 +158,12 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             )?;
             Ok(0)
         }
-        Command::Doctor {
-            caddy,
-            process_compose,
-        } => {
+        Command::Doctor { caddy } => {
             let ready = super::doctor::run(
                 super::doctor::Probes {
                     path: &cli.path,
                     state: &state,
                     caddy: caddy.as_deref(),
-                    process_compose: process_compose.as_deref(),
                 },
                 out,
             )?;
@@ -217,7 +195,6 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         Command::Up {
             name,
             primary,
-            process_compose,
             backend_port,
             readiness_timeout,
             detach,
@@ -232,7 +209,6 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             Start {
                 request: startup::Request { name, primary },
                 restart: false,
-                process_compose,
                 backend_port,
                 readiness_timeout,
                 detach,
@@ -247,7 +223,6 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             out,
         ),
         Command::Restart {
-            process_compose,
             backend_port,
             readiness_timeout,
             detach,
@@ -262,7 +237,6 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             Start {
                 request: startup::Request::default(),
                 restart: true,
-                process_compose,
                 backend_port,
                 readiness_timeout,
                 detach,
@@ -283,7 +257,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             } else {
                 let session = existing
                     .session(&workspace.id)?
-                    .context("no native session to recover")?;
+                    .context("no session to recover")?;
                 drop(existing);
                 parcela::runtime::recover(&mut writable(&state)?, &workspace, &session, false)?
             };
@@ -336,42 +310,18 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         }
         Command::Logs { service, tail, .. } => {
             let (registry, workspace) = reader()?;
-            let prefixed = service.is_none();
-            let result = lifecycle::service_request(
-                &registry,
-                &workspace,
-                Action::Logs {
-                    service,
-                    tail: tail as usize,
-                },
-            )?;
-            let logs = result["logs"]
-                .as_str()
-                .context("invalid backend log response")?;
+            let logs = lifecycle::logs(&registry, &workspace, service.as_deref(), tail as usize)?;
             use std::io::Write;
             let mut out = std::io::stdout().lock();
-            if !prefixed {
-                out.write_all(logs.as_bytes())?;
-                return Ok(0);
-            }
-            // The owner prefixes each line with `name | `; color the prefix per name.
             let paint = parcela::paint::Paint::stdout();
-            let mut seen: Vec<&str> = Vec::new();
-            for line in logs.lines() {
-                match line.split_once(" | ") {
-                    Some((padded, rest)) => {
-                        let name = padded.trim_end();
-                        let index =
-                            seen.iter()
-                                .position(|seen| *seen == name)
-                                .unwrap_or_else(|| {
-                                    seen.push(name);
-                                    seen.len() - 1
-                                });
-                        let prefix = paint.log_prefix(index, name, padded.len());
-                        writeln!(out, "{prefix} {rest}")?
+            let width = logs.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
+            for (index, (name, lines)) in logs.iter().enumerate() {
+                for line in lines {
+                    if service.is_some() {
+                        writeln!(out, "{line}")?;
+                    } else {
+                        writeln!(out, "{} {line}", paint.log_prefix(index, name, width))?;
                     }
-                    None => writeln!(out, "{line}")?,
                 }
             }
             Ok(0)
@@ -411,7 +361,6 @@ pub fn run(mut cli: Cli) -> Result<i32> {
 struct Start {
     request: startup::Request,
     restart: bool,
-    process_compose: String,
     backend_port: Option<u16>,
     readiness_timeout: u64,
     detach: bool,
@@ -422,7 +371,7 @@ struct Start {
 }
 
 fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
-    let launch = parcela::runtime::Launch::Compose(&start.process_compose);
+    let launch = parcela::runtime::Launch::Up;
     let snapshot: Option<lifecycle::LaunchSnapshot> = start
         .launch_file
         .as_ref()
@@ -522,7 +471,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
         ensure!(
             registry
                 .session(&workspace.id)?
-                .is_none_or(|session| session.kind == "compose"),
+                .is_none_or(|session| session.kind == "up"),
             "restart does not replay arbitrary run commands; use down then an explicit run"
         );
         lifecycle::down(&registry, &workspace)?;
@@ -564,7 +513,6 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     let result = lifecycle::detached(
         &registry,
         &workspace,
-        &start.process_compose,
         start.backend_port,
         start.readiness_timeout,
         start.share,
@@ -622,19 +570,4 @@ fn already_running(
         "live": status["live"],
         "state": state,
     })))
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn terminal_titles_are_dropped_from_log_lines() {
-        assert_eq!(
-            super::without_title("\x1b]0;process-compose: mb/hooks\x07[setup\t] broken"),
-            "[setup\t] broken"
-        );
-        assert_eq!(
-            super::without_title("plain \x1b]2;t\x1b\\line"),
-            "plain line"
-        );
-    }
 }

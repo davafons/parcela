@@ -1,4 +1,8 @@
-use parcela::{config::Manifest, registry::Endpoint, runtime::compose_graph};
+use parcela::{
+    config::Manifest,
+    registry::Endpoint,
+    supervisor::{Condition, Kind, Probe, Program, plan},
+};
 use serde_json::json;
 use std::{collections::BTreeMap, fs, path::Path, process::Command};
 use tempfile::TempDir;
@@ -79,62 +83,81 @@ fn hooks_run_after_their_dependencies_and_before_everything_else() {
         backend_port: port,
         public_url: format!("https://{service}.localhost:1443"),
     });
-    let env = BTreeMap::from([("PARCELA_ENVIRONMENT_NAME".to_owned(), "signup".to_owned())]);
-    let graph = compose_graph(
+    let env = BTreeMap::from([
+        ("PARCELA_ENVIRONMENT_NAME".to_owned(), "signup".to_owned()),
+        ("PORT".to_owned(), "21000".to_owned()),
+    ]);
+    let source = Path::new("/src/shop");
+    let graph = plan(
         &manifest,
         &endpoints,
         &env,
+        source,
         Path::new("/state/env"),
         true,
         &Default::default(),
     )
     .unwrap();
-    let processes = &graph["processes"];
-    assert_eq!(graph["disable_env_expansion"], true);
+    let node = |name: &str| graph.iter().find(|node| node.name == name).unwrap();
+    let names: Vec<&str> = graph.iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["setup", "prestart", "api", "db", "jobs", "web"]);
+    assert_eq!(node("setup").kind, Kind::Hook);
     assert_eq!(
-        processes["setup"],
-        json!({"command": "(\nbin/rails db:setup\n)\nstatus=$?\nprintf %s \"$status\" > '/state/env/hooks/setup.exit'\nexit \"$status\"",
-            "availability": {"restart": "no"},
-            "depends_on": {"db": {"condition": "process_healthy"}}})
-    );
-    assert_eq!(
-        processes["prestart"]["depends_on"],
-        json!({"db": {"condition": "process_healthy"}, "setup": {"condition": "process_completed_successfully"}})
-    );
-    assert_eq!(processes["db"]["depends_on"], json!({}));
-    assert_eq!(
-        processes["web"]["depends_on"],
-        json!({"db": {"condition": "process_healthy"}, "prestart": {"condition": "process_completed_successfully"}})
-    );
-    assert_eq!(processes["web"]["environment"], json!(["PORT=21000"]));
-    assert!(
-        processes["web"].get("readiness_probe").is_none(),
-        "nothing waits for web, so Process Compose never probes it"
+        node("setup").program,
+        Program::Shell("(\nbin/rails db:setup\n)\nstatus=$?\nprintf %s \"$status\" > '/state/env/hooks/setup.exit'\nexit \"$status\"".into())
     );
     assert_eq!(
-        processes["db"]["readiness_probe"]["exec"]["command"],
-        "pg_isready -h 127.0.0.1 -p \"$PARCELA_PORT_DB\""
+        node("setup").depends_on,
+        [("db".into(), Condition::Healthy)]
     );
     assert_eq!(
-        processes["api"]["environment"],
-        json!(["PORT=21001", "API_NAME=api-signup"])
+        node("prestart").depends_on,
+        [
+            ("db".into(), Condition::Healthy),
+            ("setup".into(), Condition::Completed)
+        ]
     );
-    assert_eq!(processes["api"]["working_dir"], "api");
+    assert!(node("db").depends_on.is_empty());
+    assert_eq!(
+        node("web").depends_on,
+        [
+            ("db".into(), Condition::Healthy),
+            ("prestart".into(), Condition::Completed)
+        ]
+    );
+    assert_eq!(node("web").env["PORT"], "21000");
+    assert!(!node("db").env.contains_key("PORT"));
+    assert_eq!(
+        node("web").probe,
+        Some(Probe::Http {
+            port: 21000,
+            host: "web.localhost".into(),
+            path: "/up".into()
+        })
+    );
+    assert_eq!(
+        node("db").probe,
+        Some(Probe::Exec(
+            "pg_isready -h 127.0.0.1 -p \"$PARCELA_PORT_DB\"".into()
+        ))
+    );
+    assert_eq!(node("api").env["PORT"], "21001");
+    assert_eq!(node("api").env["API_NAME"], "api-signup");
+    assert_eq!(node("api").working_dir, source.join("api"));
+    assert_eq!(node("web").working_dir, source);
 
-    let graph = compose_graph(
+    let graph = plan(
         &manifest,
         &endpoints,
         &env,
+        source,
         Path::new("/state/env"),
         false,
         &Default::default(),
     )
     .unwrap();
-    assert!(graph["processes"].get("setup").is_none());
-    assert_eq!(
-        graph["processes"]["prestart"]["depends_on"],
-        json!({"db": {"condition": "process_healthy"}})
-    );
+    assert!(graph.iter().all(|node| node.name != "setup"));
+    assert_eq!(graph[0].depends_on, [("db".to_owned(), Condition::Healthy)]);
 }
 
 #[test]
@@ -303,20 +326,26 @@ fn sharing_publishers_join_the_graph_and_retry() {
         "parcela-tailscale-web".to_owned(),
         "tailscale serve --https=443 http://127.0.0.1:21000".to_owned(),
     )]);
-    let graph = compose_graph(
+    let graph = plan(
         &manifest,
         &[],
         &BTreeMap::from([("PARCELA_ENVIRONMENT_NAME".to_owned(), "signup".to_owned())]),
+        Path::new("/src/shop"),
         Path::new("/state/env"),
         false,
         &shared,
     )
     .unwrap();
+    let publisher = graph
+        .iter()
+        .find(|node| node.name == "parcela-tailscale-web")
+        .unwrap();
+    assert_eq!(publisher.kind, Kind::Publisher);
     assert_eq!(
-        graph["processes"]["parcela-tailscale-web"],
-        json!({"command": "tailscale serve --https=443 http://127.0.0.1:21000",
-            "availability": {"restart": "on_failure", "backoff_seconds": 1, "max_restarts": 10}})
+        publisher.program,
+        Program::Shell("tailscale serve --https=443 http://127.0.0.1:21000".into())
     );
+    assert_eq!(publisher.max_restarts, 10);
 }
 
 #[test]

@@ -49,7 +49,7 @@ The finished files are [parcela.yaml](https://github.com/davafons/parcela/blob/m
 
 ## Assumptions
 
-You need macOS or Linux, Python 3 and Git. The example app is plain Python, so there is nothing else to install. You don't need to know Caddy or Process Compose. Parcela drives them for you.
+You need macOS or Linux, Python 3 and Git. The example app is plain Python, so there is nothing else to install. You don't need to know Caddy, which serves HTTPS. Parcela drives it for you.
 
 ## Install Parcela
 
@@ -57,7 +57,7 @@ You need macOS or Linux, Python 3 and Git. The example app is plain Python, so t
 curl -fsSL https://parcela.davafons.com/install.sh | sh
 ```
 
-It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.com), which serves HTTPS, and [Process Compose](https://f1bonacc1.github.io/process-compose/), which runs your processes, unless a supported version is already on your `PATH`. `sh -s -- --help` lists its options. With Homebrew instead:
+It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.com), which serves HTTPS, unless a supported version is already on your `PATH`. `sh -s -- --help` lists its options. With Homebrew instead:
 
 ```sh
 brew install davafons/tap/parcela
@@ -81,13 +81,12 @@ parcela doctor
 ```
 
 ```text
-✓ process-compose  v1.122.0 at /opt/homebrew/bin/process-compose
-✓ caddy            v2.11.7 at /opt/homebrew/bin/caddy
-✓ lsof             /usr/sbin/lsof
-✓ ps               /bin/ps
-✗ config           no parcela.yaml in /Users/you/code/hello or above
-✓ state            /Users/you/.local/state/parcela (private)
-✓ proxy            not running; `parcela up` starts it on HTTPS on :1443
+✓ caddy   v2.11.7 at /opt/homebrew/bin/caddy
+✓ lsof    /usr/sbin/lsof
+✓ ps      /bin/ps
+✗ config  no parcela.yaml in /Users/you/code/hello or above
+✓ state   /Users/you/.local/state/parcela (private)
+✓ proxy   not running; `parcela up` starts it on HTTPS on :1443
 · HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.
 
 Next step: parcela init

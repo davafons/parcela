@@ -207,7 +207,7 @@ fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
                 .collect();
             candidates.push((
                 session,
-                record.supervisor.pid,
+                record.roots(),
                 endpoints,
                 record.share.lan,
                 wildcard,
@@ -218,10 +218,10 @@ fn routes(registry: &Registry, router: &Router) -> Result<Vec<Route>> {
         |(_, _, endpoints, _, _)| endpoints.iter().map(|endpoint| endpoint.backend_port),
     ))?;
     let mut routes = Vec::new();
-    for (session, supervisor, endpoints, lan, wildcard) in candidates {
+    for (session, roots, endpoints, lan, wildcard) in candidates {
         let owned = endpoints.iter().all(|endpoint| {
             listeners
-                .owned(endpoint.backend_port, supervisor)
+                .owned(endpoint.backend_port, &roots)
                 .is_ok_and(|pids| !pids.is_empty())
         });
         if owned {

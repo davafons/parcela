@@ -2,13 +2,16 @@
 
 ## Unreleased
 
+Parcela runs each environment's processes itself, so Process Compose is no longer needed; only Caddy is. `parcela.yaml` does not change. Run `parcela down --all-projects` before upgrading: environments started by 0.3 or earlier cannot be stopped or taken over by 0.4.
+
 ### Added
 
 - `up --lan` and `up --tailscale` (and `restart`) also serve one environment to other devices: at `.local` names on the LAN through mDNS, or on the tailnet through `tailscale serve`. `PARCELA_SHARE_HOSTS` lists the shared hostnames for a dev server's host check.
 - Colors on a terminal: help, errors, and a color per process in `parcela logs`. `NO_COLOR` turns them off.
 - `hooks.teardown` runs on `parcela rm`, for example to drop the environment's database. A failed teardown keeps the environment registered.
-- `install.sh` also installs Caddy and Process Compose into `~/.local/bin` when no supported version is on `PATH`, checking each download against its release checksums. It checks Parcela's own download the same way, on macOS too, prints how to add `~/.local/bin` to `PATH` instead of editing shell profiles, and lists the files it wrote. `--help` lists its options.
+- `install.sh` also installs Caddy into `~/.local/bin` when no supported version is on `PATH`, checking the download against its release checksums. It checks Parcela's own download the same way, on macOS too, prints how to add `~/.local/bin` to `PATH` instead of editing shell profiles, and lists the files it wrote. `--help` lists its options.
 - `parcela logs --follow` streams new lines from every process, or one.
+- `parcela logs` works after `down` too, until the next run: each process writes to `log/processes/<name>.log` in the runtime directory, cut to `<name>.log.1` past 16 MB.
 - Nightly builds of `main`: `install.sh --nightly` installs the newest one. Builds other than a release tag report the commit in `--version`, like `0.3.0+20261019.4fed620`.
 - The first `up` in a terminal trusts Parcela's certificate authority when it is not trusted yet, behind the system password prompt, once per authority. Never without a terminal; `PARCELA_NO_TRUST=1` turns it off.
 - `parcela proxy install` on macOS makes URLs portless (`https://hello.localhost`): launchd owns 127.0.0.1:443 and relays each connection to the proxy as you. `uninstall` removes it.
@@ -18,6 +21,9 @@
 
 ### Changed
 
+- Parcela supervises the processes: each runs with `bash -c` (or `sh -c`) in its own process group, starts once its dependencies are ready, and stops in reverse dependency order, SIGTERM then SIGKILL after 10 seconds. Until the environment is first ready, a failed hook, an exited HTTP service or a process that exits nonzero stops `up` at once and names it, instead of waiting for the readiness timeout. Foreground `up` prefixes each line with its process's name.
+- If an owner dies, the next `up`, `down` or `recover` adopts its processes by their recorded birth identity, and `down` stops ones that outlived it instead of refusing.
+- Removed: the hidden `--process-compose` option, `parcela doctor`'s Process Compose check, and `child_pid` in `status --json`.
 - The proxy listens on one HTTPS port, and URLs leave it out when it is 443. The forwarded "standard ports" mode and its port-80 listener are gone. `--port` accepts any port the system lets a normal user listen on.
 - If the proxy dies while environments run, they start it again within a few seconds. `parcela proxy stop` still stops it for good.
 - `restart` picks up added, removed and renamed services; `down` and `up` are no longer needed for that.
@@ -28,8 +34,7 @@
 ### Fixed
 
 - `parcela proxy install` refuses a user name that could change the launchd service it installs.
-- Process Compose probes only services that another service or hook waits for, so health checks no longer fill every HTTP service's log.
-- Errors that show `owner.log` lines no longer include Process Compose's terminal-title escape.
+- Readiness checks stop once a service is ready, so they no longer fill its log.
 - `--backend-port` also refuses a port another program holds on `0.0.0.0` or `[::]`, naming the holder before anything starts.
 - Long branch and workspace names are cut to fit a hostname, ending in a short hash, instead of failing `up`.
 - An `up` interrupted or killed before it launched anything no longer leaves the environment stuck as starting: Ctrl-C during startup stops it cleanly, and the next `up` or `down` releases its ports.

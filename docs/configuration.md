@@ -70,7 +70,7 @@ services:
 
 | Field | Meaning |
 |---|---|
-| `command` | Required. A shell command, run from the checkout root. |
+| `command` | Required. A shell command, run with `bash -c` (`sh -c` where there is no bash) from the checkout root. Its output goes to `parcela logs`. |
 | `http` | Makes the service reachable at an HTTPS URL. See below. |
 | `healthcheck` | For services without `http`: a shell command that exits 0 once the service is ready, like `pg_isready`. |
 | `depends_on` | Services to start first. Parcela waits until each one is ready: its HTTP healthcheck answers, its `healthcheck` passes, or, without either, it has started. |
@@ -124,7 +124,7 @@ hooks:
 | `prestart` | On every `up` and `restart`, after `setup`. Run migrations or anything that must happen before the app starts. |
 | `teardown` | On `parcela rm`, after the environment stopped. Drop its database or delete data outside the checkout. It cannot use `depends_on`. For a checkout that is already gone, it runs from `PARCELA_RUNTIME_DIR` with the configuration of the last successful run. |
 
-`setup` and `prestart` take a `command` and an optional `depends_on`. On `up`, Parcela starts the hooks' `depends_on` services, waits until they are ready, runs `setup` if it is due, then `prestart`, then starts every other service. A hook that exits nonzero stops `up` with its exit code and output, and no other service starts. While the environment runs, `parcela logs setup` shows a hook's output again.
+`setup` and `prestart` take a `command` and an optional `depends_on`. On `up`, Parcela starts the hooks' `depends_on` services, waits until they are ready, runs `setup` if it is due, then `prestart`, then starts every other service. A hook that exits nonzero stops `up` with its exit code and output, and no other service starts. `parcela logs setup` shows a hook's output again, until the next run.
 
 A setup that fails runs again on the next `up`. Write it so it can run twice, like `bin/rails db:prepare` or `CREATE TABLE IF NOT EXISTS`.
 
@@ -265,7 +265,7 @@ Every service, hook and task receives these. Service names are uppercased, with 
 |---|---|
 | `~/.local/state/parcela/` | All of Parcela's state. Override it with `--state-dir`, `PARCELA_STATE_DIR` or `XDG_STATE_HOME`. |
 | `…/registry.sqlite3` | Projects, environments, names and port leases. |
-| `…/environments/<id>/` | One environment's `PARCELA_RUNTIME_DIR`: `data`, `tmp`, `cache`, `log/owner.log` and Parcela's own records. |
+| `…/environments/<id>/` | One environment's `PARCELA_RUNTIME_DIR`: `data`, `tmp`, `cache`, `log/owner.log`, each process's `log/processes/<name>.log` and Parcela's own records. |
 | `…/proxy/` | The proxy's Caddy config, `proxy.log` and the local certificate authority. |
 | `/tmp/parcela-<uid>/` | Unix sockets for the running environments and the proxy. |
 

@@ -20,10 +20,6 @@ pub enum Action {
     Status,
     Stop,
     Services,
-    Logs {
-        service: Option<String>,
-        tail: usize,
-    },
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -54,7 +50,6 @@ pub struct LiveStatus {
     #[serde(default)]
     pub route_published: bool,
     pub owner_pid: u32,
-    pub child_pid: u32,
     pub listener_pids: Vec<u32>,
     #[serde(default)]
     pub endpoints: std::collections::BTreeMap<String, EndpointHealth>,
@@ -122,6 +117,26 @@ pub struct Server {
     device: u64,
     inode: u64,
 }
+/// Removes an owner's control socket that nothing listens on any more. Only for a caller that
+/// holds the environment's ownership lock, so no owner can be binding it at the same time.
+pub fn remove_dead(runtime: &Path) -> Result<()> {
+    let path = crate::sockets::environment(runtime)?.control;
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        return Ok(());
+    };
+    // SAFETY: getuid has no pointers or failure case.
+    ensure!(
+        metadata.file_type().is_socket() && metadata.uid() == unsafe { libc::getuid() },
+        "unexpected file at the owner control socket; no takeover performed"
+    );
+    match UnixStream::connect(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            Ok(fs::remove_file(&path)?)
+        }
+        _ => Ok(()),
+    }
+}
+
 impl Server {
     pub fn bind(runtime: &Path) -> Result<Self> {
         private::directory(runtime)?;

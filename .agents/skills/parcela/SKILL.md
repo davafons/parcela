@@ -5,7 +5,7 @@ description: "Use Parcela to inspect, start, stop, restart or recover named loca
 
 # Parcela
 
-Parcela runs the services in one checkout's `parcela.yaml` and gives each HTTP service its own HTTPS URL. Caddy serves the URLs. Process Compose runs the processes. The project's `parcela.yaml` owns commands, data and anything with external effects.
+Parcela runs the services in one checkout's `parcela.yaml` and gives each HTTP service its own HTTPS URL. Caddy serves the URLs. Parcela runs the processes. The project's `parcela.yaml` owns commands, data and anything with external effects.
 
 This skill does not grant permission to start services, process queues, run migrations, change trust or share an environment beyond this machine. Follow the user's authorization and the project's instructions. Do not print credentials, `.env` contents or full process environments.
 

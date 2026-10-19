@@ -207,18 +207,11 @@ pub struct Probes<'a> {
     pub path: &'a Path,
     pub state: &'a Path,
     pub caddy: Option<&'a str>,
-    pub process_compose: Option<&'a str>,
 }
 
 /// Report whether `parcela up` can work here. Read-only: creates no state and changes no host setting.
 pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
     let checks = [
-        backend(
-            "process-compose",
-            probes.process_compose.unwrap_or("process-compose"),
-            "v1.",
-            "install Process Compose 1.x: brew install f1bonacc1/tap/process-compose (or https://f1bonacc1.github.io/process-compose/installation/)",
-        ),
         backend(
             "caddy",
             probes.caddy.unwrap_or("caddy"),

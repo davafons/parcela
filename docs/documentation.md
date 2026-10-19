@@ -33,7 +33,7 @@ npm run check --prefix docs/website
 
 That serves `http://127.0.0.1:5173/docs/`. Search does not refresh until you restart it.
 
-`npm run check` builds the site once into `target/docs` at the production base `/docs/`. The build fails on a dead link. The check then confirms that every page has one heading and only existing anchors, that every searchable page is in the search index, that the downloads match their sources and that the rendered Claude skill install block matches `docs/site/worktrees.md`. `tests/test_skill_install.py` runs that block in a sandbox. `scripts/check-live docs-example` runs the Getting started app against real Caddy and Process Compose.
+`npm run check` builds the site once into `target/docs` at the production base `/docs/`. The build fails on a dead link. The check then confirms that every page has one heading and only existing anchors, that every searchable page is in the search index, that the downloads match their sources and that the rendered Claude skill install block matches `docs/site/worktrees.md`. `tests/test_skill_install.py` runs that block in a sandbox. `scripts/check-live docs-example` runs the Getting started app against a real Caddy.
 
 ## Deploy
 

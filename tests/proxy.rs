@@ -305,11 +305,11 @@ impl Drop for Environments<'_> {
 
 #[test]
 fn parallel_ups_in_two_checkouts_start_one_proxy_and_both_urls_answer() {
-    if !["caddy", "process-compose", "curl", "python3"]
+    if !["caddy", "curl", "python3"]
         .iter()
         .all(|program| on_path(program))
     {
-        eprintln!("skipped: needs caddy, process-compose, curl and python3 on PATH");
+        eprintln!("skipped: needs caddy, curl and python3 on PATH");
         return;
     }
     let proxy = Proxy::new();

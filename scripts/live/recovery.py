@@ -1,4 +1,4 @@
-"""Owner, proxy and Process Compose crash, stop and recovery races. Each case runs in its own fixture."""
+"""Owner, proxy and process crash, stop and recovery races. Each case runs in its own fixture."""
 import json
 import os
 from pathlib import Path
@@ -28,6 +28,8 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 root = Path(os.environ['PARCELA_RUNTIME_DIR'])
 def stop(*_):
+    with (root / 'stop-signals').open('a') as log:
+        log.write('TERM\\n')
     (root / 'shutdown-started').write_text('started')
     time.sleep(float(os.environ.get('STOP_DELAY', '0')))
     (root / 'shutdown-completed').write_text('completed')
@@ -78,8 +80,8 @@ def listening(port):
     return bool(listener_pids(port))
 
 class Fixture(Live):
-    def __init__(self, caddy, compose):
-        super().__init__('r', caddy, compose)
+    def __init__(self, caddy):
+        super().__init__('r', caddy)
         self.apps = []
     def cli(self, path, *args, check=False, timeout=25):
         return super().cli(path, *args, check=check, timeout=timeout)
@@ -96,40 +98,44 @@ class Fixture(Live):
         self.apps.append(app)
         self.ports.append(app['port'])
         return app
-    def start(self, app, compose=None):
-        owner = self.spawn(app['path'], 'up', '--process-compose', compose or self.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    def start(self, app):
+        owner = self.spawn(app['path'], 'up', '--backend-port', str(app['port']), '--readiness-timeout', '10')
         app['owner'] = owner
         wait_for(lambda: self.probe(app)[0] == 200)
         return owner
     def start_pending(self, app):
         app['manifest']['env']['READINESS_GATED'] = 'yes'
         (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
-        owner = self.spawn(app['path'], 'up', '--process-compose', self.compose, '--backend-port', str(app['port']), '--readiness-timeout', '30')
+        owner = self.spawn(app['path'], 'up', '--backend-port', str(app['port']), '--readiness-timeout', '30')
         app['owner'] = owner
         def recorded():
             pid = int((app['runtime'] / 'service-started').read_text())
             record = json.loads((app['runtime'] / 'owner.json').read_text())
-            return record['phase'] == 'starting' and record['native']['socket'] and any(process['pid'] == pid for process in record['processes'])
+            return record['phase'] == 'starting' and 'web' in record['children'] and any(process['pid'] == pid for process in record['processes'])
         wait_for(recorded)
         assert self.session(app)['status'] == 'starting'
         assert self.probe(app)[0] == 503
         return owner
-    def gated_compose(self):
-        wrapper = self.root / 'pc-gate'
-        wrapper.write_text('''#!/usr/bin/env python3
+    def gated_ps(self):
+        """An environment whose `ps` pauses once while `gate-enabled` exists: recovery reads the
+        process tree with it right after it takes the ownership lock."""
+        tools = self.root / 'gate-tools'
+        tools.mkdir(exist_ok=True)
+        wrapper = tools / 'ps'
+        wrapper.write_text(f'''#!/usr/bin/env python3
 import os, sys, time
 from pathlib import Path
-root = Path(__file__).parent
-if sys.argv[-1] == 'down':
-    with (root / 'native-stops').open('a') as log:
-        log.write('down\\n')
-if 'list' in sys.argv and (root / 'gate-enabled').exists():
+root = Path({str(self.root)!r})
+if '-A' in sys.argv and (root / 'gate-enabled').exists() and not (root / 'gate-entered').exists():
     (root / 'gate-entered').write_text('entered')
-    time.sleep(1)
-os.execv(''' + repr(self.compose) + ''', [''' + repr(self.compose) + ''', *sys.argv[1:]])
+    time.sleep(.5)
+os.execv({shutil.which('ps')!r}, ['ps', *sys.argv[1:]])
 ''')
         wrapper.chmod(0o700)
-        return str(wrapper)
+        return {**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH']}
+    def stop_signals(self, app):
+        path = app['runtime'] / 'stop-signals'
+        return path.read_text().splitlines() if path.exists() else []
     def session(self, app):
         with sqlite3.connect(f'file:{self.state / "registry.sqlite3"}?mode=ro', uri=True) as db:
             db.row_factory = sqlite3.Row
@@ -146,27 +152,23 @@ os.execv(''' + repr(self.compose) + ''', [''' + repr(self.compose) + ''', *sys.a
                 response.begin()
                 assert response.status == 200
                 return json.loads(response.read())
-    def pc_down(self, app):
-        context = json.loads((app['runtime'] / 'context.json').read_text())
-        assert context['session']['environment_id'] == app['id']
-        token = ['--token-file', str(app['runtime'] / 'pc.token')] if (app['runtime'] / 'pc.token').exists() else []
-        return subprocess.run([self.compose, *token, '--use-uds', '--unix-socket', str(socket_path(app, 'compose')), '--log-file', str(self.root / 'native-client.log'), 'down'],
-                              capture_output=True, text=True, timeout=20)
+    def kill_service(self, app):
+        """Kills an app's service directly, as a crash would, without Parcela."""
+        os.kill(int((app['runtime'] / 'service-started').read_text()), signal.SIGKILL)
+        wait_for(lambda: not listening(app['port']))
     def close(self):
         for app in self.apps:
-            if (app['runtime'] / 'context.json').exists() and socket_path(app, 'compose').exists():
-                try:
-                    self.cli(app['path'], 'down')
-                    if socket_path(app, 'compose').exists(): self.pc_down(app)
+            if (app['runtime'] / 'context.json').exists():
+                try: self.cli(app['path'], 'down')
                 except (OSError, subprocess.TimeoutExpired): pass
         super().close()
         for app in self.apps:
             if (app['runtime'] / 'context.json').exists():
-                for kind in ('control', 'compose'):
-                    path = socket_path(app, kind)
-                    if path.is_socket() and not socket_live(path): path.unlink()
-                try: socket_path(app, 'control').parent.rmdir()
+                path = socket_path(app, 'control')
+                if path.is_socket() and not socket_live(path): path.unlink()
+                try: path.parent.rmdir()
                 except OSError: pass
+
 
 def owner_crash(f):
     app = f.app('crash')
@@ -207,11 +209,11 @@ def graceful_stop(f):
     down = f.cli(app['path'], 'down')
     assert down.returncode == 0, down.stderr
     assert f.session(app)['status'] == 'stopped'
-    assert (app['runtime'] / 'shutdown-completed').exists(), 'stop success requires completed native shutdown'
+    assert (app['runtime'] / 'shutdown-completed').exists(), 'stop success requires a completed service shutdown'
     assert not listener_pids(app['port']), 'stop success must not leave a supervised listener'
-    assert not socket_path(app, 'compose').exists(), 'normal shutdown must remove its native socket'
+    assert not socket_path(app, 'control').exists(), 'normal shutdown must remove its control socket'
     assert owner.wait(timeout=5) == 0
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    retry = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
     return {'down_exit': down.returncode, 'shutdown_completed': True, 'subsequent_up_exit': retry.returncode}
 
@@ -235,7 +237,8 @@ def restart_preflight(f):
     f.start_proxy()
     owner = f.start(app)
     original = f.session(app)
-    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', '/nonexistent/parcela-review-compose')
+    # An absent LAN address fails the replacement's preflight.
+    restart = f.cli(app['path'], 'restart', '--detach', '--lan-ip', '192.0.2.1')
     assert restart.returncode != 0
     assert owner.poll() is None, 'failed replacement preflight must preserve the original owner'
     assert f.session(app)['token'] == original['token']
@@ -299,7 +302,7 @@ def up_recovers_surviving_graph(f):
     service = json.loads(f.probe(app)[1])
     owner.kill()
     owner.wait(timeout=5)
-    recovered = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    recovered = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']))
     assert recovered.returncode == 0, recovered.stderr
     assert 'taking back control of its running services' in recovered.stderr, recovered.stderr
     result = json.loads(recovered.stdout)
@@ -310,7 +313,7 @@ def up_recovers_surviving_graph(f):
     status = json.loads(f.cli(app['path'], 'status').stdout)
     assert status['state'] == 'ready' and [process['name'] for process in status['processes']] == ['web'], status
     assert status['processes'][0]['state'] == 'running' and status['processes'][0]['pid'], status
-    duplicate = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    duplicate = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']))
     assert duplicate.returncode == 0 and json.loads(duplicate.stdout)['already_running'], duplicate.stderr
     assert f.session(app)['token'] == before['token'] and json.loads(f.probe(app)[1])['pid'] == service['pid'], 'a live owner is never replaced'
     down = f.cli(app['path'], 'down')
@@ -326,7 +329,7 @@ def up_foreground_recovers_surviving_graph(f):
     service = json.loads(f.probe(app)[1])
     owner.kill()
     owner.wait(timeout=5)
-    recovered = f.spawn(app['path'], 'up', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    recovered = f.spawn(app['path'], 'up', '--backend-port', str(app['port']))
     def reattached():
         live = json.loads(f.cli(app['path'], 'status').stdout)['live']
         return live and live['owner_pid'] == recovered.pid and live['state'] == 'ready'
@@ -355,24 +358,6 @@ def guardian_death(f):
     wait_for(lambda: f.probe(app)[0] == 200)
     assert f.session(app)['token'] == original['token']
     return {'lease_expired_without_guardian': True, 'existing_caddy_recovered': True, 'application_preserved': True}
-
-def wrong_native_token(f):
-    app = f.app('auth')
-    f.start_proxy()
-    owner = f.start(app)
-    owner.kill()
-    owner.wait(timeout=5)
-    token = app['runtime'] / 'pc.token'
-    original = token.read_text()
-    try:
-        token.write_text('wrong-test-token')
-        down = f.cli(app['path'], 'down')
-        assert down.returncode != 0 and listening(app['port']), 'failed authentication must not stop or adopt the graph'
-        detached = f.cli(app['path'], 'recover', '--detach')
-        assert detached.returncode != 0 and listening(app['port']), 'detached recovery must not bypass live native authentication'
-    finally:
-        token.write_text(original)
-    return {'unauthenticated_recovery_refused': True, 'service_preserved': True}
 
 def interrupted_stop(f):
     app = f.app('interrupted', delay=3)
@@ -405,30 +390,30 @@ def ongoing_stop_retry(f):
     wait_for(lambda: (app['runtime'] / 'shutdown-started').exists())
     owner.kill()
     owner.wait(timeout=5)
-    assert not (app['runtime'] / 'shutdown-completed').exists(), 'retry must start while native shutdown is ongoing'
+    assert not (app['runtime'] / 'shutdown-completed').exists(), 'retry must start while the service is still stopping'
     assert listening(app['port']), 'fixture graph must still be running at retry'
     retry = f.cli(app['path'], 'down')
     assert retry.returncode == 0, retry.stderr
-    assert (app['runtime'] / 'shutdown-completed').exists(), 'successful retry must await native shutdown'
+    assert (app['runtime'] / 'shutdown-completed').exists(), 'successful retry must await the service shutdown'
     assert not listening(app['port'])
     assert f.session(app)['status'] == 'stopped'
     assert f.session(app)['token'] == session['token']
     assert f.probe(app)[0] == 503
-    return {'retry_during_native_shutdown_exit': 0, 'shutdown_completed': True, 'generation_preserved': True}
+    return {'retry_during_shutdown_exit': 0, 'shutdown_completed': True, 'generation_preserved': True}
 
 
 def concurrent_crash_stop(f):
     app = f.app('election', delay=2)
-    wrapper = f.gated_compose()
+    gated = f.gated_ps()
     f.start_proxy()
-    owner = f.start(app, str(wrapper))
+    owner = f.start(app)
     session = f.session(app)
     owner.kill()
     owner.wait(timeout=5)
     (f.root / 'gate-enabled').write_text('enabled')
-    first = f.spawn(app['path'], 'down')
+    first = f.spawn(app['path'], 'down', env=gated)
     wait_for(lambda: (f.root / 'gate-entered').exists())
-    second = f.spawn(app['path'], 'down')
+    second = f.spawn(app['path'], 'down', env=gated)
     first_code = first.wait(timeout=20)
     second_code = second.wait(timeout=20)
     first_log = (f.root / f'child-{f.children.index(first)}.log').read_text()
@@ -439,8 +424,8 @@ def concurrent_crash_stop(f):
     assert f.session(app)['token'] == session['token']
     assert (app['runtime'] / 'shutdown-completed').exists()
     assert not listening(app['port'])
-    assert (f.root / 'native-stops').read_text().splitlines() == ['down'], 'only the elected controller may request native shutdown'
-    return {'first_recovery_exit': first_code, 'contending_recovery_exit': second_code, 'same_generation_stopped': True, 'native_stop_requests': 1}
+    assert f.stop_signals(app) == ['TERM'], 'only the elected controller may stop the service'
+    return {'first_recovery_exit': first_code, 'contending_recovery_exit': second_code, 'same_generation_stopped': True, 'stop_signals': 1}
 
 
 def recover_before_readiness(f):
@@ -460,7 +445,7 @@ def recover_before_readiness(f):
     assert f.probe(app)[0] == 503, 'recovery must not advertise an unready service'
     (app['runtime'] / 'allow-ready').write_text('ready')
     wait_for(lambda: f.probe(app)[0] == 200)
-    assert json.loads(f.probe(app)[1])['pid'] == pid, 'recovery must not replay the native service'
+    assert json.loads(f.probe(app)[1])['pid'] == pid, 'recovery must not replay the service'
     assert f.session(app)['token'] == session['token']
     return {'pre_readiness_controller_recovered': True, 'unready_route': 503, 'service_pid_preserved': True}
 
@@ -483,70 +468,57 @@ def stop_before_readiness(f):
 
 
 def allocation_without_launch_evidence(f):
+    """A run whose owner died after leasing ports and before saving its record, which it does
+    before starting any process: no record and nothing running."""
     app = f.app('allocation')
     marker = app['path'] / 'owned-source-data'
     marker.write_text('preserve allocation fixture')
-    wrapper = f.root / 'pc-allocation-gate'
-    wrapper.write_text('''#!/usr/bin/env python3
-import os, sys, time
-from pathlib import Path
-root = Path(__file__).parent
-if sys.argv[1:] == ['version'] and Path(''' + repr(str(app['runtime'] / 'context.json')) + ''').exists() and (root / 'gate-enabled').exists():
-    (root / 'gate-entered').write_text('before graph launch')
-    deadline = time.monotonic() + 2
-    while (root / 'gate-enabled').exists() and time.monotonic() < deadline:
-        time.sleep(.01)
-os.execv(''' + repr(f.compose) + ''', [''' + repr(f.compose) + ''', *sys.argv[1:]])
-''')
-    wrapper.chmod(0o700)
     f.start_proxy()
-    (f.root / 'gate-enabled').write_text('enabled')
-    owner = f.spawn(app['path'], 'up', '--process-compose', str(wrapper), '--backend-port', str(app['port']))
-    wait_for(lambda: (f.root / 'gate-entered').exists())
+    owner = f.start_pending(app)
     session = f.session(app)
-    assert session['status'] == 'starting' and not (app['runtime'] / 'owner.json').exists()
     owner.kill()
     owner.wait(timeout=5)
-    (f.root / 'gate-enabled').unlink()
-    assert not (app['runtime'] / 'launched').exists(), 'the owner died before launching a child'
+    f.kill_service(app)
+    (app['runtime'] / 'owner.json').unlink()
+    assert f.session(app)['status'] == 'starting'
     down = f.cli(app['path'], 'down')
     assert down.returncode == 0, down.stderr
     assert f.session(app)['token'] == session['token'] and f.session(app)['status'] == 'stopped'
     assert marker.read_text() == 'preserve allocation fixture'
-    assert not socket_path(app, 'compose').exists() and not listening(app['port'])
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    (app['runtime'] / 'allow-ready').write_text('ready')
+    retry = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']))
     assert retry.returncode == 0, retry.stderr
     assert f.probe(app)[0] == 200
     assert f.cli(app['path'], 'down').returncode == 0
-    return {'unlaunched_allocation_released': True, 'retry_exit': 0, 'source_data_preserved': True}
+    return {'unrecorded_allocation_released': True, 'retry_exit': 0, 'source_data_preserved': True}
 
 
 def recover_racing_stop(f):
     app = f.app('mixed')
-    wrapper = f.gated_compose()
+    gated = f.gated_ps()
     f.start_proxy()
-    owner = f.start(app, wrapper)
+    owner = f.start(app)
     session = f.session(app)
     pid = (app['runtime'] / 'service-started').read_text()
     owner.kill()
     owner.wait(timeout=5)
     (f.root / 'gate-enabled').write_text('enabled')
-    recovered = f.spawn(app['path'], 'recover')
+    recovered = f.spawn(app['path'], 'recover', env=gated)
     wait_for(lambda: (f.root / 'gate-entered').exists())
     stopper = f.spawn(app['path'], 'down')
     try:
-        stop_code = stopper.wait(timeout=10)
+        stop_code = stopper.wait(timeout=15)
         stop_log = (f.root / f'child-{f.children.index(stopper)}.log').read_text()
         assert stop_code == 0, stop_log
         assert recovered.wait(timeout=5) == 0
         assert f.session(app)['status'] == 'stopped'
         assert f.session(app)['token'] == session['token']
-        assert (app['runtime'] / 'service-started').read_text() == pid
-        assert (f.root / 'native-stops').read_text().splitlines() == ['down']
+        assert (app['runtime'] / 'service-started').read_text() == pid, 'recovery must not replay the service'
+        assert f.stop_signals(app) == ['TERM']
         assert not listening(app['port'])
     finally:
         (f.root / 'gate-enabled').unlink()
-    return {'mixed_stop_exit': 0, 'recovery_controller_exit': 0, 'native_stop_requests': 1, 'no_service_replay': True}
+    return {'mixed_stop_exit': 0, 'recovery_controller_exit': 0, 'stop_signals': 1, 'no_service_replay': True}
 
 
 def completed_stop_receipt(f):
@@ -567,51 +539,27 @@ def completed_stop_receipt(f):
     return {'completed_receipt_reconciled': True, 'retry_exit': 0}
 
 
-def replaced_native_socket(f):
-    app = f.app('socket')
-    f.start_proxy()
-    owner = f.start(app)
-    owner.kill()
-    owner.wait(timeout=5)
-    path = socket_path(app, 'compose')
-    retained = app['runtime'] / 'retained.sock'
-    path.rename(retained)
-    try:
-        with socket.socket(socket.AF_UNIX) as foreign:
-            foreign.bind(str(path))
-            foreign.listen()
-            inode = path.stat().st_ino
-            down = f.cli(app['path'], 'down')
-            assert down.returncode != 0, 'replaced native socket must not authorize shutdown'
-            assert path.stat().st_ino == inode, 'foreign socket must be preserved'
-            assert listening(app['port']), 'original graph must not be signaled'
-            assert socket_path(app, 'control').exists(), 'refusal must preserve original control evidence'
-            wait_for(lambda: f.probe(app)[0] == 503)
-    finally:
-        path.unlink()
-        retained.rename(path)
-    return {'replacement_refused': True, 'foreign_socket_preserved': True, 'original_graph_preserved': True}
-
-
 def replaced_process_birth(f):
+    """A recorded identity that no longer matches its pid is not this run's process: recovery
+    never signals it, and the run counts as gone."""
     app = f.app('birth')
     f.start_proxy()
     owner = f.start(app)
     owner.kill()
     owner.wait(timeout=5)
     path = app['runtime'] / 'owner.json'
-    original = path.read_bytes()
-    record = json.loads(original)
-    record['supervisor']['birth'] += 1
-    try:
-        path.write_text(json.dumps(record))
-        down = f.cli(app['path'], 'down')
-        assert down.returncode != 0, 'mismatched birth must not authorize native shutdown'
-        assert listening(app['port']), 'mismatched process identity must not be signaled'
-        wait_for(lambda: f.probe(app)[0] == 503)
-    finally:
-        path.write_bytes(original)
-    return {'mismatched_birth_refused': True, 'graph_preserved': True}
+    record = json.loads(path.read_text())
+    record['children']['web']['identity']['birth'] += 1
+    for process in record['processes']:
+        process['birth'] += 1
+    path.write_text(json.dumps(record))
+    down = f.cli(app['path'], 'down')
+    assert down.returncode == 0, down.stderr
+    assert listening(app['port']), 'a mismatched process identity must not be signaled'
+    assert f.stop_signals(app) == []
+    wait_for(lambda: f.probe(app)[0] == 503)
+    f.kill_service(app)
+    return {'mismatched_birth_not_signaled': True, 'route_withdrawn': True}
 
 
 def long_stream_lease(f):
@@ -651,7 +599,7 @@ def occupied_replacement_port(f):
         foreign.bind(('127.0.0.1', 0))
         foreign.listen()
         port = foreign.getsockname()[1]
-        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(port))
+        restart = f.cli(app['path'], 'restart', '--detach', '--backend-port', str(port))
         assert restart.returncode != 0
         assert owner.poll() is None, 'occupied replacement preflight must preserve original owner'
         assert f.session(app)['token'] == original['token']
@@ -667,7 +615,7 @@ def invalid_replacement_port(f):
     owner = f.start(app)
     original = f.session(app)
     for port in [0, 80, f.https]:
-        restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(port))
+        restart = f.cli(app['path'], 'restart', '--detach', '--backend-port', str(port))
         assert restart.returncode != 0, f'invalid replacement port {port} must be refused'
         assert owner.poll() is None, f'invalid replacement port {port} stopped original owner'
         assert f.session(app)['token'] == original['token']
@@ -679,7 +627,7 @@ def restart_owned_port(f):
     f.start_proxy()
     owner = f.start(app)
     original = f.session(app)
-    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']))
+    restart = f.cli(app['path'], 'restart', '--detach', '--backend-port', str(app['port']))
     assert restart.returncode == 0, restart.stderr
     assert owner.wait(timeout=5) == 0
     current = f.session(app)
@@ -698,10 +646,9 @@ def leased_replacement_port(f):
     original = f.session(app)
     other_owner.kill()
     other_owner.wait(timeout=5)
-    assert f.pc_down(other).returncode == 0
-    wait_for(lambda: not listening(other['port']))
+    f.kill_service(other)
     assert f.session(other)['status'] != 'stopped'
-    restart = f.cli(app['path'], 'restart', '--detach', '--process-compose', f.compose, '--backend-port', str(other['port']))
+    restart = f.cli(app['path'], 'restart', '--detach', '--backend-port', str(other['port']))
     assert restart.returncode != 0
     assert owner.poll() is None, 'reserved replacement must preserve original owner'
     assert f.session(app)['token'] == original['token']
@@ -785,7 +732,6 @@ def detached_stopped_recovery(f, finish_first):
     if finish_first:
         wait_for(lambda: (app['runtime'] / 'shutdown-completed').exists())
         wait_for(lambda: not listening(app['port']))
-        wait_for(lambda: f.pc_down(app).returncode != 0)
     recover = f.cli(app['path'], 'recover', '--detach', timeout=25)
     assert recover.returncode == 0, recover.stderr
     result = json.loads(recover.stdout)
@@ -811,7 +757,7 @@ def crash_whole_tree(f, app):
         try: os.kill(process['pid'], signal.SIGKILL)
         except ProcessLookupError: pass
     wait_for(lambda: not listening(app['port']))
-    assert socket_path(app, 'compose').exists() and socket_path(app, 'control').exists(), 'a crash leaves stale sockets'
+    assert socket_path(app, 'control').exists(), 'a crash leaves a stale control socket'
     assert f.session(app)['status'] == 'ready'
     return before
 
@@ -823,9 +769,9 @@ def crashed_tree_down(f):
     assert json.loads(first.stdout)['state'] == 'stopped'
     second = f.cli(app['path'], 'down')
     assert second.returncode == 0 and json.loads(second.stdout)['already_stopped'] is True, second.stderr
-    assert not socket_path(app, 'compose').exists() and not socket_path(app, 'control').exists()
+    assert not socket_path(app, 'control').exists()
     assert f.probe(app)[0] == 503
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    retry = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
     after = f.session(app)
     assert after['generation'] == before['generation'] + 1 and after['status'] == 'ready'
@@ -836,7 +782,7 @@ def crashed_tree_down(f):
 def crashed_tree_up(f):
     app = f.app('crashup')
     before = crash_whole_tree(f, app)
-    retry = f.cli(app['path'], 'up', '--detach', '--process-compose', f.compose, '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    retry = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']), '--readiness-timeout', '10')
     assert retry.returncode == 0, retry.stderr
     after = f.session(app)
     assert after['generation'] == before['generation'] + 1 and after['status'] == 'ready'
@@ -845,15 +791,15 @@ def crashed_tree_up(f):
     return {'up_after_crash_exit': 0, 'next_generation': after['generation'], 'https_code': 200}
 
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
-         recover_surviving_graph, up_recovers_surviving_graph, up_foreground_recovers_surviving_graph, guardian_death, wrong_native_token, interrupted_stop, completed_stop_receipt,
-         replaced_native_socket, replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
+         recover_surviving_graph, up_recovers_surviving_graph, up_foreground_recovers_surviving_graph, guardian_death, interrupted_stop, completed_stop_receipt,
+         replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
          recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop,
          occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
          detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization,
          crashed_tree_down, crashed_tree_up]
 
 
-def run(caddy, compose, cases=None):
+def run(caddy, cases=None):
     os.umask(0o077)
     selected = [case for case in CASES if not cases or case.__name__ in cases]
     assert selected, f'no recovery case matches {cases}'
@@ -861,7 +807,7 @@ def run(caddy, compose, cases=None):
     for case in selected:
         record = {'case': case.__name__}
         try:
-            with Fixture(caddy, compose) as fixture:
+            with Fixture(caddy) as fixture:
                 record['fixture'] = str(fixture.root)
                 record['evidence'] = case(fixture)
         except Exception:

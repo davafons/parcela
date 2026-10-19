@@ -38,7 +38,7 @@ shop     signup   ready  https://signup-shop.localhost:1443
 shop     primary  ready  https://shop.localhost:1443
 ```
 
-No Docker and no root. Parcela coordinates [Caddy](https://caddyserver.com) for HTTPS and routing and [Process Compose](https://f1bonacc1.github.io/process-compose/) for the processes.
+No Docker and no root. Parcela runs the processes itself and uses [Caddy](https://caddyserver.com) for HTTPS and routing.
 
 ## Install
 
@@ -46,7 +46,7 @@ No Docker and no root. Parcela coordinates [Caddy](https://caddyserver.com) for 
 curl -fsSL https://parcela.davafons.com/install.sh | sh
 ```
 
-It also installs Caddy and Process Compose into `~/.local/bin` when they are missing, checking each download against its release checksums, and never uses `sudo`. With Homebrew: `brew install davafons/tap/parcela`. From source: `cargo install --git https://github.com/davafons/parcela --locked`. Builds cover macOS and Linux.
+It also installs Caddy into `~/.local/bin` when it is missing, checking each download against its release checksums, and never uses `sudo`. With Homebrew: `brew install davafons/tap/parcela`. From source: `cargo install --git https://github.com/davafons/parcela --locked`. Builds cover macOS and Linux.
 
 ## Quickstart
 

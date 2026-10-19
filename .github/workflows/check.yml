@@ -19,10 +19,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install jj, Caddy and Process Compose
+      - name: Install jj and Caddy
         run: scripts/ci-tools
       - run: scripts/check
-      - name: Live suites against real Caddy and Process Compose
+      - name: Live suites against real Caddy
         # docs-example runs the docs' `python3 -m http.server`, which waits on a reverse DNS
         # lookup that intermittently takes 35s on GitHub's macOS runners.
         run: scripts/check-live ${{ matrix.os == 'macos-latest' && 'core service-sets ports recovery' || '' }}

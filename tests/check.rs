@@ -46,10 +46,7 @@ fn up_and_doctor_report_the_same_configuration_error() {
         let path = t.path().canonicalize().unwrap();
         fs::write(path.join("parcela.yaml"), format!("{head}{services}")).unwrap();
         let expected = expected.replace("{path}", &path.display().to_string());
-        let up = parcela(
-            &path,
-            &["up", "--process-compose", "/nonexistent/process-compose"],
-        );
+        let up = parcela(&path, &["up", "--backend-port", "1443"]);
         assert_eq!(up.status.code(), Some(1), "{services}");
         assert_eq!(
             String::from_utf8(up.stderr).unwrap(),

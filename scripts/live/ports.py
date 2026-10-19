@@ -24,8 +24,8 @@ tasks:
 '''
 
 
-def run(caddy, compose, **_):
-    with Live('ports', caddy, compose) as live:
+def run(caddy, **_):
+    with Live('ports', caddy) as live:
         cases, runs = [], []
 
         def observe(source, label):
@@ -59,8 +59,8 @@ def run(caddy, compose, **_):
         doctor = live.cli(alpha, '--json', 'doctor', check=False)
         assert next(check for check in json.loads(doctor.stdout)['checks'] if check['name'] == 'config')['ok']
         live.start_proxy()
-        live.cli(alpha, 'up', '--detach', '--process-compose', compose)
-        live.cli(beta, 'up', '--detach', '--name', 'beta', '--process-compose', compose)
+        live.cli(alpha, 'up', '--detach')
+        live.cli(beta, 'up', '--detach', '--name', 'beta')
         first, first_endpoints = observe(alpha, 'alpha')
         other, other_endpoints = observe(beta, 'beta')
         assert not (set(first.values()) | first_endpoints) & (set(other.values()) | other_endpoints), (first, other)
@@ -71,9 +71,9 @@ def run(caddy, compose, **_):
         cases.append('task-environment-carries-named-ports')
 
         live.cli(alpha, 'down')
-        live.cli(alpha, 'up', '--detach', '--process-compose', compose)
+        live.cli(alpha, 'up', '--detach')
         assert observe(alpha, 'alpha')[0] == first
-        restarted = live.json(alpha, 'restart', '--detach', '--process-compose', compose)
+        restarted = live.json(alpha, 'restart', '--detach')
         assert restarted['session']['ports'] == first, restarted['session']
         assert observe(alpha, 'alpha')[0] == first
         cases.append('down-up-and-restart-reuse-the-previous-named-ports')
@@ -82,7 +82,7 @@ def run(caddy, compose, **_):
         with socket.socket() as foreign:
             foreign.bind(('127.0.0.1', first['db']))
             foreign.listen()
-            live.cli(alpha, 'up', '--detach', '--process-compose', compose)
+            live.cli(alpha, 'up', '--detach')
             moved, _ = observe(alpha, 'alpha')
             assert moved['db'] != first['db'] and moved['vite-hmr'] == first['vite-hmr'], (moved, first)
         cases.append('a-port-taken-meanwhile-is-replaced-and-the-rest-stay')

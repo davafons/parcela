@@ -60,8 +60,8 @@ def wait_for(check, processes=(), timeout=20):
 class Live:
     """A proxy on a test port, its state directory, and every child it spawns."""
 
-    def __init__(self, name, caddy, compose):
-        self.caddy, self.compose = caddy, compose
+    def __init__(self, name, caddy):
+        self.caddy = caddy
         self.root = Path(tempfile.mkdtemp(prefix=f'pcl-live-{name}-', dir='/tmp')).resolve()
         self.state = self.root / 'state'
         self.https = free_port()
@@ -125,10 +125,10 @@ class Live:
         return self.proxy
 
     def register(self, path, role, label):
-        """Register a checkout as its first `up` does, stopping at a missing Process Compose binary."""
+        """Register a checkout as its first `up` does, stopping at preflight on an absent LAN address."""
         naming = ['--primary'] if role == 'primary' else ['--name', label]
-        started = self.cli(path, 'up', *naming, '--process-compose', '/nonexistent/parcela-register-only', check=False)
-        assert started.returncode == 1 and 'backend executable unavailable' in started.stderr, started.stderr
+        started = self.cli(path, 'up', *naming, '--lan-ip', '192.0.2.1', check=False)
+        assert started.returncode == 1 and 'no network interface has that address' in started.stderr, started.stderr
         workspace = self.json(path, '--json', 'status')['workspace']
         assert (workspace['role'], workspace['label']) == (role, label), workspace
         return workspace

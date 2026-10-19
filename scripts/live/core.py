@@ -1,4 +1,4 @@
-"""Routes, streams, ownership, Process Compose lifecycle and status against real Caddy and Process Compose."""
+"""Routes, streams, ownership, process lifecycle, logs and status against real Caddy."""
 import json
 from pathlib import Path
 import signal
@@ -24,8 +24,8 @@ def control_socket(runtime):
     return Path(json.loads((runtime / 'context.json').read_text())['sockets']['control'])
 
 
-def run(caddy, compose, **_):
-    with Live('core', caddy, compose) as live:
+def run(caddy, **_):
+    with Live('core', caddy) as live:
         cli, request, fetch = live.cli, live.request, live.fetch
         copies = []
         for name, role in [('primary', 'primary'), ('auth', 'preview'), ('compose', 'preview')]:
@@ -60,7 +60,7 @@ def run(caddy, compose, **_):
             assert cli(primary_path, 'run', '--backend-port', str(port), '--', 'python3', str(SERVICE), check=False).returncode != 0
             assert foreign.getsockname()[1] == port
 
-        owner = live.spawn(compose_path, 'up', '--process-compose', compose)
+        owner = live.spawn(compose_path, 'up')
         wait_for(lambda: request('compose-live.localhost'), [proxy, preview, owner])
         assert request('compose-live.localhost')['id'] == compose_id
         status = live.json(compose_path, 'status')
@@ -75,11 +75,8 @@ def run(caddy, compose, **_):
         assert any('worker | cli-worker-ready' in follower.stdout.readline() for _ in range(20)), 'logs --follow prints every process'
         follower.send_signal(signal.SIGINT)
         assert follower.wait(timeout=10) == 0, 'logs --follow exits cleanly on Ctrl-C'
-        compose_socket = json.loads((live.state / 'environments' / compose_id / 'context.json').read_text())['sockets']['compose']
-        readers = subprocess.run(['pgrep', '-f', f'{compose_socket}.*process logs'], capture_output=True, text=True).stdout
-        assert not readers, f'no log reader outlives logs --follow: {readers}'
         assert cli(compose_path, 'logs', 'unknown', check=False).returncode != 0
-        assert cli(auth_path, 'restart', '--detach', '--process-compose', compose, check=False).returncode != 0
+        assert cli(auth_path, 'restart', '--detach', check=False).returncode != 0
         assert preview.poll() is None
         assert cli(compose_path, 'restart', '--detach', '--readiness-timeout', '0', check=False).returncode == 2
         assert cli(compose_path, 'restart', '--detach', '--backend-port', '80', check=False).returncode == 2
@@ -98,12 +95,12 @@ def run(caddy, compose, **_):
         assert fetch('auth-live.localhost', host_header='compose-live.localhost')[0] == 503
         assert live.json(compose_path, 'down')['already_stopped']
 
-        first = live.json(compose_path, 'up', '--detach', '--process-compose', compose)
+        first = live.json(compose_path, 'up', '--detach')
         assert first['detached'] and first['live']['state'] == 'ready'
         assert first['workspace']['generation'] == first['session']['generation']
-        again = live.json(compose_path, 'up', '--detach', '--process-compose', compose)
+        again = live.json(compose_path, 'up', '--detach')
         assert again['already_running'] and again['session']['token'] == first['session']['token']
-        second = live.json(compose_path, 'restart', '--detach', '--process-compose', compose)
+        second = live.json(compose_path, 'restart', '--detach')
         assert second['session']['generation'] > first['session']['generation']
         assert second['session']['token'] != first['session']['token']
         assert request('compose-live.localhost')['generation'] == str(second['session']['generation'])
@@ -124,17 +121,17 @@ def run(caddy, compose, **_):
         assert (runtime / 'data' / 'retain.txt').read_text() == 'preserve application data'
         with socket.socket(socket.AF_UNIX) as foreign_control:
             foreign_control.bind(str(control_socket(runtime)))
-            failed = cli(compose_path, 'up', '--process-compose', compose, check=False)
+            failed = cli(compose_path, 'up', check=False)
             assert failed.returncode != 0 and control_socket(runtime).exists()
         control_socket(runtime).unlink()
-        assert cli(compose_path, 'up', '--detach', '--process-compose', '/nonexistent/parcela-test-compose', check=False).returncode != 0
+        assert cli(compose_path, 'up', '--detach', '--lan-ip', '192.0.2.1', check=False).returncode != 0
         assert live.json(compose_path, 'status')['state'] == 'stopped'
         assert not control_socket(runtime).exists()
         assert request('auth-live.localhost')['id'] == auth_id
         return {'https_port': live.https, 'verified': [
             'owned Caddy TLS/CA without trust', 'two simultaneous routes', 'literal argv', 'forwarded scheme/host spoof rejection',
             'SSE', 'WebSocket upgrade', 'unknown host rejection', 'duplicate ownership', 'SIGTERM', 'exit status', 'foreign port safety',
-            'Process Compose web+worker private UDS', 'independent teardown', 'owner-mediated down/stop', 'detached startup/readiness',
+            'supervised web+worker graph', 'independent teardown', 'owner-mediated down/stop', 'detached startup/readiness',
             'restart generation', 'unhealthy probe separate from recorded ready', 'stale command rejection',
             'live/aggregate status and UUID targeting', 'service/log inspection', 'data retention',
             'foreign control socket refusal', 'failed detached startup cleanup']}

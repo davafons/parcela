@@ -72,7 +72,8 @@ parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--
 
 Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. On an environment that is already ready, `up` prints its URLs and exits 0. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
 
-- Without `--detach`, `up` stays in the foreground and prints the processes' output. Ctrl-C stops everything.
+- Without `--detach`, `up` stays in the foreground and prints each process's output, prefixed with its name. Ctrl-C stops everything.
+- Until the environment is first ready, a hook that fails, an HTTP service that exits, or any process that exits nonzero stops `up` and says which one, with its exit code. A process that finishes with 0, like an asset build, is fine. After that, an exited process is reported and nothing restarts it; if an HTTP service stops answering for longer than the readiness timeout, 60 seconds, `up` stops the whole environment.
 - `--detach` returns once the services are ready and leaves them running.
 - `--setup` runs `hooks.setup` again, as on a new environment.
 - `--name NAME` names this checkout on its first `up`. `--primary` gives a linked checkout the project URL.
@@ -101,7 +102,7 @@ $ parcela up --name review --detach
 parcela down [--all | --all-projects]
 ```
 
-Stops the environment's services and workers. `stop` is the same command. Source, data and the environment's URLs stay. Running `down` again does nothing.
+Stops the environment's services and workers: each one gets SIGTERM once nothing that depends on it is still running, and SIGKILL after 10 seconds. `stop` is the same command. Source, data and the environment's URLs stay. Running `down` again does nothing.
 
 - `--all` stops every running environment of this project.
 - `--all-projects` stops every running environment on the machine.
@@ -146,7 +147,7 @@ hello primary  ready
   path /Users/you/code/hello
 ```
 
-The state is one of `ready`, `starting`, `unhealthy`, `stopped`, `interrupted` or `unknown`. [Troubleshooting](troubleshooting.md) says what to do for each.
+The state is one of `ready`, `starting`, `unhealthy`, `stopped`, `interrupted` or `unknown`. [Troubleshooting](troubleshooting.md) says what to do for each. A process is `pending`, `running`, `stopping`, `restarting`, `completed` (exited 0, like a finished hook), `exited` or `skipped` (a dependency stopped before it could start).
 
 ### parcela ls
 
@@ -170,7 +171,7 @@ hello    billing  not started  https://billing-hello.localhost:1443  /Users/you/
 parcela logs [SERVICE] [--tail N] [--follow]
 ```
 
-Prints the last lines of every service and worker, each line prefixed with its name. Name a service or worker to see only its output. `--tail` is the number of lines per process, 100 by default. `--follow`, or `-f`, keeps printing new lines until Ctrl-C or until the environment stops.
+Prints the last lines of every service, worker and hook of the latest run, each line prefixed with its name. Name one to see only its output. `--tail` is the number of lines per process, 100 by default. `--follow`, or `-f`, keeps printing new lines until Ctrl-C or until the environment stops. The logs stay after `down`, until the next run starts, so `logs` also shows why a run stopped. Each process writes to `log/processes/<name>.log` in its runtime directory, which is cut to `<name>.log.1` past 16 MB.
 
 ```text
 $ parcela logs --tail 2
@@ -204,17 +205,16 @@ https://api-hello.localhost:1443
 parcela doctor
 ```
 
-Checks Process Compose, Caddy, `lsof`, `ps`, the nearest `parcela.yaml`, the state directory and the proxy. It changes nothing. Every failed check says how to fix it, and the command exits 1 until all pass. It also validates `parcela.yaml`, so run it after you edit the file.
+Checks Caddy, `lsof`, `ps`, the nearest `parcela.yaml`, the state directory and the proxy. It changes nothing. Every failed check says how to fix it, and the command exits 1 until all pass. It also validates `parcela.yaml`, so run it after you edit the file.
 
 ```text
 $ parcela doctor
-✓ process-compose  v1.122.0 at /opt/homebrew/bin/process-compose
-✓ caddy            v2.11.7 at /opt/homebrew/bin/caddy
-✓ lsof             /usr/sbin/lsof
-✓ ps               /bin/ps
-✓ config           /Users/you/code/hello/parcela.yaml (project hello)
-✓ state            /Users/you/.local/state/parcela (private)
-✓ proxy            not running; `parcela up` starts it on HTTPS on :1443
+✓ caddy   v2.11.7 at /opt/homebrew/bin/caddy
+✓ lsof    /usr/sbin/lsof
+✓ ps      /bin/ps
+✓ config  /Users/you/code/hello/parcela.yaml (project hello)
+✓ state   /Users/you/.local/state/parcela (private)
+✓ proxy   not running; `parcela up` starts it on HTTPS on :1443
 · HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.
 
 Next step: parcela up

@@ -1,20 +1,19 @@
 #!/bin/sh
-# Installs the latest Parcela release into ~/.local/bin, plus Caddy and Process Compose when no
-# supported version is on PATH. Run with --help for options.
+# Installs the latest Parcela release into ~/.local/bin, plus Caddy when no supported version is
+# on PATH. Run with --help for options.
 # Served at https://parcela.davafons.com/install.sh from github.com/davafons/parcela.
 set -eu
 
-# The versions Parcela's live tests run against.
+# The version Parcela's live tests run against.
 CADDY_VERSION="${CADDY_VERSION:-2.11.7}"
-PROCESS_COMPOSE_VERSION="${PROCESS_COMPOSE_VERSION:-1.122.0}"
 BIN="$HOME/.local/bin"
 
 usage() {
   cat <<EOF
 Usage: install.sh [--nightly]
 
-Installs Parcela into ~/.local/bin, plus Caddy 2 and Process Compose 1 when
-no supported version is on PATH.
+Installs Parcela into ~/.local/bin, plus Caddy 2 when no supported version
+is on PATH.
 
 Options:
   --nightly    Install the newest build of main instead of the latest release
@@ -23,7 +22,6 @@ Options:
 Environment:
   PARCELA_SKIP_BACKENDS=1    Install only Parcela
   CADDY_VERSION              Caddy version to install (default $CADDY_VERSION)
-  PROCESS_COMPOSE_VERSION    Process Compose version to install (default $PROCESS_COMPOSE_VERSION)
 EOF
 }
 
@@ -92,38 +90,28 @@ fetch() {
   wrote="$wrote ~/.local/bin/$1"
 }
 
-# supported NAME BINARY succeeds when BINARY is a version Parcela runs, matching its own checks.
+# supported BINARY succeeds when BINARY is a Caddy version Parcela runs, matching its own check.
 supported() {
-  version=$("$2" version 2>/dev/null) || return 1
-  case "$1" in
-    caddy) case "$version" in v2.*) return 0 ;; esac ;;
-    process-compose) case "$version" in *v1.*) return 0 ;; esac ;;
-  esac
+  case "$("$1" version 2>/dev/null)" in v2.*) return 0 ;; esac
   return 1
 }
 
-# backend NAME NEED installs NAME into $BIN unless a supported one is on PATH or already there.
-# A found binary of another version stays put; the pinned one goes into $BIN beside it.
-backend() {
-  found=$(command -v "$1" 2>/dev/null || true)
-  [ -z "$found" ] && [ -x "$BIN/$1" ] && found="$BIN/$1"
-  [ -n "$found" ] && supported "$1" "$found" && return 0
-  if [ -n "$found" ] && [ "$found" != "$BIN/$1" ] && [ -x "$BIN/$1" ] && supported "$1" "$BIN/$1"; then
-    echo "$1: unsupported version at $found; using ~/.local/bin/$1"
-    installed="$installed $1"
+# install_caddy installs Caddy into $BIN unless a supported one is on PATH or already there. A found
+# binary of another version stays put; the pinned one goes into $BIN beside it.
+install_caddy() {
+  found=$(command -v caddy 2>/dev/null || true)
+  [ -z "$found" ] && [ -x "$BIN/caddy" ] && found="$BIN/caddy"
+  [ -n "$found" ] && supported "$found" && return 0
+  if [ -n "$found" ] && [ "$found" != "$BIN/caddy" ] && [ -x "$BIN/caddy" ] && supported "$BIN/caddy"; then
+    echo "caddy: unsupported version at $found; using ~/.local/bin/caddy"
+    installed="$installed caddy"
     return 0
   fi
-  [ -n "$found" ] && echo "$1: unsupported version at $found; installing $2 into ~/.local/bin"
-  if [ "$1" = caddy ]; then
-    release="https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION"
-    fetch caddy "$release" "$release/caddy_${CADDY_VERSION}_checksums.txt" \
-      "caddy_${CADDY_VERSION}_${caddy_os}_${arch}.tar.gz" 512
-  else
-    release="https://github.com/F1bonacc1/process-compose/releases/download/v$PROCESS_COMPOSE_VERSION"
-    fetch process-compose "$release" "$release/process-compose_checksums.txt" \
-      "process-compose_${pc_os}_${arch}.tar.gz" 256
-  fi
-  installed="$installed $1"
+  [ -n "$found" ] && echo "caddy: unsupported version at $found; installing Caddy $CADDY_VERSION into ~/.local/bin"
+  release="https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION"
+  fetch caddy "$release" "$release/caddy_${CADDY_VERSION}_checksums.txt" \
+    "caddy_${CADDY_VERSION}_${caddy_os}_${arch}.tar.gz" 512
+  installed="$installed caddy"
 }
 
 # path_hint prints how to put $BIN on PATH, or ahead of an older backend that shadows it.
@@ -181,17 +169,16 @@ main() {
 
   if [ "${PARCELA_SKIP_BACKENDS:-}" != 1 ]; then
     case "$(uname -s)-$(uname -m)" in
-      Darwin-x86_64) caddy_os=mac pc_os=darwin arch=amd64 ;;
-      Darwin-arm64) caddy_os=mac pc_os=darwin arch=arm64 ;;
-      Linux-x86_64 | Linux-amd64) caddy_os=linux pc_os=linux arch=amd64 ;;
-      Linux-aarch64 | Linux-arm64) caddy_os=linux pc_os=linux arch=arm64 ;;
+      Darwin-x86_64) caddy_os=mac arch=amd64 ;;
+      Darwin-arm64) caddy_os=mac arch=arm64 ;;
+      Linux-x86_64 | Linux-amd64) caddy_os=linux arch=amd64 ;;
+      Linux-aarch64 | Linux-arm64) caddy_os=linux arch=arm64 ;;
       *) caddy_os= ;;
     esac
     if [ -n "$caddy_os" ]; then
-      backend caddy "Caddy $CADDY_VERSION"
-      backend process-compose "Process Compose $PROCESS_COMPOSE_VERSION"
+      install_caddy
     else
-      echo "Install Caddy 2 and Process Compose 1 yourself; run parcela doctor to check."
+      echo "Install Caddy 2 yourself; run parcela doctor to check."
     fi
   fi
 

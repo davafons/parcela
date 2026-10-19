@@ -18,13 +18,7 @@ fn doctor(path: &Path, state: &Path, port: u16) -> (Option<i32>, Value) {
         .arg("--state-dir")
         .arg(state)
         .env("PARCELA_HTTPS_PORT", port.to_string())
-        .args([
-            "doctor",
-            "--caddy",
-            "/nonexistent/caddy",
-            "--process-compose",
-            "/nonexistent/process-compose",
-        ])
+        .args(["doctor", "--caddy", "/nonexistent/caddy"])
         .output()
         .unwrap();
     (
@@ -56,27 +50,12 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
         .iter()
         .map(|check| check["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        names,
-        [
-            "process-compose",
-            "caddy",
-            "lsof",
-            "ps",
-            "config",
-            "state",
-            "proxy"
-        ]
-    );
+    assert_eq!(names, ["caddy", "lsof", "ps", "config", "state", "proxy"]);
     for check in report["checks"].as_array().unwrap() {
         let keys: Vec<&String> = check.as_object().unwrap().keys().collect();
         assert_eq!(keys, ["detail", "fix", "name", "ok"]);
         assert_eq!(check["ok"] == false, check["fix"].is_string(), "{check}");
     }
-    assert_eq!(
-        check(&report, "process-compose"),
-        &json!({"name": "process-compose", "ok": false, "detail": "/nonexistent/process-compose not found on PATH", "fix": "install Process Compose 1.x: brew install f1bonacc1/tap/process-compose (or https://f1bonacc1.github.io/process-compose/installation/)"})
-    );
     assert_eq!(
         check(&report, "config"),
         &json!({"name": "config", "ok": false, "detail": format!("no parcela.yaml in {} or above; create one with `parcela init`, or pass --path to a configured checkout", path.display()), "fix": "parcela init"})

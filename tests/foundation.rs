@@ -33,12 +33,13 @@ fn cli(path: &Path, state: &Path, args: &[&str]) -> Output {
         .output()
         .unwrap()
 }
-/// Register through a first `up` that stops at the missing Process Compose binary.
+/// Register through a first `up` that stops at preflight.
 fn register(path: &Path, state: &Path, flags: &[&str]) -> Output {
     let mut args = vec![
         "up",
-        "--process-compose",
-        "/nonexistent/parcela-test-process-compose",
+        // Registers the checkout, then preflight refuses the proxy's port before anything starts.
+        "--backend-port",
+        "1443",
     ];
     args.extend_from_slice(flags);
     let output = cli(path, state, &args);
@@ -356,10 +357,7 @@ fn concurrent_cli_adoption_is_idempotent_with_one_owner() {
         .collect();
     for handle in handles {
         let stderr = handle.join().unwrap();
-        assert!(
-            stderr.contains("backend executable unavailable"),
-            "{stderr}"
-        );
+        assert!(stderr.contains("is the proxy's port"), "{stderr}");
     }
     let registry = Registry::open(&state, false).unwrap().unwrap();
     assert_eq!(registry.list(None).unwrap().len(), 1);
@@ -380,7 +378,7 @@ fn concurrent_conflicting_adoption_has_exactly_one_winner() {
                 barrier.wait();
                 String::from_utf8(register(&path, &state, &["--primary"]).stderr)
                     .unwrap()
-                    .contains("backend executable unavailable")
+                    .contains("is the proxy's port")
             })
         })
         .collect();

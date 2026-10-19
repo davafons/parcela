@@ -1,17 +1,16 @@
 #!/bin/sh
 # Installs the tools the checks need into ~/.local/bin on a CI runner: jj for discovery tests,
-# Caddy and Process Compose for the live suites. Versions match docs/website/install.sh.
+# Caddy for the live suites. Versions match docs/website/install.sh.
 set -eu
 JJ_VERSION=0.40.0
 CADDY_VERSION=2.11.7
-PROCESS_COMPOSE_VERSION=1.122.0
 BIN="$HOME/.local/bin"
 mkdir -p "$BIN"
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) jj=x86_64-unknown-linux-musl caddy=linux_amd64 pc=linux_amd64 ;;
-  Linux-aarch64) jj=aarch64-unknown-linux-musl caddy=linux_arm64 pc=linux_arm64 ;;
-  Darwin-arm64) jj=aarch64-apple-darwin caddy=mac_arm64 pc=darwin_arm64 ;;
-  Darwin-x86_64) jj=x86_64-apple-darwin caddy=mac_amd64 pc=darwin_amd64 ;;
+  Linux-x86_64) jj=x86_64-unknown-linux-musl caddy=linux_amd64 ;;
+  Linux-aarch64) jj=aarch64-unknown-linux-musl caddy=linux_arm64 ;;
+  Darwin-arm64) jj=aarch64-apple-darwin caddy=mac_arm64 ;;
+  Darwin-x86_64) jj=x86_64-apple-darwin caddy=mac_amd64 ;;
   *) echo "unsupported runner $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 get() {
@@ -19,10 +18,8 @@ get() {
 }
 get "https://github.com/jj-vcs/jj/releases/download/v$JJ_VERSION/jj-v$JJ_VERSION-$jj.tar.gz" ./jj
 get "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION/caddy_${CADDY_VERSION}_$caddy.tar.gz" caddy
-get "https://github.com/F1bonacc1/process-compose/releases/download/v$PROCESS_COMPOSE_VERSION/process-compose_$pc.tar.gz" process-compose
 if [ -n "${GITHUB_PATH:-}" ]; then
   echo "$BIN" >> "$GITHUB_PATH"
 fi
 "$BIN/jj" --version
 "$BIN/caddy" version
-"$BIN/process-compose" version 2>/dev/null | head -2

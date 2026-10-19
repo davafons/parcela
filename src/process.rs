@@ -65,6 +65,7 @@ impl OwnedChild {
             ended: false,
         })
     }
+    /// Starts `command` in its own process group with stdout and stderr in `log`.
     pub fn spawn_logged(command: &mut Command, log: std::fs::File) -> Result<Self> {
         command
             .process_group(0)
@@ -74,9 +75,16 @@ impl OwnedChild {
         Ok(Self {
             child: command
                 .spawn()
-                .context("launch detached environment owner")?,
+                .with_context(|| format!("launch {}", command.get_program().to_string_lossy()))?,
             ended: false,
         })
+    }
+    /// Takes over a child spawned elsewhere; dropping it stops its process group.
+    pub fn from_child(child: Child) -> Self {
+        Self {
+            child,
+            ended: false,
+        }
     }
     pub fn detach(mut self) {
         self.ended = true;
@@ -100,6 +108,17 @@ impl OwnedChild {
             std::io::Error::last_os_error()
         );
         Ok(())
+    }
+    /// SIGKILL to the whole group and reap at once, for a child nothing waits on.
+    pub fn kill_now(mut self) {
+        if !self.ended && self.poll().is_ok_and(|status| status.is_none()) {
+            // SAFETY: the unreaped direct child still owns its PID/group identity.
+            unsafe {
+                libc::kill(-(self.child.id() as i32), libc::SIGKILL);
+            }
+            let _ = self.child.wait();
+        }
+        self.ended = true;
     }
     pub fn stop(&mut self, signal: i32) -> Result<ExitStatus> {
         if let Some(status) = self.poll()? {
@@ -230,8 +249,8 @@ pub fn version(binary: &str, argument: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 /// Verify the listener itself, not merely an HTTP answer at an allocated port.
-pub fn listener_identity(port: u16, owner: u32) -> Result<Vec<u32>> {
-    Listeners::inspect([port])?.owned(port, owner)
+pub fn listener_identity(port: u16, roots: &[u32]) -> Result<Vec<u32>> {
+    Listeners::inspect([port])?.owned(port, roots)
 }
 
 /// Every LISTEN socket on a set of ports, from one lsof call.
@@ -325,14 +344,14 @@ impl Listeners {
             })
             .collect()
     }
-    /// The live listeners on `port`, which must all belong to the `owner` process tree.
-    pub fn owned(&self, port: u16, owner: u32) -> Result<Vec<u32>> {
+    /// The live listeners on `port`, which must all belong to the process tree of one of `roots`.
+    pub fn owned(&self, port: u16, roots: &[u32]) -> Result<Vec<u32>> {
         let mut found = Vec::new();
         for (pid, _) in self.on(port)? {
             let Some(identity) = Identity::read(pid)? else {
                 continue;
             };
-            let owned = descendant(pid, owner)?;
+            let owned = descendant(pid, roots)?;
             if !identity.alive() {
                 continue;
             }
@@ -383,9 +402,9 @@ fn lsof() -> &'static str {
     }
 }
 
-fn descendant(mut pid: u32, owner: u32) -> Result<bool> {
+fn descendant(mut pid: u32, roots: &[u32]) -> Result<bool> {
     for _ in 0..32 {
-        if pid == owner {
+        if roots.contains(&pid) {
             return Ok(true);
         }
         if pid <= 1 {
@@ -403,6 +422,18 @@ fn descendant(mut pid: u32, owner: u32) -> Result<bool> {
         pid = parent;
     }
     Ok(false)
+}
+
+/// Signals the process, or with `group` its process group, only while `identity` still names
+/// it: the pid is re-read just before the signal. A pid from disk is never signaled on its own.
+pub fn signal_verified(identity: &Identity, signal: i32, group: bool) -> Result<bool> {
+    if Identity::read(identity.pid)?.as_ref() != Some(identity) {
+        return Ok(false);
+    }
+    let pid = identity.pid as i32;
+    // SAFETY: kill has no pointers; the identity check above narrows pid reuse to the gap
+    // between two system calls.
+    Ok(unsafe { libc::kill(if group { -pid } else { pid }, signal) } == 0)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -507,8 +538,10 @@ fn birth(_: u32) -> Result<Option<u64>> {
     anyhow::bail!("process identity requires macOS or Linux")
 }
 
-pub fn tree(root: &Identity) -> Result<Vec<Identity>> {
-    if !root.alive() {
+/// Every live process descending from a live root, the roots included.
+pub fn tree(roots: &[Identity]) -> Result<Vec<Identity>> {
+    let roots: Vec<&Identity> = roots.iter().filter(|root| root.alive()).collect();
+    if roots.is_empty() {
         return Ok(Vec::new());
     }
     let output = capture(
@@ -528,7 +561,7 @@ pub fn tree(root: &Identity) -> Result<Vec<Identity>> {
             Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
         })
         .collect();
-    let mut pids = std::collections::BTreeSet::from([root.pid]);
+    let mut pids: std::collections::BTreeSet<u32> = roots.iter().map(|root| root.pid).collect();
     loop {
         let before = pids.len();
         for (pid, parent) in &pairs {
