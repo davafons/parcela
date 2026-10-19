@@ -63,7 +63,7 @@ It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.co
 brew install davafons/tap/parcela
 ```
 
-For the newest build of `main` instead of the latest release, add `--nightly`: `curl -fsSL https://parcela.davafons.com/install.sh | sh -s -- --nightly`. Its `parcela --version` includes the commit, like `0.3.0+20261019.4fed620`.
+For the newest build of `main` instead of the latest release, add `--nightly`: `curl -fsSL https://parcela.davafons.com/install.sh | sh -s -- --nightly`. Its `parcela --version` includes the commit, like `0.4.0+20261020.4fed620`.
 
 ## Create the app
 

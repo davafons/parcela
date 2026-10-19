@@ -1,5 +1,5 @@
 //! Sets PARCELA_VERSION: the Cargo version for a build of its release tag, else the version
-//! plus the commit date and hash, like `0.3.0+20261019.4fed620`, and `.dirty` with local edits.
+//! plus the commit date and hash, like `0.4.0+20261020.4fed620`, and `.dirty` with local edits.
 use std::process::Command;
 
 fn git(args: &[&str]) -> Option<String> {
