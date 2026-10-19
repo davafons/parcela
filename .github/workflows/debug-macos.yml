@@ -22,8 +22,10 @@ jobs:
           D=$(mktemp -d /tmp/dbg.XXXX); cp -R examples/docs-demo $D/hello
           P="target/debug/parcela --path $D/hello --state-dir $D/state"
           $P proxy start --port 31555
-          $P up --detach --readiness-timeout 25; echo "up=$?"
-          $P status --json | head -80
-          /usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fptn | head -40
-          tail -30 $D/state/environments/*/log/owner.log
-          $P down; $P proxy stop
+          $P up --detach --readiness-timeout 25 &
+          sleep 10
+          $P --json status | head -120
+          /usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fptn
+          ps -A -o pid,ppid,command | grep -v grep | grep -E "parcela|python|process-compose"
+          curl -sv http://127.0.0.1:$(/usr/sbin/lsof -nP -iTCP -sTCP:LISTEN -Fn -a -c Python | grep -o ':[0-9]*$' | head -1 | tr -d :)/ 2>&1 | head -12
+          wait
