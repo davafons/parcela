@@ -1,5 +1,5 @@
-//! Unix socket paths are capped near 104 bytes, so sockets live in `/tmp/parcela-<uid>/<hash>`, keyed
-//! by the canonical state directory instead of under the state directory itself.
+//! Unix socket paths are capped near 104 bytes, so sockets live in a short per-user directory,
+//! `<base>/<hash>`, keyed by the canonical state directory instead of under the state directory itself.
 use crate::private;
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -65,9 +65,53 @@ fn directory(state: &Path) -> Result<PathBuf> {
         .with_context(|| format!("resolve state directory {}", state.display()))?;
     let hash = format!("{:016x}", fnv1a(state.as_os_str().as_bytes()));
     let hash = &hash[..8];
-    // SAFETY: getuid has no pointers or failure case.
-    let uid = unsafe { libc::getuid() };
-    Ok(PathBuf::from(format!("/tmp/parcela-{uid}")).join(hash))
+    Ok(base().join(hash))
+}
+
+/// macOS's per-user temporary directory, which no other user can create first, or
+/// `/tmp/parcela-<uid>` where there is none, as on Linux. Neither depends on the environment, so
+/// every Parcela process of a user agrees on it.
+pub fn base() -> PathBuf {
+    user_directory()
+        .filter(|path| {
+            // The longest socket adds /parcela/<hash>/<12 characters>-ctl.sock.
+            path.is_absolute()
+                && path.as_os_str().len() + "/parcela/12345678/123456789012-ctl.sock".len() < 100
+                && private::existing_directory(path).is_ok()
+        })
+        .map_or_else(
+            // SAFETY: getuid has no pointers or failure case.
+            || PathBuf::from(format!("/tmp/parcela-{}", unsafe { libc::getuid() })),
+            |path| path.join("parcela"),
+        )
+}
+
+#[cfg(target_os = "macos")]
+fn user_directory() -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+    let mut buffer = vec![0u8; 1024];
+    // SAFETY: confstr writes at most buffer.len() bytes, NUL included, into the buffer.
+    let length = unsafe {
+        libc::confstr(
+            libc::_CS_DARWIN_USER_TEMP_DIR,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+        )
+    };
+    if length == 0 || length > buffer.len() {
+        return None;
+    }
+    buffer.truncate(length - 1);
+    Some(
+        PathBuf::from(std::ffi::OsString::from_vec(buffer))
+            .components()
+            .collect(),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn user_directory() -> Option<PathBuf> {
+    None
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {

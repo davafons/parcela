@@ -2,7 +2,7 @@
 
 ## What does Parcela change on my machine?
 
-- **Files.** State in `~/.local/state/parcela`, or `$XDG_STATE_HOME/parcela` (mode 700), and sockets in `/tmp/parcela-<uid>`. Nothing in your checkout except the `parcela.yaml` that `parcela init` writes.
+- **Files.** State in `~/.local/state/parcela`, or `$XDG_STATE_HOME/parcela` (mode 700), and sockets in a per-user directory: `$(getconf DARWIN_USER_TEMP_DIR)parcela` on macOS, `/tmp/parcela-<uid>` on Linux. Nothing in your checkout except the `parcela.yaml` that `parcela init` writes.
 - **Binaries.** `install.sh` puts `parcela`, and Caddy when it is missing, in `~/.local/bin`. It never uses `sudo`.
 - **Listeners.** One Caddy on `127.0.0.1:1443`, and your services on loopback ports from 20000–29999. Nothing listens on your network unless you run `up --lan` or `up --tailscale`, and only for that run.
 - **Trust.** Parcela's certificate authority is added to the system trust store only by `parcela trust` or the first `up` in a terminal, behind the system password prompt. Scripts, agents and CI never change trust.
@@ -87,7 +87,8 @@ parcela rm                                     # in each checkout whose hooks.te
 caddy untrust --cert "$(parcela trust --print)" # if you trusted the authority
 parcela proxy uninstall                        # macOS, if you ran proxy install
 parcela proxy stop
-rm -rf ~/.local/state/parcela /tmp/parcela-$(id -u)  # all state, including environment data
+rm -rf ~/.local/state/parcela                  # all state, including environment data
+rm -rf "$(getconf DARWIN_USER_TEMP_DIR)parcela"  # macOS sockets; /tmp/parcela-$(id -u) on Linux
 rm ~/.local/bin/parcela
 ```
 

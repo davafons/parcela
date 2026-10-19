@@ -267,6 +267,6 @@ Every service, hook and task receives these. Service names are uppercased, with 
 | `…/registry.sqlite3` | Projects, environments, names and port leases. |
 | `…/environments/<id>/` | One environment's `PARCELA_RUNTIME_DIR`: `data`, `tmp`, `cache`, `log/owner.log`, each process's `log/processes/<name>.log` and Parcela's own records. |
 | `…/proxy/` | The proxy's Caddy config, `proxy.log` and the local certificate authority. |
-| `/tmp/parcela-<uid>/` | Unix sockets for the running environments and the proxy. |
+| `$(getconf DARWIN_USER_TEMP_DIR)parcela/` on macOS, `/tmp/parcela-<uid>/` on Linux | Unix sockets for the running environments and the proxy. |
 
 The state directory is private to your user. `rm` keeps an environment's directory. Delete it yourself when you no longer need its data.

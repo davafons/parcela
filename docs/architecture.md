@@ -51,7 +51,7 @@ The state directory is `--state-dir`, then `PARCELA_STATE_DIR`, then `$XDG_STATE
 └── environments/<uuid>/   context.json, owner.json, log/ (owner.log, processes/), hooks/, data/, tmp/, cache/
 ```
 
-Control and Caddy admin sockets live in `/tmp/parcela-<uid>/<hash>`, where the hash comes from the state path. Unix socket paths are limited to about 100 bytes.
+Control and Caddy admin sockets live in `<base>/<hash>`, where the hash comes from the state path. The base is `parcela` in macOS's per-user temporary directory, which another user cannot create first, and `/tmp/parcela-<uid>` on Linux. Neither depends on environment variables, so every process of a user agrees on it. Unix socket paths are limited to about 100 bytes.
 
 ## Safety rules
 

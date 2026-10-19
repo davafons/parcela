@@ -36,8 +36,7 @@ fn mode(path: &Path) -> u32 {
 }
 
 fn base() -> PathBuf {
-    // SAFETY: getuid has no pointers or failure case.
-    PathBuf::from(format!("/tmp/parcela-{}", unsafe { libc::getuid() }))
+    sockets::base()
 }
 
 fn hashed_directory(socket: &Path, base: &Path) -> String {
@@ -89,6 +88,8 @@ fn shared_or_linked_socket_directories_are_refused() {
     let socket = sockets::environment(&runtime).unwrap().control;
     let directory = socket.parent().unwrap().to_owned();
 
+    // The base may not exist yet on a fresh machine.
+    parcela::private::directory(directory.parent().unwrap()).unwrap();
     fs::create_dir(&directory).unwrap();
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o777)).unwrap();
     let error = Server::bind(&runtime).err().unwrap();
