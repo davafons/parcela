@@ -16,6 +16,9 @@
 - The proxy listens on one HTTPS port, and URLs leave it out when it is 443. The forwarded "standard ports" mode and its port-80 listener are gone. `--port` accepts any port the system lets a normal user listen on.
 - If the proxy dies while environments run, they start it again within a few seconds. `parcela proxy stop` still stops it for good.
 - `restart` picks up added, removed and renamed services; `down` and `up` are no longer needed for that.
+- `up` on a ready environment prints its URLs and exits 0, like `docker compose up -d`.
+- Clearer errors: a readiness timeout says what each service answered, a busy `--backend-port` names its holder, and an unknown service or task lists the valid names.
+- `--help` lists the global options in their own section. `status --all` is gone; use `ls`.
 
 ### Fixed
 

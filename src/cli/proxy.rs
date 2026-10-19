@@ -101,6 +101,19 @@ pub fn run(state: &Path, command: ProxyCommand, out: Output) -> Result<i32> {
         }
         ProxyCommand::Stop => {
             let stopped = proxy::stop(state)?;
+            let running = match Registry::open(state, false)? {
+                Some(registry) => registry
+                    .sessions()?
+                    .iter()
+                    .filter(|session| session.status != parcela::registry::SessionStatus::Stopped)
+                    .count(),
+                None => 0,
+            };
+            if stopped && running > 0 {
+                eprintln!(
+                    "parcela: {running} running environment(s) lose their URLs until `parcela proxy start` or the next `parcela up`"
+                );
+            }
             let report = json!({"stopped": stopped, "running": false});
             out.emit(&report, |style| render::proxy_stopped(&report, style))?;
             Ok(0)

@@ -113,9 +113,9 @@ def run(caddy, compose, **_):
                                        'generation': first['session']['generation'], 'action': {'type': 'stop'}}) + '\n').encode())
             assert 'stale' in json.loads(stale.makefile().readline())['error']
         assert request('compose-live.localhost')['id'] == compose_id
-        inventory = live.json(live.root, 'status', '--all')['workspaces']
+        inventory = live.json(live.root, 'ls')['workspaces']
         assert {row['workspace']['label']: row['state'] for row in inventory} == {'primary': 'stopped', 'auth': 'ready', 'compose': 'ready'}
-        assert 'compose' in live.human(live.root, 'status', '--all')
+        assert 'compose' in live.human(live.root, 'ls')
         selected = subprocess.run([str(BINARY), '--state-dir', str(live.state), '--workspace', compose_id, 'status'],
                                   capture_output=True, text=True, check=True, timeout=15)
         assert json.loads(selected.stdout)['workspace']['id'] == compose_id

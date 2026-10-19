@@ -274,12 +274,7 @@ fn primary_override_is_explicit_and_inspection_never_registers() {
         ],
     );
     let state = t.path().join("state");
-    for args in [
-        vec!["ls"],
-        vec!["status", "--all"],
-        vec!["context"],
-        vec!["url"],
-    ] {
+    for args in [vec!["ls"], vec!["status"], vec!["context"], vec!["url"]] {
         cli(&linked, &state, &args);
         assert!(!state.exists());
     }

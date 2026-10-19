@@ -35,8 +35,12 @@ pub(crate) fn allocate(
     let mut probes = Vec::new();
     for (service, hostname) in manifest.service_hosts(&workspace.hostname)? {
         let probe = match port.filter(|_| service == manifest.default_service) {
-            Some(requested) => TcpListener::bind(("127.0.0.1", requested))
-                .context("backend endpoint unavailable; foreign listeners are never stopped")?,
+            Some(requested) => TcpListener::bind(("127.0.0.1", requested)).with_context(|| {
+                format!(
+                    "--backend-port {requested} is already in use by {}; pick another",
+                    crate::process::port_holder(requested)
+                )
+            })?,
             None => free_port(&unavailable)?,
         };
         let backend_port = probe.local_addr()?.port();

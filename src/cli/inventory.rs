@@ -169,7 +169,7 @@ pub fn remove(
                 continue;
             }
             if running(&existing, &workspace)? {
-                skipped.push(json!({"workspace": workspace, "reason": "still running; stop it with parcela down --workspace ID"}));
+                skipped.push(json!({"workspace": workspace, "reason": "still running; stop it with `parcela down --workspace ID`"}));
             } else {
                 targets.push(workspace);
             }

@@ -541,7 +541,7 @@ pub fn preflight(
     if let Some(port) = port {
         ensure!(
             port >= 1024 && !active_router.listens_on(port),
-            "backend endpoint conflicts with privileged/router ports"
+            "--backend-port {port} is the proxy's port or below 1024; pick another"
         );
         ensure!(
             !registry
@@ -550,15 +550,19 @@ pub fn preflight(
                 .any(|session| session.leased_ports().contains(&port)
                     && session.environment_id != workspace.id
                     && session.status != SessionStatus::Stopped),
-            "backend endpoint reserved by another environment"
+            "--backend-port {port} is leased by another environment; pick another"
         );
         if TcpListener::bind(("127.0.0.1", port)).is_err() {
-            let session = registry
-                .session(&workspace.id)?
-                .context("backend endpoint unavailable; foreign listeners are never stopped")?;
+            let busy = || {
+                format!(
+                    "--backend-port {port} is already in use by {}; pick another",
+                    crate::process::port_holder(port)
+                )
+            };
+            let session = registry.session(&workspace.id)?.with_context(busy)?;
             ensure!(
                 session.backend_port == port && session.status != SessionStatus::Stopped,
-                "backend endpoint unavailable; foreign listeners are never stopped"
+                busy()
             );
             let record = Record::read(&path, &session)?;
             ensure!(
@@ -824,21 +828,37 @@ impl Owner<'_> {
                 ready = false;
                 deadline = Instant::now() + Duration::from_secs(timeout);
             }
-            let healthy = endpoints.iter().all(|endpoint| {
-                !observed[&endpoint.service].is_empty()
-                    && (ready
-                        || listeners
-                            .address(endpoint.backend_port)
-                            .and_then(|address| {
-                                http::readiness(
-                                    address,
-                                    &endpoint.hostname,
-                                    &self.record.manifest.services[&endpoint.service]
-                                        .readiness_path,
-                                )
-                            })
-                            .unwrap_or(false))
-            });
+            // Why each service is not ready yet, for the timeout message.
+            let waiting = endpoints
+                .iter()
+                .filter_map(|endpoint| {
+                    let path = &self.record.manifest.services[&endpoint.service].readiness_path;
+                    let port = endpoint.backend_port;
+                    let reason = if observed[&endpoint.service].is_empty() {
+                        if listeners.on(port).is_ok_and(|held| !held.is_empty()) {
+                            format!(
+                                "port {port} is held by {}",
+                                crate::process::port_holder(port)
+                            )
+                        } else {
+                            format!("nothing listens on its $PORT, {port}")
+                        }
+                    } else if ready {
+                        return None;
+                    } else {
+                        match listeners
+                            .address(port)
+                            .and_then(|address| http::status(address, &endpoint.hostname, path))
+                        {
+                            Ok(code) if (200..300).contains(&code) => return None,
+                            Ok(code) => format!("GET {path} returned {code}"),
+                            Err(error) => format!("GET {path} failed: {error:#}"),
+                        }
+                    };
+                    Some(format!("{}: {reason}", endpoint.service))
+                })
+                .collect::<Vec<_>>();
+            let healthy = waiting.is_empty();
             listener = observed;
             if healthy != ready {
                 ready = healthy;
@@ -920,7 +940,8 @@ impl Owner<'_> {
             }
             ensure!(
                 ready || Instant::now() < deadline,
-                "application readiness timed out; see child diagnostics"
+                "not ready after {timeout}s: {}",
+                waiting.join("; ")
             );
             thread::sleep(Duration::from_millis(200));
         }
@@ -1229,10 +1250,14 @@ pub fn task(
     name: &str,
     args: &[String],
 ) -> Result<i32> {
-    let task = manifest
-        .tasks
-        .get(name)
-        .with_context(|| format!("no project-defined task {name}"))?;
+    let task = manifest.tasks.get(name).with_context(|| {
+        if manifest.tasks.is_empty() {
+            format!("unknown task {name}; parcela.yaml has no tasks")
+        } else {
+            let names: Vec<&str> = manifest.tasks.keys().map(String::as_str).collect();
+            format!("unknown task {name}; parcela.yaml has {}", names.join(", "))
+        }
+    })?;
     let path = runtime(registry, workspace)?;
     let _lock = Lock::acquire(&path.join("task.lock"))?;
     let session = registry.session(&workspace.id)?;

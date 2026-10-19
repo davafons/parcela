@@ -139,7 +139,7 @@ fn init_never_overwrites_an_existing_manifest() {
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         format!(
-            "parcela: {} already exists; edit it, or check it with parcela doctor\n",
+            "parcela: {} already exists; edit it, or check it with `parcela doctor`\n",
             path.join("parcela.yaml").display()
         )
     );

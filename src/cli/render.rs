@@ -140,8 +140,13 @@ pub fn down(value: &Value, label: &str, style: &Style) -> String {
 
 pub fn started(value: &Value, style: &Style) -> String {
     let url = cell(&value["session"]["public_url"]);
+    let already = if value["already_running"] == true {
+        " already"
+    } else {
+        ""
+    };
     let mut text = format!(
-        "{} {} is running at {}\n",
+        "{} {} is{already} running at {}\n",
         style.ok(),
         name(&value["workspace"]),
         style.url(&url)
@@ -205,20 +210,16 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
             cell(&value["version"]),
         )
     } else {
-        let mut text = format!(
-            "{} Proxy not running ({listening})\n  {:<9}{}\n",
-            style.bad(),
-            "urls",
-            style.url(&cell(&value["url"])),
-        );
+        let mut text = format!("{} Proxy not running ({listening})\n", style.bad());
         if let Some(error) = value["error"].as_str() {
             text.push_str(&format!("  {:<9}{error}\n", "problem"));
         }
+        text.push_str(&format!("  {:<9}{}\n", "log", cell(&value["log"])));
         text.push_str(&format!(
             "  Start it with {}\n",
             style.bold("parcela proxy start")
         ));
-        text
+        return text;
     };
     text.push_str(&format!("  {:<9}{}\n", "log", cell(&value["log"])));
     if let Some(warning) = value["version_warning"].as_str() {

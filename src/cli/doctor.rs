@@ -151,7 +151,7 @@ fn proxy(state: &Path) -> Check {
                 "proxy",
                 format!("{error:#}"),
                 format!(
-                    "fix or remove {}, then run parcela proxy start",
+                    "fix or remove {}, then run `parcela proxy start`",
                     state.join("proxy/frontdoor.json").display()
                 ),
             );
@@ -171,7 +171,7 @@ fn proxy(state: &Path) -> Check {
             None => Check::pass(
                 "proxy",
                 format!(
-                    "not running; parcela up starts it on {}",
+                    "not running; `parcela up` starts it on {}",
                     front_door.describe()
                 ),
             ),
@@ -223,7 +223,7 @@ pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
     ];
     let ready = checks.iter().all(|check| check.ok);
     let notes = [
-        "HTTPS trust is not checked, and only parcela trust changes it. If the browser warns, run parcela trust once.",
+        "HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.",
     ];
     let next = checks
         .iter()

@@ -85,8 +85,8 @@ parcela doctor
 ✓ ps               /bin/ps
 ✗ config           no parcela.yaml in /Users/you/code/hello or above
 ✓ state            /Users/you/.local/state/parcela (private)
-✓ proxy            not running; parcela up starts it on HTTPS on :1443
-· HTTPS trust is not checked, and only parcela trust changes it. If the browser warns, run parcela trust once.
+✓ proxy            not running; `parcela up` starts it on HTTPS on :1443
+· HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.
 
 Next step: parcela init
 ```
@@ -137,7 +137,7 @@ parcela up
 ```
 
 ```text
-parcela: Started the proxy on :1443. Run `parcela trust` to trust https://hello.localhost:1443
+parcela: started the proxy on :1443; run `parcela trust` to trust https://hello.localhost:1443
 [web	] 127.0.0.1 - - [17/Oct/2026 20:40:13] "GET / HTTP/1.1" 200 -
 ✓ hello is running at https://hello.localhost:1443
   Press Ctrl-C to stop

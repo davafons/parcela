@@ -189,7 +189,7 @@ pub fn detached(
         previous
             .as_ref()
             .is_none_or(|session| session.status == SessionStatus::Stopped),
-        "environment already has an active or interrupted run; use status/down, never force takeover"
+        "this environment is already running or was interrupted; see `parcela status`"
     );
     let (log_path, log) = owner_log(&path)?;
     let mut command = Command::new(std::env::current_exe()?);
@@ -310,12 +310,26 @@ pub fn service_url(registry: &Registry, workspace: &Workspace, service: &str) ->
             .iter()
             .find(|endpoint| endpoint.service == service)
             .map(|endpoint| endpoint.public_url.clone())
-            .context("unknown routed service");
+            .with_context(|| {
+                let names: Vec<&str> = session
+                    .endpoints
+                    .iter()
+                    .map(|endpoint| endpoint.service.as_str())
+                    .collect();
+                format!(
+                    "unknown service {service}; services with a URL: {}",
+                    names.join(", ")
+                )
+            });
     }
     let hosts = registry.hosts(&workspace.id)?;
-    let hostname = hosts
-        .get(service)
-        .context("unknown routed service; legacy unnamed sessions expose only the default url")?;
+    let hostname = hosts.get(service).with_context(|| {
+        let names: Vec<&str> = hosts.keys().map(String::as_str).collect();
+        format!(
+            "unknown service {service}; services with a URL: {}",
+            names.join(", ")
+        )
+    })?;
     match session {
         Some(session) => Ok(session
             .public_url

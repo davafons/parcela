@@ -383,7 +383,7 @@ impl Registry {
                 Role::Primary => &workspace.project_id,
                 Role::Preview => &workspace.label,
             };
-            bail!("{name} is {status}; stop it with parcela down before removing it");
+            bail!("{name} is {status}; stop it with `parcela down` before removing it");
         }
         transaction.execute(
             "DELETE FROM active_ports WHERE environment_id=?1",
@@ -578,7 +578,7 @@ impl Registry {
             .optional()?;
         ensure!(
             previous.as_deref().is_none_or(|status| status == "stopped"),
-            "environment already has an active or interrupted run; no process will be guessed or killed. Inspect the record and explicitly reconcile it"
+            "this environment is already running or was interrupted; see `parcela status`"
         );
         transaction.execute(
             "UPDATE workspaces SET generation = generation + 1 WHERE id = ?1",

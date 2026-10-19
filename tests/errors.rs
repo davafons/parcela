@@ -77,13 +77,13 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
     let output = cli(&root, &state, &["status"]);
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
-        "parcela: nothing is registered yet; start this checkout with parcela up\n"
+        "parcela: nothing is registered yet; start this checkout with `parcela up`\n"
     );
     let output = cli(&root, &state, &["up"]);
     assert_eq!(
         String::from_utf8_lossy(&output.stderr),
         format!(
-            "parcela: no parcela.yaml in {} or above; create one with parcela init, or pass --path to a configured checkout\n",
+            "parcela: no parcela.yaml in {} or above; create one with `parcela init`, or pass --path to a configured checkout\n",
             root.display()
         )
     );
@@ -91,7 +91,7 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
     bare.arg("--path").arg(&root).arg("--state-dir").arg(&state);
     assert_eq!(
         common::on_terminal(bare).1,
-        "No parcela.yaml here. Create one with parcela init, then run parcela up.\nSee parcela --help for every command.\n"
+        "No parcela.yaml here. Create one with `parcela init`, then run `parcela up`.\nSee `parcela --help` for every command.\n"
     );
     let app = checkout(
         &root,
@@ -101,7 +101,7 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
     let bare = cli(&app, &state, &[]);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&bare.stdout).unwrap(),
-        serde_json::json!({"hint": "Not started yet. Run parcela up."})
+        serde_json::json!({"hint": "Not started yet. Run `parcela up`."})
     );
     up(&app, &state, &[]);
     let bare = cli(&app, &state, &[]);

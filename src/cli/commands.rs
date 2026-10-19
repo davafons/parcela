@@ -3,7 +3,7 @@ use super::{
     output::{Output, status_diagnostics},
     render,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use parcela::{
     config::{Manifest, locate},
     context::ResolvedContext,
@@ -16,7 +16,7 @@ use parcela::{
 };
 use std::path::{Path, PathBuf};
 
-const NOT_STARTED: &str = "nothing is registered yet; start this checkout with parcela up";
+const NOT_STARTED: &str = "nothing is registered yet; start this checkout with `parcela up`";
 
 pub(super) fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
     let path = if let Some(path) = explicit {
@@ -84,18 +84,18 @@ fn startup_registry(
 pub fn bare(global: Global) -> Result<i32> {
     let out = Output::detect(global.json);
     let hint = match project(&global.path) {
-        Err(_) => "No parcela.yaml here. Create one with parcela init, then run parcela up.",
+        Err(_) => "No parcela.yaml here. Create one with `parcela init`, then run `parcela up`.",
         Ok((source, manifest)) => {
             let registered = Registry::open(&state_dir(global.state_dir.clone())?, false)?
                 .is_some_and(|registry| registry.current(&source, &manifest).is_ok());
             if registered {
-                return run(Cli::new(global, Command::Status { all: false }));
+                return run(Cli::new(global, Command::Status));
             }
-            "Not started yet. Run parcela up."
+            "Not started yet. Run `parcela up`."
         }
     };
     out.emit(&serde_json::json!({"hint": hint}), |_| {
-        format!("{hint}\nSee parcela --help for every command.\n")
+        format!("{hint}\nSee `parcela --help` for every command.\n")
     })?;
     Ok(0)
 }
@@ -200,7 +200,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             readiness_timeout,
             argv,
         } => {
-            let (source, manifest) = project(&cli.path)?;
+            let (source, manifest) =
+                project(&cli.path).context("`parcela run` needs a project's parcela.yaml")?;
             let request = startup::Request { name, primary };
             let (mut registry, workspace) = startup_registry(&state, &source, &manifest, &request)?;
             parcela::runtime::run(
@@ -301,11 +302,11 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             out.emit(&result, |style| render::down(&result, &name, style))?;
             Ok(0)
         }
-        Command::Status { all: true } | Command::Ls => {
+        Command::Ls => {
             super::inventory::list(&state, &cli.path, out)?;
             Ok(0)
         }
-        Command::Status { all: false } => {
+        Command::Status => {
             let (registry, workspace) = reader()?;
             let status = lifecycle::status_with_processes(&registry, &workspace)?;
             if out == Output::Human {
@@ -467,6 +468,11 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
         };
         out.emit(&result, |style| render::recovered(&result, style))?;
         return Ok(0);
+    } else if !start.restart
+        && let Some(result) = already_running(&registry, &workspace, start.share)?
+    {
+        out.emit(&result, |style| render::started(&result, style))?;
+        return Ok(0);
     }
     let restart_lock = if start.restart {
         parcela::private::directory(&registry.runtime_path(&workspace))?;
@@ -556,6 +562,59 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     .inspect_err(|_| print_new_log_lines(&log, offset, 20))?;
     out.emit(&result, |style| render::started(&result, style))?;
     Ok(0)
+}
+
+/// `up` on a ready environment reports it like a fresh start, as `docker compose up -d` does.
+/// Any other live state, or a ready run without the sharing asked for, is refused.
+fn already_running(
+    registry: &Registry,
+    workspace: &Workspace,
+    share: Share,
+) -> Result<Option<serde_json::Value>> {
+    if registry
+        .session(&workspace.id)?
+        .is_none_or(|session| session.status == parcela::registry::SessionStatus::Stopped)
+    {
+        return Ok(None);
+    }
+    let status = lifecycle::status(registry, workspace)?;
+    let name = render::name(&serde_json::to_value(workspace)?);
+    let state = status["state"].as_str().unwrap_or("unknown");
+    match state {
+        "ready" => {}
+        "unknown" => bail!(
+            "{name} has a run Parcela cannot reach ({}); see `parcela status`",
+            status["diagnostic"].as_str().unwrap_or("no owner")
+        ),
+        _ => bail!("{name} is {state}; see `parcela status`, or run `parcela restart`"),
+    }
+    let shared: Vec<&str> = status["live"]["endpoints"]
+        .as_object()
+        .into_iter()
+        .flat_map(|endpoints| endpoints.values())
+        .flat_map(|endpoint| endpoint["shared"].as_array().into_iter().flatten())
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    let host = |url: &str| -> String {
+        let authority = url.split('/').nth(2).unwrap_or_default();
+        authority.split(':').next().unwrap_or_default().to_owned()
+    };
+    for (asked, flag, suffix) in [
+        (share.lan, "--lan", ".local"),
+        (share.tailscale, "--tailscale", ".ts.net"),
+    ] {
+        ensure!(
+            !asked || shared.iter().any(|url| host(url).ends_with(suffix)),
+            "{name} is already running without {flag}; run `parcela restart {flag}`"
+        );
+    }
+    Ok(Some(serde_json::json!({
+        "already_running": true,
+        "workspace": status["workspace"],
+        "session": status["recorded_session"],
+        "live": status["live"],
+        "state": state,
+    })))
 }
 
 #[cfg(test)]

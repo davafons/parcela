@@ -83,7 +83,7 @@ pub fn ensure_running(state: &Path, host: &str) -> Result<Router> {
 
 pub fn started_hint(router: &Router, host: &str) -> String {
     format!(
-        "Started the proxy on :{}. Run `parcela trust` to trust {}",
+        "started the proxy on :{}; run `parcela trust` to trust {}",
         router.front_door.https,
         router.front_door.url(host)
     )

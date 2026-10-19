@@ -17,8 +17,8 @@ These flags work with every command:
 
 ```text
 $ parcela
-No parcela.yaml here. Create one with parcela init, then run parcela up.
-See parcela --help for every command.
+No parcela.yaml here. Create one with `parcela init`, then run `parcela up`.
+See `parcela --help` for every command.
 ```
 
 ## Text and JSON output
@@ -70,7 +70,7 @@ Next: parcela up
 parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--lan] [--tailscale]
 ```
 
-Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
+Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. On an environment that is already ready, `up` prints its URLs and exits 0. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
 
 - Without `--detach`, `up` stays in the foreground and prints the processes' output. Ctrl-C stops everything.
 - `--detach` returns once the services are ready and leaves them running.
@@ -116,7 +116,7 @@ $ parcela down
 ### parcela restart
 
 ```text
-parcela restart [--detach] [--backend-port N] [--lan] [--tailscale]
+parcela restart [--detach] [--setup] [--backend-port N] [--lan] [--tailscale]
 ```
 
 Stops everything and starts it again from the current `parcela.yaml`. Use it after any change, including added, removed or renamed services. It checks that the new configuration can start before it stops the running one. When the services' URLs change, it can only reserve the new ones after the old run stops. Sharing does not carry over: pass `--lan` or `--tailscale` again.
@@ -214,8 +214,8 @@ $ parcela doctor
 ✓ ps               /bin/ps
 ✓ config           /Users/you/code/hello/parcela.yaml (project hello)
 ✓ state            /Users/you/.local/state/parcela (private)
-✓ proxy            not running; parcela up starts it on HTTPS on :1443
-· HTTPS trust is not checked, and only parcela trust changes it. If the browser warns, run parcela trust once.
+✓ proxy            not running; `parcela up` starts it on HTTPS on :1443
+· HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.
 
 Next step: parcela up
 ```
@@ -236,7 +236,7 @@ parcela proxy status
 The proxy is one background Caddy that serves the URLs of every environment. `up` starts it when it is not running, and if it dies while environments run, for example because Caddy crashed or was killed, they start it again within a few seconds. You rarely need these commands.
 
 - `start --port N` listens on port `N` and saves it for later starts. The default is 1443, or `PARCELA_HTTPS_PORT` when it is set and nothing is saved. With `--port 443`, URLs have no port, like `https://hello.localhost`. Parcela never runs as root, so that works only where the system lets a normal user listen on 443: on Linux after `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`, and not on macOS.
-- `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`.
+- `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`. It says how many environments that affects.
 - `restart` replaces the proxy. Run it after upgrading Parcela.
 - `status` shows the port, process IDs, version and log file. It exits 1 when the proxy is not running.
 
@@ -347,12 +347,13 @@ $ parcela task psql -- -tAc 'show port'
 parcela run [--name NAME | --primary] [--backend-port N] -- COMMAND...
 ```
 
-Runs one command in the foreground as the project's only web service, instead of the services in `parcela.yaml`. The command must listen on `127.0.0.1:$PORT`. `run` passes the command through as-is, with no shell, so wrap it in `sh -c` to use variables. It works only in projects with a single service.
+Runs one command in the foreground as the project's only web service, instead of the services in `parcela.yaml`. It still needs a `parcela.yaml` for the project name. The command must listen on `127.0.0.1:$PORT`. `run` passes the command through as-is, with no shell, so wrap it in `sh -c` to use variables. It works only in projects with a single service.
 
 ```text
 $ parcela run -- sh -c 'exec python3 -m http.server "$PORT" --bind 127.0.0.1'
 Serving HTTP on 127.0.0.1 port 23225 (http://127.0.0.1:23225/) ...
-parcela: ready https://solo.localhost:1443 (generation 2, routing-only; data isolation requires project bindings)
+✓ hello is running at https://hello.localhost:1443
+  Press Ctrl-C to stop
 ```
 
 ## Agents

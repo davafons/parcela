@@ -79,7 +79,7 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
     );
     assert_eq!(
         check(&report, "config"),
-        &json!({"name": "config", "ok": false, "detail": format!("no parcela.yaml in {} or above; create one with parcela init, or pass --path to a configured checkout", path.display()), "fix": "parcela init"})
+        &json!({"name": "config", "ok": false, "detail": format!("no parcela.yaml in {} or above; create one with `parcela init`, or pass --path to a configured checkout", path.display()), "fix": "parcela init"})
     );
     assert_eq!(
         check(&report, "state"),
@@ -87,7 +87,7 @@ fn doctor_reports_a_stable_checklist_with_fixes_and_changes_nothing() {
     );
     assert_eq!(
         check(&report, "proxy"),
-        &json!({"name": "proxy", "ok": true, "detail": format!("not running; parcela up starts it on HTTPS on :{port}"), "fix": null})
+        &json!({"name": "proxy", "ok": true, "detail": format!("not running; `parcela up` starts it on HTTPS on :{port}"), "fix": null})
     );
     assert!(!state.exists());
 

@@ -310,7 +310,7 @@ impl Listeners {
     /// The sockets on `port`. Each must be loopback (`127.0.0.1`, `::1`) or a wildcard
     /// (`0.0.0.0`, `::`, `*`). Wildcard binds are accepted without a warning: the application
     /// chose that exposure, and Parcela still routes only through loopback.
-    fn on(&self, port: u16) -> Result<Vec<(u32, IpAddr)>> {
+    pub fn on(&self, port: u16) -> Result<Vec<(u32, IpAddr)>> {
         self.0
             .iter()
             .filter(|listener| listener.port == port)

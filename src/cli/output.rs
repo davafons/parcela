@@ -150,7 +150,7 @@ pub fn status_rows(rows: &[Value], style: &Style) -> String {
         })
         .collect();
     if rows.is_empty() {
-        return "No environments registered. Start one with parcela up.\n".into();
+        return "No environments registered. Start one with `parcela up`.\n".into();
     }
     table(&["PROJECT", "NAME", "STATE", "URL", "PATH"], &rows)
 }

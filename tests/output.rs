@@ -48,7 +48,7 @@ fn piped_stdout_is_json_and_json_flag_forces_it_on_a_terminal() {
     let empty =
         serde_json::json!({"runtime_verified": false, "workspaces": [], "unregistered": []});
     let outside = path.parent().unwrap();
-    for args in [&["status", "--all"][..], &["--json", "status", "--all"]] {
+    for args in [&["ls"][..], &["--json", "ls"]] {
         let output = piped(outside, &state, args);
         assert!(output.status.success());
         assert_eq!(
@@ -56,7 +56,7 @@ fn piped_stdout_is_json_and_json_flag_forces_it_on_a_terminal() {
             empty
         );
     }
-    let forced = terminal(outside, &state, &["--json", "status", "--all"]);
+    let forced = terminal(outside, &state, &["--json", "ls"]);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&forced).unwrap(),
         empty
@@ -76,8 +76,8 @@ fn the_human_flag_is_gone() {
 fn a_terminal_gets_aligned_text() {
     let (_t, path, state) = project();
     assert_eq!(
-        terminal(path.parent().unwrap(), &state, &["status", "--all"]),
-        "No environments registered. Start one with parcela up.\n"
+        terminal(path.parent().unwrap(), &state, &["ls"]),
+        "No environments registered. Start one with `parcela up`.\n"
     );
     assert_eq!(
         terminal(&path, &state, &["ls"]),
@@ -93,7 +93,7 @@ fn a_terminal_gets_aligned_text() {
         .adopt(&manifest, &path, Role::Primary, "primary")
         .unwrap();
     assert_eq!(
-        terminal(&path, &state, &["status", "--all"]),
+        terminal(&path, &state, &["ls"]),
         format!(
             "PROJECT  NAME     STATE    URL                          PATH\ndemo     primary  stopped  https://demo.localhost:1443  {}\n",
             path.display()

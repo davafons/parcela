@@ -137,7 +137,7 @@ fn rm_forgets_a_stopped_environment_releases_its_hosts_and_keeps_files() {
     assert_eq!(refused.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&refused.stderr),
-        "parcela: notes is starting; stop it with parcela down before removing it\n"
+        "parcela: notes is starting; stop it with `parcela down` before removing it\n"
     );
     let removed = json_of(&cli(&review, &f.state, &["rm"]));
     let runtime = f
@@ -182,7 +182,7 @@ fn rm_prune_forgets_only_stopped_registrations_whose_checkout_is_gone() {
     );
     assert!(text.contains(&runtime.display().to_string()));
     assert!(text.ends_with(
-        "✗ Skipped live (notes): still running; stop it with parcela down --workspace ID\n"
+        "✗ Skipped live (notes): still running; stop it with `parcela down --workspace ID`\n"
     ));
     let mut ids = f.ids();
     ids.sort();

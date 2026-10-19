@@ -227,7 +227,7 @@ fn inspection_and_invalid_names_do_not_create_state() {
         value(&cli(&path, &state, &["ls"]))["workspaces"],
         serde_json::json!([])
     );
-    value(&cli(temp.path(), &state, &["status", "--all"]));
+    value(&cli(temp.path(), &state, &["ls"]));
     assert!(!cli(&path, &state, &["context"]).status.success());
     let invalid = cli(&path, &state, &["up", "--name", "../bad"]);
     assert_eq!(invalid.status.code(), Some(1));

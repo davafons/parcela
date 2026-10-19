@@ -16,11 +16,14 @@ pub fn admin(socket: &Path, method: &str, path: &str, body: &[u8]) -> Result<(u1
     exchange(&mut stream, method, path, "localhost", body)
 }
 pub fn readiness(address: SocketAddr, host: &str, path: &str) -> Result<bool> {
+    Ok((200..300).contains(&status(address, host, path)?))
+}
+/// The status code of `GET path` with a short timeout.
+pub fn status(address: SocketAddr, host: &str, path: &str) -> Result<u16> {
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(150))?;
     stream.set_read_timeout(Some(Duration::from_millis(300)))?;
     stream.set_write_timeout(Some(Duration::from_millis(300)))?;
-    let (code, _) = exchange(&mut stream, "GET", path, host, &[])?;
-    Ok((200..300).contains(&code))
+    Ok(exchange(&mut stream, "GET", path, host, &[])?.0)
 }
 fn exchange(
     stream: &mut (impl Read + Write),

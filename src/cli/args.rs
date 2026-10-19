@@ -23,6 +23,7 @@ pub struct Args {
 }
 
 #[derive(clap::Args, Clone)]
+#[command(next_help_heading = "Global options")]
 pub struct Global {
     /// Checkout directory
     #[arg(long, global = true, default_value = ".")]
@@ -139,11 +140,7 @@ pub enum Command {
         launch_file: Option<PathBuf>,
     },
     /// Show the environment's status
-    Status {
-        /// Show all environments
-        #[arg(long, conflicts_with = "workspace")]
-        all: bool,
-    },
+    Status,
     /// List environments
     Ls,
     /// Show logs

@@ -22,11 +22,11 @@ Another program listens on the port. Parcela never stops it. Stop it yourself, o
 ## `up` times out
 
 ```text
-parcela: application readiness timed out; see child diagnostics
+parcela: not ready after 60s: web: GET /up returned 404
 parcela: services stopped before they were ready; full log: /Users/you/.local/state/parcela/environments/<id>/log/owner.log
 ```
 
-A service never answered on its port. Check that its command:
+The message says what each service did instead: `nothing listens on its $PORT`, a status code, or that another process holds the port. Check that its command:
 
 - listens on `$PORT`, not a fixed port,
 - binds `127.0.0.1`,
