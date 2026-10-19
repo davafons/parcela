@@ -1,11 +1,22 @@
+use clap::builder::styling::{AnsiColor, Styles};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+
+/// Help colors: amber headings like the docs site, cyan commands and flags.
+const STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Yellow.on_default().bold())
+    .usage(AnsiColor::Yellow.on_default().bold())
+    .literal(AnsiColor::Cyan.on_default().bold())
+    .placeholder(AnsiColor::Cyan.on_default())
+    .error(AnsiColor::Red.on_default().bold())
+    .valid(AnsiColor::Green.on_default())
+    .invalid(AnsiColor::Yellow.on_default());
 
 /// Run each checkout's services at named HTTPS URLs (experimental).
 ///
 /// Start with `parcela init`, then `parcela up`.
 #[derive(Parser)]
-#[command(version)]
+#[command(version, styles = STYLES)]
 pub struct Args {
     #[command(flatten)]
     pub global: Global,

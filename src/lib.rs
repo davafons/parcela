@@ -7,6 +7,7 @@ pub mod frontdoor;
 pub mod http;
 pub mod lifecycle;
 pub mod owner;
+pub mod paint;
 pub mod ports;
 pub mod private;
 pub mod process;

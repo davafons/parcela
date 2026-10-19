@@ -18,7 +18,10 @@ pub fn main() {
     match result {
         Ok(code) => std::process::exit(code),
         Err(error) => {
-            eprintln!("parcela: {error:#}");
+            eprintln!(
+                "{} {error:#}",
+                parcela::paint::Paint::stderr().paint("1;31", "parcela:")
+            );
             std::process::exit(1);
         }
     }

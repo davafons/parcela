@@ -317,6 +317,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         }
         Command::Logs { service, tail, .. } => {
             let (registry, workspace) = reader()?;
+            let prefixed = service.is_none();
             let result = lifecycle::service_request(
                 &registry,
                 &workspace,
@@ -325,13 +326,35 @@ pub fn run(mut cli: Cli) -> Result<i32> {
                     tail: tail as usize,
                 },
             )?;
+            let logs = result["logs"]
+                .as_str()
+                .context("invalid backend log response")?;
             use std::io::Write;
-            std::io::stdout().lock().write_all(
-                result["logs"]
-                    .as_str()
-                    .context("invalid backend log response")?
-                    .as_bytes(),
-            )?;
+            let mut out = std::io::stdout().lock();
+            if !prefixed {
+                out.write_all(logs.as_bytes())?;
+                return Ok(0);
+            }
+            // The owner prefixes each line with `name | `; color the prefix per name.
+            let paint = parcela::paint::Paint::stdout();
+            let mut seen: Vec<&str> = Vec::new();
+            for line in logs.lines() {
+                match line.split_once(" | ") {
+                    Some((padded, rest)) => {
+                        let name = padded.trim_end();
+                        let index =
+                            seen.iter()
+                                .position(|seen| *seen == name)
+                                .unwrap_or_else(|| {
+                                    seen.push(name);
+                                    seen.len() - 1
+                                });
+                        let prefix = paint.log_prefix(index, name, padded.len());
+                        writeln!(out, "{prefix} {rest}")?
+                    }
+                    None => writeln!(out, "{line}")?,
+                }
+            }
             Ok(0)
         }
         Command::Url { service } => {

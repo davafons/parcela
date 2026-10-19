@@ -436,12 +436,13 @@ pub fn follow_logs(
     let socket = crate::sockets::environment(&runtime)?.compose;
     let width = names.iter().map(String::len).max().unwrap_or(0);
     let prefixed = service.is_none();
+    let paint = crate::paint::Paint::stdout();
     let output = std::sync::Mutex::new(std::io::stdout());
     let signals = Signals::new()?;
     let mut children = Vec::new();
     std::thread::scope(|scope| -> Result<()> {
         let mut readers = Vec::new();
-        for name in &names {
+        for (index, name) in names.iter().enumerate() {
             let mut child = std::process::Command::new(&native.binary)
                 .args(["--use-uds", "--unix-socket"])
                 .arg(&socket)
@@ -465,7 +466,7 @@ pub fn follow_logs(
                     let Ok(line) = line else { break };
                     let mut out = output.lock().unwrap_or_else(|poison| poison.into_inner());
                     let written = if prefixed {
-                        writeln!(out, "{name:width$} | {line}")
+                        writeln!(out, "{} {line}", paint.log_prefix(index, name, width))
                     } else {
                         writeln!(out, "{line}")
                     };

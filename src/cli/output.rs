@@ -1,4 +1,5 @@
 use anyhow::Result;
+use parcela::paint::Paint;
 use serde_json::Value;
 use std::io::{IsTerminal, Write};
 
@@ -42,22 +43,14 @@ impl Output {
     }
 }
 
-pub struct Style {
-    color: bool,
-}
+pub struct Style(Paint);
 
 impl Style {
     fn detect() -> Self {
-        Self {
-            color: std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none(),
-        }
+        Self(Paint::stdout())
     }
     fn paint(&self, code: &str, text: &str) -> String {
-        if self.color {
-            format!("\x1b[{code}m{text}\x1b[0m")
-        } else {
-            text.to_owned()
-        }
+        self.0.paint(code, text)
     }
     pub fn ok(&self) -> String {
         self.paint("32", "✓")

@@ -615,14 +615,7 @@ fn ready_notice(
 ) -> String {
     use std::io::IsTerminal;
     let terminal = std::io::stderr().is_terminal();
-    let color = terminal && std::env::var_os("NO_COLOR").is_none();
-    let paint = |code: &str, text: &str| {
-        if color {
-            format!("\x1b[{code}m{text}\x1b[0m")
-        } else {
-            text.to_owned()
-        }
-    };
+    let paint = |code: &str, text: &str| crate::paint::Paint::stderr().paint(code, text);
     let name = match workspace.role {
         crate::registry::Role::Primary => workspace.project_id.clone(),
         crate::registry::Role::Preview => {
