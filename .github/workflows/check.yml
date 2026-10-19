@@ -24,3 +24,11 @@ jobs:
       - run: scripts/check
       - name: Live suites against real Caddy and Process Compose
         run: scripts/check-live
+      - name: Logs from the failed live fixtures
+        if: failure()
+        run: |
+          for root in /tmp/pcl-live-*; do
+            find "$root" -name '*.log' -size +0 | head -20 | while read -r log; do
+              echo "== $log"; tail -40 "$log"
+            done
+          done
