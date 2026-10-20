@@ -50,6 +50,11 @@ export default defineConfig({
   },
   themeConfig: {
     logo: '/assets/logo.svg',
+    nav: [
+      { text: 'Get started', link: '/getting-started/' },
+      { text: 'Guides', items: groups.find(({ label }) => label === 'Guides').pages.map(([slug, text]) => ({ text, link: route(slug) })) },
+      { text: 'FAQ', link: '/faq/' },
+    ],
     outline: [2, 3],
     search: { provider: 'local' },
     sidebar: groups.map(({ label, pages }) => ({
@@ -57,9 +62,5 @@ export default defineConfig({
       items: pages.map(([slug, text]) => ({ text, link: route(slug) })),
     })),
     socialLinks: [{ icon: 'github', link: 'https://github.com/davafons/parcela' }],
-    footer: {
-      message: `Released under the <a href="https://github.com/davafons/parcela/blob/main/LICENSE">AGPL-3.0</a>. <a href="https://github.com/davafons/parcela">GitHub</a> · <a href="${base}getting-started/">Get started</a> · <a href="${base}faq/">FAQ</a>`,
-      copyright: 'Copyright © 2026 David Afonso',
-    },
   },
 });

@@ -1,76 +1,144 @@
 <script setup>
-// A top-down field of land plots in box-drawing characters behind the home hero. It is the
-// same on every render and mirrored around a center fence, so it stays symmetric at any width.
-function field(plotsAcross, rows) {
-  let seed = 7;
-  const random = () => {
-    seed = (seed * 1664525 + 1013904223) % 4294967296;
-    return seed / 4294967296;
-  };
-  const w = 16;
-  const h = 6;
-  const crops = ['· · · · · · ·', "' ' ' ' ' ' '", '~ ~ ~ ~ ~ ~ ~', ': : : : : : :', '+   +   +   +', ''];
-  const half = Math.ceil(plotsAcross / 2);
-  const plots = Array.from({ length: Math.ceil(rows / h) }, () => Array.from({ length: half }, () => crops[Math.floor(random() * crops.length)]));
-  const cols = plotsAcross * w + 1;
-  const lines = [];
-  for (let y = 0; y < rows; y += 1) {
-    let line = '';
-    for (let x = 0; x < cols; x += 1) {
-      const edgeX = x % w === 0;
-      const edgeY = y % h === 0;
-      if (edgeX && edgeY) line += '┼';
-      else if (edgeY) line += '─';
-      else if (edgeX) line += '│';
-      else {
-        const column = Math.floor(x / w);
-        const crop = plots[Math.floor(y / h)][Math.min(column, plotsAcross - 1 - column)];
-        const row = (y % h) - 1;
-        const char = row % 2 === 0 && row < h - 2 ? crop[(x % w) - 2] : undefined;
-        line += char ?? ' ';
-      }
-    }
-    lines.push(line);
+import { onBeforeUnmount, onMounted, ref } from 'vue';
+
+// Land plots behind the home hero, laid out from the page itself: fences fall on the content
+// edges and the gap between the demo columns, and stop short of every text block and widget.
+const root = ref(null);
+const field = ref(null);
+let observer;
+let frame = 0;
+
+const pad = 14;
+
+// The text of the headline, without the rotator's hidden names (they are wider than the shown one).
+function headline() {
+  const heading = document.querySelector('.VPHero .heading');
+  if (!heading) return [];
+  const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
+  const found = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.textContent.trim() || node.parentElement.closest('.rotator, .sr')) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    found.push(...range.getClientRects());
   }
-  return lines.join('\n');
+  return found;
 }
 
-const plots = field(22, 72);
+function rects(selector, tight) {
+  return [...document.querySelectorAll(selector)].flatMap((element) => {
+    if (!tight) return [element.getBoundingClientRect()];
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return [...range.getClientRects()];
+  });
+}
+
+function measure() {
+  cancelAnimationFrame(frame);
+  frame = requestAnimationFrame(() => {
+    const box = root.value?.getBoundingClientRect();
+    const terminal = document.querySelector('.demo .terminal')?.getBoundingClientRect();
+    const grid = document.querySelector('.demo .agents')?.getBoundingClientRect();
+    if (!box || !terminal || !grid) return;
+    const left = terminal.left - box.left;
+    const right = Math.max(terminal.right, grid.right) - box.left;
+    const across = right - left > 700 ? 8 : 4;
+    const size = (right - left) / across;
+    const top = terminal.top - box.top;
+    // The field ends a little below the demo, before the page content starts.
+    const height = Math.round(Math.max(terminal.bottom, grid.bottom) - box.top + 72);
+    const xs = [];
+    for (let x = left - Math.ceil(left / size) * size; x <= box.width + 1; x += size) xs.push(x);
+    const ys = [];
+    for (let y = top - Math.ceil(top / size) * size; y <= height + 1; y += size) ys.push(y);
+    const holes = [
+      ...headline(),
+      ...rects('.VPHero .heading .rotator', false),
+      ...rects('.VPHero .tagline', true),
+      ...rects('.VPHero .actions .action', false),
+      terminal,
+      grid,
+    ].filter((rect) => rect.width && rect.height).map((rect) => ({
+      x: rect.left - box.left - pad,
+      y: rect.top - box.top - pad,
+      w: rect.width + pad * 2,
+      h: rect.height + pad * 2,
+    }));
+    field.value = { width: box.width, height, xs, ys, size, left, top, holes };
+  });
+}
+
+onMounted(() => {
+  measure();
+  observer = new ResizeObserver(measure);
+  observer.observe(document.body);
+  const rotator = document.querySelector('.VPHero .heading .rotator');
+  if (rotator) observer.observe(rotator);
+  document.fonts?.ready.then(measure);
+});
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  cancelAnimationFrame(frame);
+});
 </script>
 
 <template>
-  <div class="background" aria-hidden="true">
-    <pre class="field">{{ plots }}</pre>
+  <div ref="root" class="background" :style="field ? { height: `${field.height}px` } : null" aria-hidden="true">
+    <svg v-if="field" :width="field.width" :height="field.height">
+      <defs>
+        <mask id="parcela-plots-mask" maskUnits="userSpaceOnUse" x="0" y="0" :width="field.width" :height="field.height">
+          <rect :width="field.width" :height="field.height" fill="#fff" />
+          <rect v-for="(hole, i) in field.holes" :key="i" :x="hole.x" :y="hole.y" :width="hole.w" :height="hole.h" rx="18" fill="#000" />
+        </mask>
+        <pattern
+          id="parcela-plots-dots"
+          patternUnits="userSpaceOnUse"
+          :width="field.size / 8"
+          :height="field.size / 8"
+          :x="field.left + field.size / 16"
+          :y="field.top + field.size / 16"
+        >
+          <circle :cx="field.size / 16" :cy="field.size / 16" r="1" class="dot" />
+        </pattern>
+      </defs>
+      <g mask="url(#parcela-plots-mask)">
+        <rect :width="field.width" :height="field.height" fill="url(#parcela-plots-dots)" />
+        <line v-for="x in field.xs" :key="`x${x}`" :x1="x" :x2="x" y1="0" :y2="field.height" class="fence" />
+        <line v-for="y in field.ys" :key="`y${y}`" x1="0" :x2="field.width" :y1="y" :y2="y" class="fence" />
+      </g>
+    </svg>
   </div>
 </template>
 
 <style scoped>
+/* Faint on purpose: it frames the hero without competing with it. */
 .background {
   position: absolute;
   z-index: -1;
-  top: calc(var(--vp-nav-height) * -1);
+  top: 0;
   left: 0;
   right: 0;
-  height: 1350px;
+  height: 1300px;
   overflow: hidden;
   pointer-events: none;
+  opacity: 0.6;
+  -webkit-mask-image: linear-gradient(transparent, #000 40px, #000 calc(100% - 160px), transparent);
+  mask-image: linear-gradient(transparent, #000 40px, #000 calc(100% - 160px), transparent);
 }
 
-/* Clear behind the headline and the demo, fading out before the content below. */
-.field {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  margin: 0;
-  color: var(--parcela-bg-mark);
-  font-family: var(--vp-font-family-mono);
-  font-size: 13px;
-  line-height: 18px;
-  opacity: 0.8;
-  transform: translateX(-50%);
-  -webkit-mask-image: radial-gradient(ellipse 880px 540px at 50% 38%, transparent 55%, #000 100%), linear-gradient(#000 45%, transparent 80%);
-  -webkit-mask-composite: source-in;
-  mask-image: radial-gradient(ellipse 880px 540px at 50% 38%, transparent 55%, #000 100%), linear-gradient(#000 45%, transparent 80%);
-  mask-composite: intersect;
+svg {
+  display: block;
+}
+
+.fence {
+  stroke: var(--parcela-bg-mark);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.dot {
+  fill: var(--parcela-bg-mark);
 }
 </style>

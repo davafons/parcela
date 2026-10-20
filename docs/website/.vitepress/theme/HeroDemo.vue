@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { agents } from './agents.js';
 
 // Three agents, one worktree each. An agent opens its terminal tab and its hand appears over
@@ -36,17 +36,11 @@ const script = [
   [0, 'down'],
 ];
 
-// A hand works somewhere inside its own slot.
-const spot = (p, x = 0.6, y = 0.55) => [(p % 3 + x) / 3 * 100, (Math.floor(p / 3) + y) / 2 * 100];
-const pointers = reactive(players.map((_, p) => ({ x: spot(p)[0], y: spot(p)[1], tilt: 0, shown: false, click: 0 })));
-
-function wander(p) {
-  const pointer = pointers[p];
-  const [x, y] = spot(p, 0.3 + Math.random() * 0.5, 0.3 + Math.random() * 0.45);
-  pointer.tilt = x > pointer.x ? 8 : -8;
-  Object.assign(pointer, { x, y });
-  setTimeout(() => { pointer.tilt = 0; }, 700);
-}
+// A hand rests over its own slot and shows a loading ring while its agent works.
+const spot = (p) => [(p % 3 + 0.72) / 3 * 100, (Math.floor(p / 3) + 0.4) / 2 * 100];
+const pointers = reactive(players.map((_, p) => ({ x: spot(p)[0], y: spot(p)[1], shown: false, working: false, click: 0 })));
+// The agent's last step before `down`: after it, the agent is done and its ring stops.
+const last = envs.map((_, i) => script.findLastIndex(([tab, kind]) => tab === i && (kind === 'say' || kind === 'run')));
 
 const tabs = reactive(envs.map(() => ({ open: false, busy: false, lines: [] })));
 const order = ref([]);
@@ -54,12 +48,10 @@ const view = ref(-1);
 const focus = ref(-1);
 const typed = ref('');
 const state = reactive(envs.map(() => 'empty'));
-const running = computed(() => state.filter((s) => s !== 'empty').length);
 const root = ref(null);
 let run = 0;
 let held = 0;
 let observer;
-let drift;
 
 // Clicking a tab holds it on screen for a while; then the view follows the agents again.
 function pick(i) {
@@ -83,6 +75,7 @@ function close(i) {
   tabs[i].busy = false;
   order.value = order.value.filter((tab) => tab !== i);
   pointers[i].shown = false;
+  pointers[i].working = false;
   if (view.value === i) view.value = order.value.at(-1) ?? -1;
 }
 
@@ -100,7 +93,7 @@ function reset(done) {
   focus.value = -1;
   typed.value = '';
   envs.forEach((_, i) => { state[i] = 'empty'; });
-  pointers.forEach((pointer, p) => Object.assign(pointer, { x: spot(p)[0], y: spot(p)[1], tilt: 0, shown: false }));
+  pointers.forEach((pointer) => Object.assign(pointer, { shown: false, working: false }));
   if (!done) return;
   // The resting frame: every agent has its worktree up and its work checked.
   for (const [tab, kind, text, out] of script) {
@@ -124,7 +117,7 @@ async function play(id) {
     for (;;) {
       reset(false);
       await wait(700);
-      for (const [tab, kind, text, out] of script) {
+      for (const [step, [tab, kind, text, out]] of script.entries()) {
         if (!tabs[tab].open) {
           open(tab);
           show(tab);
@@ -143,6 +136,7 @@ async function play(id) {
           lines.push(ask(text));
           typed.value = '';
           tabs[tab].busy = true;
+          pointers[tab].working = true;
           await wait(900);
         } else if (kind === 'say') {
           pointers[tab].click += 1;
@@ -165,6 +159,7 @@ async function play(id) {
           await wait(kind === 'up' ? 900 : 1000);
           if (kind === 'down') close(tab);
         }
+        if (step === last[tab]) pointers[tab].working = false;
       }
       await wait(1800);
     }
@@ -177,20 +172,14 @@ onMounted(() => {
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   observer = new IntersectionObserver(([entry]) => {
     run += 1;
-    clearInterval(drift);
-    if (entry.isIntersecting) {
-      play(run);
-      drift = setInterval(() => pointers.forEach((pointer, p) => pointer.shown && wander(p)), 1500);
-    } else {
-      reset(true);
-    }
+    if (entry.isIntersecting) play(run);
+    else reset(true);
   });
   observer.observe(root.value);
 });
 
 onBeforeUnmount(() => {
   run += 1;
-  clearInterval(drift);
   observer?.disconnect();
 });
 
@@ -238,9 +227,10 @@ reset(true);
           :key="p"
           class="pointer"
           :class="{ shown: pointer.shown }"
-          :style="{ left: `${pointer.x}%`, top: `${pointer.y}%`, '--tilt': `${pointer.tilt}deg`, '--color': players[p] }"
+          :style="{ left: `${pointer.x}%`, top: `${pointer.y}%`, '--color': players[p] }"
         >
           <span v-if="pointer.click" :key="pointer.click" class="ring"></span>
+          <span v-if="pointer.working" class="loading"><i v-for="dot in 8" :key="dot" :style="{ '--dot': dot - 1 }"></i></span>
           <svg :key="`hand-${pointer.click}`" viewBox="-20 -6 64 86" class="hand">
             <g transform="translate(5 7)" opacity="0.16" stroke="#000" stroke-width="10" stroke-linejoin="round">
               <rect x="-8" y="0" width="16" height="48" rx="8" /><rect x="-12" y="30" width="46" height="42" rx="16" />
@@ -253,10 +243,6 @@ reset(true);
           </svg>
         </div>
       </div>
-      <div class="bar">
-        <span><b>{{ running }}</b> running</span>
-        <span class="domain">*.localhost:1443</span>
-      </div>
     </div>
   </section>
 </template>
@@ -265,6 +251,8 @@ reset(true);
 .demo {
   display: grid;
   gap: 24px;
+  box-sizing: border-box;
+  width: 100%;
   margin: 0 auto;
   padding: 0 24px;
   max-width: 1280px;
@@ -282,12 +270,17 @@ reset(true);
     gap: 32px;
     padding: 0 64px;
   }
+
+  /* Side by side, the terminal takes the grid's height. */
+  .terminal {
+    min-height: 0;
+  }
 }
 
 .terminal {
   display: flex;
   flex-direction: column;
-  min-height: 300px;
+  min-height: 240px;
   border: 2px solid var(--parcela-frame);
   border-radius: 22px;
   background: var(--vp-c-bg);
@@ -542,29 +535,6 @@ code {
   color: var(--vp-c-text-3);
 }
 
-.bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 9px 16px;
-  border: 2px solid var(--parcela-frame);
-  border-radius: 999px;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-2);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.bar b {
-  color: var(--vp-c-brand-1);
-  font-weight: 800;
-}
-
-.domain {
-  font-family: var(--vp-font-family-mono);
-  font-size: 12px;
-  font-weight: 600;
-}
 
 .pointer {
   position: absolute;
@@ -588,10 +558,39 @@ code {
   width: 32px;
   overflow: visible;
   font-family: var(--vp-font-family-base);
-  transform: rotate(var(--tilt));
   transform-origin: 11px 3px;
-  transition: transform 0.4s ease;
   animation: press 0.25s ease;
+}
+
+/* The console's loading ring: eight dots, the lit one going round. */
+.loading {
+  position: absolute;
+  left: -34px;
+  top: -2px;
+  width: 22px;
+  height: 22px;
+  animation: appear 0.25s ease-out both;
+}
+
+.loading i {
+  position: absolute;
+  left: 9px;
+  top: 9px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color);
+  transform: rotate(calc(var(--dot) * 45deg)) translateY(-9px);
+  animation: dot 0.8s steps(1) infinite;
+  animation-delay: calc(var(--dot) * 0.1s - 0.8s);
+}
+
+@keyframes dot {
+  0% { opacity: 1; }
+  12.5% { opacity: 0.7; }
+  25% { opacity: 0.45; }
+  37.5% { opacity: 0.25; }
+  50% { opacity: 0.15; }
 }
 
 .ring {

@@ -47,7 +47,7 @@
   --parcela-glow: 0 0 0 3px rgba(52, 191, 237, 0.28), 0 6px 18px rgba(10, 143, 209, 0.18);
   --parcela-card: 0 1px 2px rgba(75, 81, 87, 0.06), 0 6px 20px rgba(75, 81, 87, 0.07);
   --parcela-page: linear-gradient(180deg, #ffffff 0%, #eef1f4 100%);
-  --parcela-bg-mark: rgba(75, 81, 87, 0.16);
+  --parcela-bg-mark: rgba(75, 81, 87, 0.26);
   --parcela-github: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E");
 
   --vp-c-bg: #ffffff;
@@ -90,7 +90,7 @@
   --vp-button-alt-active-border: var(--parcela-blue-deep);
   --vp-button-alt-active-text: #4b5157;
 
-  --parcela-hero: linear-gradient(120deg, #0a8fd1 0%, #34bfed 100%);
+  --parcela-hero: linear-gradient(120deg, #0a75ae 0%, #1590c8 100%);
 }
 
 :root.dark {
@@ -99,7 +99,7 @@
   --parcela-glow: 0 0 0 3px rgba(52, 191, 237, 0.35), 0 6px 18px rgba(52, 191, 237, 0.15);
   --parcela-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
   --parcela-page: linear-gradient(180deg, #181c20 0%, #121518 100%);
-  --parcela-bg-mark: rgba(230, 234, 238, 0.11);
+  --parcela-bg-mark: rgba(230, 234, 238, 0.17);
 
   --vp-c-bg: #181c20;
   --vp-c-bg-alt: #14181b;
@@ -183,6 +183,24 @@ body {
   mask: var(--parcela-github) center / contain no-repeat;
 }
 
+/* Landing page sections rise into place as they scroll in. */
+@supports (animation-timeline: view()) {
+  .VPHome > .vp-doc > div > *,
+  .VPHome .cta .pitch > *,
+  .footer .inner > * {
+    animation: reveal linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 45%;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -192,10 +210,10 @@ body {
   }
 }
 
-.VPNav .VPNavBar:not(.home.top) .content-body,
-.VPNavBar.has-sidebar .content-body {
-  background: color-mix(in srgb, var(--vp-c-bg) 88%, transparent);
-  backdrop-filter: blur(10px);
+/* No divider under the nav on the home page, even after scrolling. */
+.VPNavBar.home .divider,
+.VPNavBar.home .divider-line {
+  background-color: transparent !important;
 }
 
 .VPSidebar {
@@ -279,6 +297,10 @@ body {
 }
 
 /* The hero is one big centered statement; the demo row sits under it. */
+.VPContent .VPHome .VPHero {
+  padding-top: calc(var(--vp-nav-height) + 56px);
+}
+
 .VPHero .container {
   text-align: center;
 }
@@ -295,23 +317,13 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  font-size: 40px;
+  font-size: clamp(36px, 6vw, 72px);
   line-height: 1.12;
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
-@media (min-width: 640px) {
-  .VPHero .main .text {
-    font-size: 56px;
-  }
-}
-
 @media (min-width: 960px) {
-  .VPHero .main .text {
-    font-size: 72px;
-  }
-
   .VPHero .container .main .tagline {
     font-size: 22px;
   }
@@ -355,6 +367,13 @@ body {
 .VPHome {
   position: relative;
   z-index: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The closing band meets the footer with no gap. */
+.VPContent.is-home .VPHome {
+  margin-bottom: 0;
 }
 
 .VPHome .vp-doc {
@@ -384,6 +403,35 @@ body {
   font-weight: 600;
 }
 
+/* A command's output, written as a text block right after it, hangs off the command. */
+.VPHome .vp-doc div[class*='language-']:has(+ div.language-text) {
+  margin-bottom: 0;
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+
+.VPHome .vp-doc div[class*='language-'] + div.language-text {
+  margin-top: 0;
+  border-top: 2px dashed var(--vp-c-divider);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.VPHome .vp-doc div[class*='language-'] + div.language-text > span.lang {
+  display: none;
+}
+
+.VPHome .vp-doc div[class*='language-'] + div.language-text code {
+  color: #1f8a45;
+  font-weight: 600;
+}
+
+.dark .VPHome .vp-doc div[class*='language-'] + div.language-text code {
+  color: #5fd68a;
+}
+
 .VPHome .vp-doc strong {
   color: var(--vp-c-brand-1);
 }
@@ -395,7 +443,35 @@ body {
   }
 
   .VPNavBarSearch .DocSearch-Button {
-    width: 280px;
+    width: 220px;
     justify-content: space-between;
   }
+}
+
+/* The links sit together in the middle of the window, in the same place on every page. */
+@media (min-width: 1100px) {
+  .VPNavBarMenu {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    height: var(--vp-nav-height);
+    transform: translateX(-50%);
+  }
+}
+
+/* A nav dropdown opens under its label, left edges aligned. */
+.VPNavBarMenu .VPFlyout .menu {
+  left: 12px;
+  right: auto;
+}
+
+/* No dividers between the search, the theme switch and the GitHub link. */
+.VPNavBar .translations::before,
+.VPNavBar .appearance::before,
+.VPNavBar .social-links::before {
+  display: none;
+}
+
+.VPNavBar .social-links {
+  margin-left: 8px;
 }
