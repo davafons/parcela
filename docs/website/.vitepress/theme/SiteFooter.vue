@@ -46,7 +46,9 @@ const columns = [
         </a>
       </nav>
     </div>
-    <p class="copyright">© 2026 David Afonso</p>
+    <div class="bottom">
+      <p>© 2026 David Afonso</p>
+    </div>
   </footer>
 </template>
 
@@ -58,26 +60,40 @@ const columns = [
   font-size: 14px;
 }
 
+/* The columns and the copyright line share the page's content edges. */
+.inner,
+.bottom {
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 0 24px;
+  max-width: 1280px;
+}
+
+@media (min-width: 640px) {
+  .inner,
+  .bottom {
+    padding: 0 48px;
+  }
+}
+
+@media (min-width: 960px) {
+  .inner,
+  .bottom {
+    padding: 0 64px;
+  }
+}
+
 .inner {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 32px;
-  box-sizing: border-box;
-  margin: 0 auto;
-  padding: 56px 24px 40px;
-  max-width: 1280px;
+  padding-top: 56px;
+  padding-bottom: 40px;
 }
 
 @media (min-width: 640px) {
   .inner {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    padding: 56px 48px 40px;
-  }
-}
-
-@media (min-width: 960px) {
-  .inner {
-    padding: 64px 64px 48px;
   }
 }
 
@@ -115,11 +131,11 @@ h3 {
   height: 16px;
 }
 
-.copyright {
+.bottom p {
   margin: 0;
-  padding: 0 24px 32px;
+  padding: 20px 0 32px;
+  border-top: 1px solid var(--vp-c-divider);
   color: var(--vp-c-text-3);
-  font-size: 12px;
-  text-align: center;
+  font-size: 13px;
 }
 </style>

@@ -91,6 +91,9 @@ export function prepareContent({ clean = true } = {}) {
   for (const [path, markdown] of files) write(path, markdown);
   for (const [name, source] of Object.entries(downloads)) write(join(srcDir, 'public/assets', name), readFileSync(join(repository, source)));
   if (clean || !existsSync(join(srcDir, 'public/apple-touch-icon.png'))) write(join(srcDir, 'public/apple-touch-icon.png'), renderIcon(180));
+  // /docs/ has no page of its own; send it to the first one.
+  const first = route('getting-started');
+  write(join(srcDir, 'public/docs/index.html'), `<!doctype html><meta charset="utf-8"><title>Parcela docs</title><meta http-equiv="refresh" content="0; url=${first}"><link rel="canonical" href="${first}"><meta name="robots" content="noindex"><a href="${first}">Parcela docs</a>\n`);
   for (const [i, [slug, name]] of pages.entries()) {
     const page = describe(files[i][1], name);
     if (meta.get(slug)?.title === page.title && meta.get(slug)?.description === page.description) continue;
