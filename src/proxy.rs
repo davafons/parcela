@@ -5,7 +5,7 @@ use crate::{
     frontdoor::FrontDoor,
     private::{self, Lock},
     process::Identity,
-    router::{self, ProxyEvidence, Router, VERSION},
+    router::{self, PROTOCOL, ProxyEvidence, Router, VERSION},
 };
 use anyhow::{Context, Result, bail, ensure};
 use std::{
@@ -96,16 +96,22 @@ pub fn started_hint(router: &Router, host: &str, trusted: bool) -> String {
     )
 }
 
-pub fn version_warning(router: &Router) -> Option<String> {
-    (router.version != VERSION).then(|| {
-        format!(
-            "the running proxy is from Parcela {}, this is {VERSION}; run `parcela proxy restart` to update it",
+pub fn protocol_warning(router: &Router) -> Option<String> {
+    use std::cmp::Ordering;
+    match router.protocol.cmp(&PROTOCOL) {
+        Ordering::Equal => None,
+        Ordering::Less => Some(format!(
+            "the running proxy is from Parcela {}, older than this {VERSION}; run `parcela proxy restart` to update it",
             router.version
-        )
-    })
+        )),
+        Ordering::Greater => Some(format!(
+            "the running proxy is from Parcela {}, newer than this {VERSION}; run `parcela upgrade`",
+            router.version
+        )),
+    }
 }
 fn warn_version(router: &Router) {
-    if let Some(warning) = version_warning(router) {
+    if let Some(warning) = protocol_warning(router) {
         eprintln!("parcela: {warning}");
     }
 }

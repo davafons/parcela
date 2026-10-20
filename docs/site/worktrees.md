@@ -1,25 +1,18 @@
-# Parallel worktrees and agents
+# Worktrees and agents
 
-Every checkout of a project gets its own environment: its own ports, logs, processes and URLs. This page shows how checkouts are named, how to run several agents at once and how to keep their data apart.
+Start with a configured project. Give each agent its own checkout, then run the same `parcela.yaml` in each one.
 
-## How checkouts are named
+## Names and isolation
 
-The main checkout of a project uses the project URL. Every other checkout puts its name in front:
+| Checkout of `shop` | Default URL |
+| --- | --- |
+| Main checkout | `https://shop.localhost:1443` |
+| jj workspace or Git worktree `signup` | `https://signup-shop.localhost:1443` |
+| HTTP service with `subdomain: api` in `signup` | `https://api-signup-shop.localhost:1443` |
 
-| Checkout | Name | URL |
-|---|---|---|
-| Main checkout, or a plain directory | `primary` | `https://shop.localhost:1443` |
-| jj workspace `signup` | `signup` | `https://signup-shop.localhost:1443` |
-| Git worktree in directory `billing` | `billing` | `https://billing-shop.localhost:1443` |
-| Any checkout started with `parcela up --name review` | `review` | `https://review-shop.localhost:1443` |
+Parcela remembers identity on first registration. Renaming a branch keeps the same URL. A conflicting name is refused. Use `--name review` on first start to choose a name, or `--primary` for the main URL after the old holder releases it with `rm`. Long derived names are shortened to fit DNS limits and get a hash suffix.
 
-Other services add their name in front again, so the `api` service of `signup` is `https://api-signup-shop.localhost:1443`.
-
-- The project name comes from the main checkout's directory. All jj workspaces and Git worktrees of a repository share it. Set `project: shop` in `parcela.yaml` to choose it yourself.
-- Parcela remembers the name on the first `up`. Renaming a branch or a workspace keeps the same URL.
-- Each hostname label, like `api-signup-shop`, is at most 63 characters. A longer branch or workspace name is cut and ends in a short hash, like `add-mobile-checkout-flow-with-apple-pay-3f2a`. `--name` sets a shorter one.
-- A name that another checkout already uses is refused. Parcela never takes over another environment's URL.
-- Use `parcela up --primary` to give a linked checkout the project URL, when no other checkout holds it.
+Each environment has its own processes, ports, logs, and runtime directory. Processes still run as your user. Separate databases and queues in [your app configuration](frameworks.md#separate-data).
 
 ## Run several agents at once
 
@@ -47,6 +40,8 @@ parcela --path ../billing url
 https://billing-shop.localhost:1443
 ```
 
+Or name the environment the way its URL does, from any directory: `parcela -w billing-shop url`. `-w` takes a URL, a hostname, a name that only one environment has, or an ID.
+
 See everything that runs on the machine:
 
 ```sh
@@ -60,37 +55,19 @@ shop     signup   ready    https://signup-shop.localhost:1443   /Users/you/code/
 shop     primary  stopped  https://shop.localhost:1443          /Users/you/code/shop
 ```
 
-## Keep data separate
-
-Parcela separates ports, URLs, processes and logs. Your data is separate only if `parcela.yaml` says so: two checkouts that read the same `.env` and the same database share it.
-
-Give every environment its own database, and create it in `hooks.setup`, which runs on the first `up` of each new worktree:
-
-```yaml
-env:
-  DATABASE_PATH: ${PARCELA_DATA_DIR}/app.sqlite3
-
-hooks:
-  setup:
-    command: cp -n "$PARCELA_PRIMARY_DIR/.env" .env; bin/rails db:prepare
-  prestart:
-    command: bin/rails db:migrate
-```
-
-`PARCELA_DATA_DIR` belongs to one environment. `PARCELA_PRIMARY_DIR` is the main checkout, where untracked files like `.env` live. With this, `parcela up` in a fresh worktree copies the secrets, creates and seeds the database, migrates it and starts the app.
-
-For PostgreSQL or another server, run one per environment as a service, or name one database per environment on a shared server. [Databases](configuration.md#databases) in the configuration reference shows both.
-
 ## Clean up
 
 ```sh
-parcela down --all            # stop every environment of this project
-parcela down --all-projects   # stop every environment on the machine
+parcela --path ../billing down
 git worktree remove ../billing
-parcela rm --prune            # forget checkouts whose directory is gone
+parcela rm --prune
 ```
 
-`down` keeps everything on disk. `rm` forgets a stopped environment and frees its URLs. It keeps the runtime directory, so a database there survives until you delete it yourself.
+This stops and removes only `billing`, then forgets missing stopped checkouts. With jj, use `jj workspace forget billing` before removing its directory yourself.
+
+To stop all environments of this project, use `parcela down --all`. To stop all projects, use `parcela down --all-projects`.
+
+`down` keeps everything on disk. `rm` forgets a stopped environment and frees its URLs. It keeps the runtime directory, but a configured teardown hook runs first and can delete external data.
 
 ## Set up a coding agent
 
@@ -100,7 +77,7 @@ Parcela ships instructions for coding agents inside the binary. Print them with:
 parcela --skill
 ```
 
-The output is Markdown. It tells the agent how to pick the right checkout, start it with `--detach`, read `--json` output, find URLs and logs and stop only its own environment. You can also [read the operating skill](../../.agents/skills/parcela/SKILL.md) here or [download it](../../.agents/skills/parcela/SKILL.md?raw=1).
+Use the same operating instructions with Claude Code, Codex, Cursor, or another coding agent. The output is Markdown. It tells the agent how to pick the right checkout, start it with `--detach`, read `--json` output, find URLs and logs and stop only its own environment. You can also [read the operating skill](../../.agents/skills/parcela/SKILL.md) here or [download it](../../.agents/skills/parcela/SKILL.md?raw=1).
 
 ### Install the skill for Claude Code
 
@@ -134,6 +111,56 @@ Then ask Claude Code something bounded:
 /parcela Show this checkout's status and URLs. Don't start or stop anything.
 ```
 
-### Ask an agent to configure a project
+### Configure a project with an agent
 
-[Getting started](getting-started.md#let-your-agent-set-it-up) has a prompt that installs Parcela and writes `parcela.yaml` for an existing project.
+[Get started](getting-started.md#install-it-with-your-agent) has a prompt that installs Parcela and writes `parcela.yaml` for an existing project.
+
+## Share with another device
+
+Sharing is off by default and lasts for one run. Pass the flag again after a restart.
+
+### Share on the same network
+
+```text
+$ parcela up --detach --lan
+✓ hello is running at https://hello.localhost:1443
+            https://hello.local:1443
+  api       https://api-hello.localhost:1443
+            https://api-hello.local:1443
+```
+
+Each service also answers at a `.local` name, which the device on your network resolves over mDNS. Parcela publishes the names with `dns-sd` on macOS or `avahi-publish` on Linux, and Caddy listens on this machine's LAN address with the same port. Devices on the network reach only the environments started with `--lan`.
+
+The device does not trust Parcela's certificate authority, so it warns first. To stop the warning, install the certificate from `parcela trust --print` on the device. If the network changes, run `parcela restart --lan`. `--lan-ip IP` picks the address when the detected one is wrong, for example behind a VPN. `--lan` refuses a public address, so a machine with one, such as a cloud VM, cannot serve its app to the internet this way. `PARCELA_LAN=1` in the environment works like `--lan`, and `PARCELA_TAILSCALE=1` like `--tailscale`.
+
+### Share on your tailnet
+
+```text
+$ parcela up --detach --tailscale
+✓ hello is running at https://hello.localhost:1443
+            https://mb.tail1234.ts.net
+  api       https://api-hello.localhost:1443
+            https://mb.tail1234.ts.net:8443
+```
+
+Each service gets its own HTTPS port on this machine's tailnet name, through `tailscale serve`. Tailscale's certificate is trusted everywhere, so there is no warning. Only devices on your tailnet can open it. It never uses Funnel. It needs the Tailscale CLI, a connected machine and HTTPS certificates turned on for the tailnet. Parcela picks ports that `tailscale serve status` shows free, and leaves the rest of your serve configuration alone.
+
+### Let the dev server accept the names
+
+Dev servers such as Vite and Rails refuse hostnames they do not know. Parcela puts the shared ones in `PARCELA_SHARE_HOSTS`, separated by commas. For Vite:
+
+```js
+server: {
+  allowedHosts: (process.env.PARCELA_SHARE_HOSTS ?? '').split(',').filter(Boolean),
+},
+```
+
+The publishers show up in `parcela status` and `parcela logs` as `parcela-lan-<service>` and `parcela-tailscale-<service>`. A link that the app builds from `PARCELA_URL` still points at `.localhost`, which other devices cannot open.
+
+### Stop sharing
+
+Run `parcela down` in the shared checkout. This stops the environment and its mDNS or Tailscale publishers. To keep the app running locally, start it again with `parcela up --detach` without sharing flags. Unset `PARCELA_LAN` and `PARCELA_TAILSCALE` first if you used those variables.
+
+Check `parcela status`. For Tailscale, also check `tailscale serve status` to confirm the run's ports are gone. Parcela leaves unrelated serve configuration alone.
+
+If a device cannot connect, see [shared URL troubleshooting](troubleshooting.md#another-device-cannot-open-a-shared-url).

@@ -8,26 +8,43 @@ export const repository = resolve(project, '../..');
 export const srcDir = join(project, '.generated/src');
 
 export const groups = [
-  { label: 'Introduction', pages: [
-    ['index', 'Home', 'docs/site/index.md'],
-    ['getting-started', 'Getting started', 'docs/site/getting-started.md'],
-    ['faq', 'FAQ', 'docs/site/faq.md'],
+  { label: 'Start here', pages: [
+    ['docs', 'Documentation', 'docs/site/docs.md'],
+    ['getting-started', 'Get started', 'docs/site/getting-started.md'],
   ] },
   { label: 'Guides', pages: [
-    ['worktrees', 'Parallel worktrees and agents', 'docs/site/worktrees.md'],
-    ['frameworks', 'Frameworks and data', 'docs/site/frameworks.md'],
-    ['cli', 'CLI guide', 'docs/site/cli.md'],
+    ['frameworks', 'Configure your app', 'docs/site/frameworks.md'],
+    ['worktrees', 'Worktrees and agents', 'docs/site/worktrees.md'],
     ['troubleshooting', 'Troubleshooting', 'docs/site/troubleshooting.md'],
   ] },
   { label: 'Reference', pages: [
+    ['cli', 'CLI reference', 'docs/site/cli.md'],
     ['configuration', 'Configuration', 'docs/site/configuration.md'],
-    ['operating-skill', 'Operating skill', '.agents/skills/parcela/SKILL.md'],
+    ['faq', 'FAQ', 'docs/site/faq.md'],
     ['telemetry', 'Telemetry', 'docs/site/telemetry.md'],
   ] },
+  { label: 'More', pages: [
+    ['tutorial', 'Example app', 'docs/site/tutorial.md'],
+    ['contributing', 'Contribute to Parcela', 'CONTRIBUTING.md'],
+  ] },
 ];
-export const pages = groups.flatMap((group) => group.pages);
-// The landing page is the site root; every other page lives under /docs/.
-export const route = (slug) => (slug === 'index' ? '/' : `/docs/${slug}/`);
+export const pages = [
+  ['index', 'Home', 'docs/site/index.md'],
+  ...groups.flatMap((group) => group.pages),
+  ['operating-skill', 'Operating skill', '.agents/skills/parcela/SKILL.md'],
+  ['architecture', 'Architecture', 'docs/architecture.md'],
+  ['docs-site', 'Build the documentation site', 'docs/website/README.md'],
+];
+export const route = (slug) => slug === 'index' ? '/' : slug === 'docs' ? '/docs/' : `/docs/${slug}/`;
+export const redirects = {
+  installation: ['getting-started', 'install-it-by-hand'],
+  'daily-use': ['getting-started', 'everyday-commands'],
+  'project-setup': ['frameworks', 'services-and-setup'],
+  data: ['frameworks', 'separate-data'],
+  https: ['faq', 'clients-and-certificates'],
+  sharing: ['worktrees', 'share-with-another-device'],
+  concepts: ['worktrees', 'names-and-isolation'],
+};
 
 export const downloads = {
   'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
@@ -87,7 +104,7 @@ function write(path, bytes) {
 }
 
 export function prepareContent({ clean = true } = {}) {
-  const files = pages.map(([slug, , source]) => [join(srcDir, slug === 'index' ? 'index.md' : `docs/${slug}/index.md`), render(source)]);
+  const files = pages.map(([slug, , source]) => [join(srcDir, route(slug).slice(1), 'index.md'), render(source)]);
   if (clean) rmSync(srcDir, { recursive: true, force: true });
   for (const [path, markdown] of files) write(path, markdown);
   for (const [name, source] of Object.entries(downloads)) write(join(srcDir, 'public/assets', name), readFileSync(join(repository, source)));
@@ -95,10 +112,10 @@ export function prepareContent({ clean = true } = {}) {
   // The installer and the schema live at the site root, next to the pages.
   write(join(srcDir, 'public/install.sh'), readFileSync(join(project, 'install.sh')));
   write(join(srcDir, 'public/schema/v1.json'), readFileSync(join(project, 'schema/v1.json')));
-  // Cloudflare reads these from the site root: /docs/ has no page of its own, and install.sh
-  // should be fetched fresh soon after a release.
-  const first = route('getting-started');
-  write(join(srcDir, 'public/_redirects'), `/docs ${first} 301\n/docs/ ${first} 301\n`);
+  write(join(srcDir, 'public/_redirects'), '/docs /docs/ 301\n' + Object.entries(redirects).flatMap(([from, [to, anchor]]) => [
+    `/docs/${from} ${route(to)}#${anchor} 301`,
+    `/docs/${from}/ ${route(to)}#${anchor} 301`,
+  ]).join('\n') + '\n');
   write(join(srcDir, 'public/_headers'), '/install.sh\n  Content-Type: text/x-shellscript; charset=utf-8\n  Cache-Control: public, max-age=300\n');
   for (const [i, [slug, name]] of pages.entries()) {
     const page = describe(files[i][1], name);

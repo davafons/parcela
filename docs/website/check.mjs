@@ -4,7 +4,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { downloads, pages, repository, route } from './content.mjs';
+import { brandNames } from './brands.mjs';
+import { createMarkdownRenderer } from 'vitepress';
+import { downloads, groups, pages, redirects, repository, route } from './content.mjs';
 
 const base = '/';
 const output = process.env.DOCS_OUTPUT ?? join(repository, 'target/docs');
@@ -12,15 +14,53 @@ execFileSync(join(import.meta.dirname, 'node_modules/.bin/vitepress'), ['build']
   cwd: import.meta.dirname, stdio: 'inherit', env: { ...process.env, DOCS_BASE: base, DOCS_OUTPUT: output },
 });
 
+const markdown = await createMarkdownRenderer(repository, { html: false });
+brandNames(markdown);
+const decorated = markdown.render('Claude Code, Codex, Rails, and Next.js. NextXjs and GitHub.');
+assert.equal((decorated.match(/class="tool-name"/g) ?? []).length, 4, 'tool names are marked without matching lookalikes');
+assert.ok(decorated.includes('aria-hidden="true"'), 'decorative icons leave the names readable');
+for (const source of ['`Rails`', '```sh\nCodex Rails\n```']) {
+  assert.ok(!markdown.render(source).includes('tool-name'), 'brand decoration leaves code unchanged');
+}
+const linked = markdown.render('Python and [Python with **Caddy** installed](https://example.com) and Caddy.');
+assert.equal((linked.match(/class="tool-name"/g) ?? []).length, 2, 'only tool names outside links receive badges');
+assert.ok(!/<a\b[^>]*>[\s\S]*?tool-name[\s\S]*?<\/a>/.test(linked), 'links keep continuous text and underlines');
+
+assert.ok(markdown.render('<script>alert(1)</script>').includes('&lt;script&gt;'), 'prose remains escaped');
+
+const published = pages.map(([, , source]) => source);
+for (const name of readdirSync(join(repository, 'docs/site')).filter((name) => name.endsWith('.md'))) {
+  assert.ok(published.includes(`docs/site/${name}`), `${name} is published and navigable`);
+}
+
+assert.ok(!groups.some((group) => group.pages.some(([slug]) => slug === 'index')), 'the sidebar has no Home entry');
+assert.equal(groups.find(({ label }) => label === 'Guides').pages.length, 3, 'three guides follow Get started');
+
+const tutorial = readFileSync(join(repository, 'docs/site/tutorial.md'), 'utf8');
+for (const name of ['index.html', 'db.py', 'api.py', 'worker.py', 'parcela.yaml']) {
+  const example = readFileSync(join(repository, 'examples/docs-demo', name), 'utf8').trimEnd();
+  assert.ok(tutorial.includes('\n' + example + '\n```'), `the tutorial contains the tested ${name}`);
+}
+
 const html = (slug) => readFileSync(join(output, route(slug), 'index.html'), 'utf8');
 const ids = new Map(pages.map(([slug]) => [`${base}${route(slug).slice(1)}`, new Set([...html(slug).matchAll(/ id="([^"]+)"/g)].map((match) => match[1]))]));
 for (const [slug, , source] of pages) {
   assert.equal(html(slug).match(/<h1[\s>]/g)?.length, 1, `${source} renders one page heading`);
   assert.ok(!html(slug).includes(homedir()), `${source} leaks no local path`);
+  for (const [, path] of html(slug).matchAll(/href="([^"#?]+)"/g)) {
+    if (path === '/' || path.startsWith('/docs/')) assert.ok(ids.has(path), `${source} links to a published page ${path}`);
+  }
   for (const [, path, anchor] of html(slug).matchAll(/href="([^"#]*)#([^"]+)"/g)) {
     const target = path || `${base}${route(slug).slice(1)}`;
+    if (target === '/' || target.startsWith('/docs/')) assert.ok(ids.has(target), `${source} links to a published page ${target}`);
     if (ids.has(target)) assert.ok(ids.get(target).has(decodeURIComponent(anchor)), `${source} links to an existing anchor ${path}#${anchor}`);
   }
+}
+
+const rules = readFileSync(join(output, '_redirects'), 'utf8');
+for (const [from, [to, anchor]] of Object.entries(redirects)) {
+  assert.ok(ids.get(route(to))?.has(anchor), `${from} redirects to a published section`);
+  for (const suffix of ['', '/']) assert.ok(rules.includes(`/docs/${from}${suffix} ${route(to)}#${anchor} 301`), `${from}${suffix} retains its old URL`);
 }
 
 for (const [name, source] of Object.entries(downloads)) {
@@ -89,4 +129,4 @@ const blocks = [...html('worktrees').matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/g)]
   .map(([, code]) => code.replace(/<[^>]+>/g, '').replace(/&(?:lt|gt|quot|#39|amp);/g, (entity) => entities[entity]).trimEnd());
 assert.ok(blocks.includes(install), 'the rendered Claude skill install block matches docs/site/worktrees.md');
 
-console.log(`docs check passed: ${pages.length} pages with cards and metadata, ${Object.keys(downloads).length} downloads, search and install block at ${base} in ${output}`);
+console.log(`docs check passed: ${pages.length} pages with cards and metadata, ${Object.keys(downloads).length} downloads, source coverage, links, tutorial, search and install block at ${base} in ${output}`);

@@ -9,13 +9,11 @@ use parcela::{
     context::ResolvedContext,
     frontdoor::FrontDoor,
     lifecycle,
-    registry::{Registry, Workspace},
+    registry::{NOT_STARTED, Registry, Workspace},
     share::Request as Share,
     startup,
 };
 use std::path::{Path, PathBuf};
-
-const NOT_STARTED: &str = "nothing is registered yet; start this checkout with `parcela up`";
 
 pub(super) fn state_dir(explicit: Option<PathBuf>) -> Result<PathBuf> {
     let path = if let Some(path) = explicit {
@@ -55,12 +53,78 @@ pub(super) fn target_workspace(
         }
     }
 }
+/// The environment `selector` names: its ID, one of its URLs or hostnames, with or without
+/// `.localhost`, `.local` and the port, or its name when only one environment has it.
+fn select(registry: &Registry, selector: &str) -> Result<Workspace> {
+    if let Ok(id) = uuid::Uuid::parse_str(selector) {
+        return by_id(registry, id);
+    }
+    let lower = selector.to_ascii_lowercase();
+    let host = lower
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split(['/', ':'])
+        .next()
+        .unwrap_or_default();
+    let label = |host: &str| -> String {
+        host.strip_suffix(".localhost")
+            .or_else(|| host.strip_suffix(".local"))
+            .unwrap_or(host)
+            .to_owned()
+    };
+    let wanted = label(host);
+    let workspaces = registry.list(None)?;
+    for workspace in &workspaces {
+        let hosts = registry.hosts(&workspace.id)?;
+        if hosts
+            .values()
+            .chain([&workspace.hostname])
+            .any(|host| label(host) == wanted)
+        {
+            return Ok(workspace.clone());
+        }
+    }
+    let mut named: Vec<_> = workspaces
+        .into_iter()
+        .filter(|workspace| workspace.label == selector)
+        .collect();
+    match named.len() {
+        0 => anyhow::bail!(unknown_environment(selector)),
+        1 => Ok(named.remove(0)),
+        _ => anyhow::bail!(
+            "{selector} names {} environments; use one of: {}",
+            named.len(),
+            named
+                .iter()
+                .map(|workspace| label(&workspace.hostname))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+fn service_url(
+    registry: &Registry,
+    workspace: &Workspace,
+    service: Option<String>,
+) -> Result<String> {
+    match service {
+        Some(service) => lifecycle::service_url(registry, workspace, &service),
+        None => lifecycle::url(registry, workspace),
+    }
+}
+fn unknown_environment(selector: &str) -> String {
+    match uuid::Uuid::parse_str(selector) {
+        Ok(_) => UNKNOWN_ID.to_owned(),
+        Err(_) => format!("no environment named {selector}; list environments with parcela ls"),
+    }
+}
+const UNKNOWN_ID: &str = "unknown environment ID; list environments with parcela ls";
 fn by_id(registry: &Registry, id: uuid::Uuid) -> Result<Workspace> {
     registry
         .list(None)?
         .into_iter()
         .find(|workspace| workspace.id == id.to_string())
-        .context("unknown environment ID; list environments with parcela ls")
+        .context(UNKNOWN_ID)
 }
 /// Open the registry for writing, which creates it on first use.
 fn writable(state: &Path) -> Result<Registry> {
@@ -133,26 +197,46 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             .write_all(include_bytes!("../../.agents/skills/parcela/SKILL.md"))?;
         return Ok(0);
     }
+    if let Command::Completion { shell } = cli.command {
+        use clap::CommandFactory;
+        clap_complete::generate(
+            shell,
+            &mut super::args::Args::command(),
+            "parcela",
+            &mut std::io::stdout(),
+        );
+        return Ok(0);
+    }
     if let Command::Upgrade { nightly, stable } = cli.command {
         return super::upgrade::run(nightly, stable);
     }
     let state = state_dir(cli.state_dir)?;
-    if let Some(id) = cli.workspace
+    let mut id = None;
+    if let Some(selector) = &cli.workspace
         && !matches!(
             cli.command,
             Command::Init { .. } | Command::Doctor { .. } | Command::Telemetry { .. }
         )
     {
-        let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-        cli.path = by_id(&registry, id)?.source;
+        let registry =
+            Registry::open(&state, false)?.with_context(|| unknown_environment(selector))?;
+        let workspace = select(&registry, selector)?;
+        id = Some(uuid::Uuid::parse_str(&workspace.id)?);
+        cli.path = workspace.source;
     }
     let reader = || -> Result<(Registry, Workspace)> {
-        let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
-        let workspace = target_workspace(&registry, &cli.path, cli.workspace)?;
+        let Some(registry) = Registry::open(&state, false)? else {
+            // Report a missing parcela.yaml before the unstarted checkout.
+            project(&cli.path)?;
+            anyhow::bail!(NOT_STARTED);
+        };
+        let workspace = target_workspace(&registry, &cli.path, id)?;
         Ok((registry, workspace))
     };
     match cli.command {
-        Command::Skill | Command::Upgrade { .. } => unreachable!("handled above"),
+        Command::Skill | Command::Upgrade { .. } | Command::Completion { .. } => {
+            unreachable!("handled above")
+        }
         Command::Init { name, command } => {
             let front_door = FrontDoor::load(&state)?;
             super::init::run(
@@ -337,17 +421,48 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             }
             Ok(0)
         }
-        Command::Url { service } => {
+        Command::Url {
+            service,
+            service_flag,
+        } => {
             let (registry, workspace) = reader()?;
-            let url = match service {
-                Some(service) => lifecycle::service_url(&registry, &workspace, &service)?,
-                None => lifecycle::url(&registry, &workspace)?,
-            };
+            let url = service_url(&registry, &workspace, service.or(service_flag))?;
             println!("{url}");
             Ok(0)
         }
+        Command::Open { service } => {
+            let (registry, workspace) = reader()?;
+            let status = lifecycle::status(&registry, &workspace)?;
+            anyhow::ensure!(
+                status["state"] != "stopped",
+                "{} is not running; start it with `parcela up`",
+                render::name(&status["workspace"])
+            );
+            let url = service_url(&registry, &workspace, service)?;
+            // $BROWSER may carry arguments, like `firefox -P work`, so the shell splits it.
+            let browser = std::env::var("BROWSER")
+                .ok()
+                .filter(|browser| !browser.is_empty());
+            let name = browser.clone().unwrap_or_else(|| {
+                if cfg!(target_os = "macos") {
+                    "open"
+                } else {
+                    "xdg-open"
+                }
+                .into()
+            });
+            let opened = std::process::Command::new("/bin/sh")
+                .args(["-c", &format!("{name} \"$1\""), "sh", &url])
+                .status()
+                .with_context(|| format!("run {name}"))?;
+            anyhow::ensure!(opened.success(), "{name} could not open {url}");
+            out.emit(&serde_json::json!({ "url": url }), |style| {
+                format!("Opened {}\n", style.url(&url))
+            })?;
+            Ok(0)
+        }
         Command::Rm { prune } => {
-            super::inventory::remove(&state, &cli.path, cli.workspace, prune, out)?;
+            super::inventory::remove(&state, &cli.path, id, prune, out)?;
             Ok(0)
         }
         Command::Task { name, args } => {

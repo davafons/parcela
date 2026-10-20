@@ -25,7 +25,7 @@ parcela --path "$CHECKOUT" status
 - `status` returns the environment's `.workspace`, `.url`, `.state` and `.processes`.
 - `doctor` returns `{ready, checks: [{name, ok, detail, fix}], notes}` and exits 1 until ready. Report failed checks and their `fix`. Do not apply a fix that installs tools or changes trust without authorization.
 
-From another directory, target an environment by its ID: `parcela --workspace "$ENVIRONMENT_ID" status`. `--path` and `--workspace` conflict. Keep any `--state-dir` on every call.
+From another directory, target an environment by its ID: `parcela --workspace "$ENVIRONMENT_ID" status`. `--workspace` also takes the environment's URL or hostname, such as `signup-shop`; prefer the ID in scripts. `--path` and `--workspace` conflict. Keep any `--state-dir` on every call.
 
 If the checkout has no `parcela.yaml` and the user asks to configure it, `parcela init` writes a minimal one with a guessed command. Review the guess with the user. `init` never overwrites a file.
 
@@ -42,7 +42,7 @@ A separate URL does not separate databases, uploads, secrets or queues. Read the
 ```sh
 parcela --path "$CHECKOUT" up --detach
 parcela --path "$CHECKOUT" status
-parcela --path "$CHECKOUT" url --service api
+parcela --path "$CHECKOUT" url api
 ```
 
 - If the environment is already `ready`, reuse it unless the user asks for a restart. `up` on a ready environment prints its URLs and exits 0.

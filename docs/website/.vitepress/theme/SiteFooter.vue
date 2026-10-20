@@ -48,7 +48,7 @@ const columns = [
       </nav>
     </div>
     <div class="bottom">
-      <p>© 2026 David Afonso</p>
+      <p>© 2026 LOST COORDS</p>
     </div>
   </footer>
 </template>

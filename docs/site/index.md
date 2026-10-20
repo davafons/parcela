@@ -6,7 +6,7 @@ description: Run multiple worktrees in parallel without conflicts. Each checkout
 search: false
 hero:
   text: Deployable dev environments for your AI agents
-  tagline: Run multiple worktrees in parallel without conflicts.
+  tagline: Run multiple agents in parallel without port conflicts.
   actions:
     - theme: brand
       text: Get started
@@ -16,19 +16,9 @@ hero:
       link: https://github.com/lostcoords/parcela
 ---
 
-## Install
+## Run your project
 
-```sh
-curl -fsSL https://parcela.run/install.sh | sh
-```
-
-Or with Homebrew: `brew install lostcoords/tap/parcela`. Builds cover macOS and Linux.
-
-Using a coding agent? [Paste it this prompt](getting-started.md#let-your-agent-set-it-up) and it installs Parcela and configures your project.
-
-## Five minutes to a running app
-
-### Describe your app
+### Configure the stack
 
 `parcela init` writes a `parcela.yaml` for your dev server. Add your other processes and a setup command:
 
@@ -49,7 +39,7 @@ hooks:
     command: bin/setup
 ```
 
-Each HTTP service gets a free port in `$PORT` and its own URL. `hooks.setup` runs once in every new environment, so a fresh worktree installs its packages and creates its database on its own.
+Each HTTP service gets a free port in `$PORT` and its own URL. `hooks.setup` runs once in every new environment, so the setup command can install dependencies and prepare data for a fresh worktree.
 
 ### Start it
 
@@ -64,3 +54,5 @@ parcela up --detach
 ### Open it
 
 Visit `https://shop.localhost:1443`. `parcela logs` shows what every process printed, and `parcela down` stops it all.
+
+[Get started](getting-started.md) with your app, or browse the [documentation](docs.md).

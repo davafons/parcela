@@ -18,16 +18,23 @@ use std::{
 use uuid::Uuid;
 
 pub const LEASE_MS: u64 = 3000;
-/// The Parcela release that started a proxy; another release warns instead of reusing silently.
+/// The Parcela release that started a proxy, shown to people.
 pub const VERSION: &str = env!("PARCELA_VERSION");
+/// What a proxy and the commands that load routes into it must agree on: the proxy's own behavior
+/// and the shape of its Caddy configuration. Releases share a running proxy while this matches.
+/// Bump it only when that changes.
+pub const PROTOCOL: u32 = 1;
 
-/// The running proxy: its ownership token, the front door it serves and the release that started it.
+/// The running proxy: its ownership token, the front door it serves and the release that started
+/// it. Unknown fields are ignored, so a newer proxy's record stays readable by older releases.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Router {
     pub token: String,
     pub front_door: FrontDoor,
     pub version: String,
+    /// 0 for proxies started before the protocol was recorded.
+    #[serde(default)]
+    pub protocol: u32,
 }
 impl Router {
     pub fn url(&self, host: &str) -> String {
@@ -427,6 +434,7 @@ pub fn run(registry: &Registry, binary: &str, front_door: FrontDoor) -> Result<i
         token: Uuid::new_v4().to_string(),
         front_door,
         version: VERSION.into(),
+        protocol: PROTOCOL,
     };
     let config = configuration(registry, &router)?;
     let config_path = directory.join("caddy.json");

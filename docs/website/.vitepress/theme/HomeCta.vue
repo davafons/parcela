@@ -1,16 +1,9 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { withBase } from 'vitepress';
+import InstallCommand from './InstallCommand.vue';
 
 // The closing call to action above the footer: the install command and the mascot.
-// The install block is VitePress's code block markup, so its copy button works the same.
-const install = [
-  ['#6F42C1', '#B392F0', 'curl'],
-  ['#005CC5', '#79B8FF', ' -fsSL'],
-  ['#032F62', '#9ECBFF', ' https://parcela.run/install.sh'],
-  ['#D73A49', '#F97583', ' |'],
-  ['#6F42C1', '#B392F0', ' sh'],
-];
 const root = ref(null);
 const shown = ref(true);
 let observer;
@@ -37,13 +30,7 @@ onBeforeUnmount(() => {
       <div class="pitch">
         <h2>Give every agent its own running app</h2>
         <p>Install Parcela, describe your app once, and every worktree runs at its own HTTPS URL.</p>
-        <div class="vp-doc install">
-          <div class="language-sh vp-adaptive-theme">
-            <button title="Copy Code" class="copy"></button>
-            <span class="lang">sh</span>
-            <pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span v-for="([light, dark, text], i) in install" :key="i" :style="{ '--shiki-light': light, '--shiki-dark': dark }">{{ text }}</span></span></code></pre>
-          </div>
-        </div>
+        <InstallCommand class="install" />
         <a class="go" :href="withBase('/docs/getting-started/')">Get started</a>
       </div>
       <img class="mascot" :src="withBase('/assets/logo.svg')" alt="" width="200" height="200" aria-hidden="true" />
@@ -111,11 +98,6 @@ p {
 .install {
   margin-top: 24px;
   max-width: 600px;
-}
-
-.install div[class*='language-'] {
-  margin: 0;
-  box-shadow: none;
 }
 
 .go {

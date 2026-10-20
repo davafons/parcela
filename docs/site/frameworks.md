@@ -1,34 +1,35 @@
-# Frameworks and data
+# Configure your app
 
-Parcela gives each checkout its own ports, processes and URLs. It does not copy, isolate or delete your data, and it knows nothing about frameworks. This page shows how to wire common stacks to the variables Parcela sets, so every worktree gets its own data and its dev server accepts its own URL.
+Put the commands your app already uses in `parcela.yaml`. Configure data once so every checkout can start with `parcela up`.
 
-The examples use the `signup` worktree of a project called `shop`, at `https://signup-shop.localhost:1443`.
+## Services and setup
 
-## What a process gets
+```yaml
+version: 1
+project: shop
 
-Every service, hook and task gets these, among others. The full list is in the [configuration reference](configuration.md#environment-variables-parcela-sets).
+services:
+  web:
+    command: bin/rails server -p $PORT -b 127.0.0.1
+    http:
+      healthcheck: /up
+  jobs:
+    command: bin/jobs
 
-| Variable | Use it for |
-|---|---|
-| `PORT`, `HOST` | The port to listen on, and `127.0.0.1` |
-| `PARCELA_URL` | Links, mailers, OAuth callbacks, trusted origins |
-| `PARCELA_HOSTNAME` | Host checks, like `signup-shop.localhost` |
-| `PARCELA_SHARE_HOSTS` | The extra hostnames after `up --lan` or `--tailscale`, comma-separated. Empty otherwise. |
-| `PARCELA_SERVICE_<NAME>_URL`, `_PORT` | Another service's URL, and its backend port on 127.0.0.1 |
-| `PARCELA_ENVIRONMENT_NAME` | Naming databases and key prefixes: `primary`, or `signup` |
-| `PARCELA_DATA_DIR` | Files that belong to this environment |
-| `PARCELA_RUNTIME_DIR` | Holds `data`, `tmp`, `cache` and `log` |
-| `PARCELA_PRIMARY_DIR` | The main checkout, to copy `.env` from |
+hooks:
+  setup:
+    command: bin/setup
+  prestart:
+    command: bin/rails db:migrate
+```
 
-Parcela creates `tmp` and `cache` under `PARCELA_RUNTIME_DIR` but sets no variable for them, and it does not set `TMPDIR`. Point a tool at `${PARCELA_RUNTIME_DIR}/tmp` yourself if you want it there.
+Give each process a service. HTTP services listen on `127.0.0.1:$PORT` and return 2xx at their healthcheck path. For another HTTP service, set `http.subdomain`, such as `api`. Workers need no `http` section.
 
-Values in `env` can use `${NAME}` only for variables Parcela sets. `${HOME}` or a shell variable is an error. Commands also inherit the environment of the shell that ran `parcela up`, except variables starting with `PARCELA_`.
+Use `depends_on` when a service or hook needs another service ready first. `setup` runs until it succeeds once. `prestart` runs on every new start. Make setup safe to retry. If needed, copy untracked configuration from `$PARCELA_PRIMARY_DIR` without printing secrets.
 
-## Data per worktree
+## Separate data
 
-A new worktree is a new directory, so files the app keeps inside the checkout, such as Rails' `storage/` or Django's `db.sqlite3`, already differ per worktree. They start empty and go away with the worktree. Anything outside the checkout, such as a database server, a Redis or an `.env` that points at one, is shared until `parcela.yaml` says otherwise.
-
-`hooks.setup` runs on an environment's first `up`, `hooks.prestart` on every start and `hooks.teardown` on `parcela rm`. The [hooks reference](configuration.md#hooks) has the details.
+URLs and ports do not isolate databases, queues, or uploads. Configure each app component explicitly. Files under `PARCELA_DATA_DIR` belong to one registered environment and survive worktree removal. Shared `.env` values can still point multiple copies at the same database.
 
 ### SQLite
 
@@ -63,9 +64,9 @@ DATABASES = {
 
 ### PostgreSQL
 
-Two ways, as in [Databases](configuration.md#databases).
+Choose one server per environment or one database per environment on a shared server.
 
-**A server per environment.** Run `postgres` as a service on a named port, as in [the complete example](configuration.md#a-complete-example). Its files live in `PARCELA_DATA_DIR` and `down` stops it.
+**A server per environment.** Run `postgres` as a service on a named port, as in [the Rails and PostgreSQL example](https://github.com/lostcoords/parcela/blob/main/examples/rails-postgres/parcela.yaml). Its files live in `PARCELA_DATA_DIR` and `down` stops it.
 
 **One shared server, one database per environment.** Name the database after the environment. libpq tools such as `psql`, `createdb` and `dropdb` read `PGHOST`:
 
@@ -166,7 +167,9 @@ services:
     depends_on: [redis]
 ```
 
-Sidekiq reads `REDIS_URL` when it has no URL configured. Rails' Redis cache store and Action Cable's `redis` adapter take the URL from their configuration, so pass `ENV["REDIS_URL"]` there. The generated `config/cable.yml` uses the `async` adapter in development. Two workers that share one Redis take each other's jobs. Sidekiq 7 dropped namespaces, so on a shared server the only separation is a database index per worktree, which you assign by hand. A prefix such as `shop:${PARCELA_ENVIRONMENT_NAME}:` works for caches that accept a namespace, such as the Redis cache store's `namespace:`.
+Pass `REDIS_URL` to each component that uses Redis, including Rails' cache store and Action Cable's Redis adapter. Sidekiq reads it when no other URL is configured. Rails' generated development Cable configuration uses the `async` adapter until changed.
+
+Keep job queues separate. Workers sharing the same queue can consume each other's jobs. Sidekiq 7 does not support namespaces. On a shared Redis server, assign a distinct database index to each environment. For caches that accept namespaces, use a prefix such as `shop:${PARCELA_ENVIRONMENT_NAME}:`.
 
 Queues that live in the database, such as Solid Queue, GoodJob or Oban, are separate once the database is.
 
@@ -189,11 +192,12 @@ local:
 
 Django: `MEDIA_ROOT = os.environ.get("STORAGE_ROOT", BASE_DIR / "media")`.
 
-## Host checks
 
-Requests reach the app through Caddy, which [keeps the browser's `Host`](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#defaults), such as `signup-shop.localhost:1443`, and sets `X-Forwarded-Proto: https`, `X-Forwarded-Host` and `X-Forwarded-For`. Dev servers that check hosts usually allow `localhost` and its subdomains, so the loopback URL works. The names from `--lan` and `--tailscale` are in `PARCELA_SHARE_HOSTS`. `--tailscale` sends requests from `tailscale serve` straight to the backend port, not through Caddy. `tailscale serve` also keeps `Host` and sets `X-Forwarded-Proto: https`.
+`down` keeps data. `rm` forgets the registration and retains its runtime directory, but a declared teardown hook can delete external data first. A later registration gets a new directory. Retained files are not automatically reused.
 
-Keep these settings in development configuration only.
+## Framework settings
+
+Local `.localhost` names work with the defaults below. Add `PARCELA_SHARE_HOSTS` for LAN or tailnet access. Keep these settings in development configuration.
 
 ### Rails
 
@@ -208,11 +212,11 @@ if ENV["PARCELA_URL"]
 end
 ```
 
-Action Cable accepts a connection whose `Origin` matches the request's scheme and `Host`, and Rack takes the scheme from `X-Forwarded-Proto`, so the page's own origin works. If it refuses one, set `config.action_cable.allowed_request_origins = [ENV["PARCELA_URL"]]`.
+Action Cable normally accepts the page's own origin. If it rejects that origin, set `config.action_cable.allowed_request_origins = [ENV["PARCELA_URL"]]`.
 
 ### Django
 
-`ALLOWED_HOSTS` falls back to `.localhost`, `127.0.0.1` and `[::1]` only while it is empty and `DEBUG` is on, so list them once you add the shared names. Django rejects a POST whose `Origin` is `https://…` while it thinks the request is plain HTTP. Trust Caddy's header, or list the URL:
+When adding shared hosts, retain the local names too. Trust the proxy's HTTPS scheme to avoid a mismatch during CSRF checks. In development `settings.py`:
 
 ```python
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -237,7 +241,9 @@ server: {
 },
 ```
 
-HMR needs no settings. The Vite client connects back to the host and port it was loaded from, over `wss://` on an HTTPS page, and Caddy forwards the websocket. This repository's own docs site runs that way. Do not move HMR to a separate `server.hmr.port`: Parcela routes only HTTP services, so the browser would have to reach that port directly. If something already sets `server.ws.clientPort`, or `server.hmr.clientPort` in older Vite, use the proxy's port: `new URL(process.env.PARCELA_URL).port || 443`.
+Keep HMR on the HTTP service's port. Vite connects to the page's host over `wss://`, and Caddy forwards the WebSocket. A separate `server.hmr.port` would need its own route.
+
+If the project already overrides `server.ws.clientPort`, or `server.hmr.clientPort` on older Vite, set it to `new URL(process.env.PARCELA_URL).port || 443`.
 
 When Vite runs next to a backend, as with Vite Ruby or Laravel's plugin, give it its own HTTP service, so it gets a free port and its own HTTPS URL:
 
@@ -293,19 +299,23 @@ services:
       healthcheck: /up
 ```
 
-Variables already in the environment win over `.env`. When a `.env` exists, `php artisan serve` passes only a short list of them to its PHP process unless it runs with `--no-reload`. [Trust the proxy](https://laravel.com/docs/12.x/requests#configuring-trusted-proxies), `->withMiddleware(fn ($middleware) => $middleware->trustProxies(at: '127.0.0.1'))` in `bootstrap/app.php`, so generated URLs use `https`.
+Keep `--no-reload` so `php artisan serve` passes Parcela's environment through when `.env` exists. In `bootstrap/app.php`, [trust the loopback proxy](https://laravel.com/docs/12.x/requests#configuring-trusted-proxies) so generated URLs use HTTPS:
 
-## Cookies
+```php
+->withMiddleware(fn ($middleware) => $middleware->trustProxies(at: '127.0.0.1'))
+```
 
-Each environment is its own host, so host-only cookies, the default, keep sessions apart: logging in to `signup-shop.localhost` does not log you in to `shop.localhost`. HTTPS URLs make `Secure` cookies work.
+## Keep browser sessions separate
+
+Use host-only cookies to keep logins separate between `signup-shop.localhost` and `shop.localhost`. HTTPS allows `Secure` cookies.
 
 `localhost` is not on the [Public Suffix List](https://publicsuffix.org/), so browsers treat it as a top-level domain, and `shop.localhost` and `api-shop.localhost` are different sites. A request from one to the other is cross-site, and cookies with `SameSite=Lax`, Rails' and Django's default, are not sent with it. Either keep the browser on one origin, for example with a dev-server proxy to `http://127.0.0.1:${PARCELA_SERVICE_API_PORT}`, or use `SameSite=None; Secure` cookies with credentialed CORS.
 
 With `wildcard: true`, tenants such as `kobe.signup-shop.localhost` are subdomains of the environment's host. A cookie for `Domain=signup-shop.localhost` reaches every tenant of that worktree and no other worktree.
 
-## Calls between services
+## Connect services
 
-Server-side code can call another service on its backend port, without DNS, TLS or a certificate authority:
+For server-side calls, use the other service's loopback port. This avoids DNS and certificate configuration:
 
 ```yaml
 env:
@@ -315,7 +325,7 @@ env:
 
 Use the public URL for anything a browser follows. The request arrives with `Host: 127.0.0.1:<port>`, which Rails and Django allow in development and the Django settings above list.
 
-## OAuth callbacks and webhooks
+## Configure callbacks and webhooks
 
 Every worktree has its own origin, so its OAuth callback is its own URL, such as `https://signup-shop.localhost:1443/auth/callback`. Build it from the request or from `PARCELA_URL`, never from a fixed host.
 
@@ -332,45 +342,8 @@ services:
     command: stripe listen --forward-to "http://127.0.0.1:$PARCELA_SERVICE_WEB_PORT/webhooks"
 ```
 
-## Clients other than browsers
+## Verify the configuration
 
-### Name resolution
+Run `parcela doctor`, then `parcela up --detach`. Open every returned URL and read `parcela logs`. Before giving agents parallel checkouts, check that their data is separate as intended. After editing configuration, use `parcela restart --detach`.
 
-Browsers resolve `localhost` and every subdomain of it to loopback without asking DNS. curl 7.85.0 and later do the same. Other programs ask the system resolver:
-
-- **macOS.** The system resolver answers any `*.localhost` with `::1` and `127.0.0.1`, as checked on macOS 26 with Python, Node, Ruby and Go. The proxy listens on 127.0.0.1 only, so a client must fall back from `::1`; common ones do.
-- **Go's own resolver** does not resolve `*.localhost`: `lookup foo.localhost: no such host` on Go 1.27 with `GODEBUG=netdns=go`. On Linux, Go hands `*.localhost` to glibc only when `/etc/nsswitch.conf` lists `myhostname` or `resolve` for hosts and the binary has cgo. A `CGO_ENABLED=0` binary always uses its own.
-- **Linux.** glibc resolves `*.localhost` only through systemd-resolved or [`nss-myhostname`](https://www.freedesktop.org/software/systemd/man/latest/nss-myhostname.html). Without them, add the names to `/etc/hosts`, or call the backend port.
-
-For calls from the app itself, the backend port in `PARCELA_SERVICE_<NAME>_PORT` avoids the question.
-
-### The certificate authority
-
-`parcela trust` adds Parcela's certificate authority to the system trust store. Programs with their own CA list do not see it. `parcela trust --print` prints the root certificate's path and changes nothing. It is in the state directory, by default `~/.local/state/parcela/proxy/data/pki/authorities/local/root.crt`, and exists once the proxy has started.
-
-| Client | Variable | Effect |
-|---|---|---|
-| Node | `NODE_EXTRA_CA_CERTS` | Adds to Node's built-in list. Read at startup. |
-| Node 22.19+, 24.6+ | `NODE_USE_SYSTEM_CA=1` | Also trusts the system store, so `parcela trust` is enough. Same as `--use-system-ca`. |
-| Python `requests` | `REQUESTS_CA_BUNDLE` | Replaces certifi's bundle. |
-| Python httpx | `SSL_CERT_FILE` | Replaces certifi's bundle. |
-| Python `ssl`, `urllib` | `SSL_CERT_FILE` | Replaces OpenSSL's default file. |
-| Ruby `Net::HTTP` | `SSL_CERT_FILE` | Replaces OpenSSL's default file. |
-| Go | `SSL_CERT_FILE` | Replaces the default file on Linux. On macOS Go uses the system store, so `parcela trust` is enough; from Go 1.27, setting the variable there replaces the store too. |
-| curl | `--cacert` | `curl --cacert "$(parcela trust --print)" "$(parcela url)"` |
-
-A variable that replaces the bundle breaks every other HTTPS call, so give it a combined bundle:
-
-```sh
-cat "$(python3 -m certifi)" "$(parcela trust --print)" > ~/.local/share/dev-ca.pem
-export REQUESTS_CA_BUNDLE=~/.local/share/dev-ca.pem
-```
-
-Export the variable in the shell that runs `parcela up`, since commands inherit it. To set it in `parcela.yaml` instead, build the path from the runtime directory, which sits in the same state directory:
-
-```yaml
-env:
-  NODE_EXTRA_CA_CERTS: ${PARCELA_RUNTIME_DIR}/../../proxy/data/pki/authorities/local/root.crt
-```
-
-Inside a service, `parcela trust --print` does not see a `PARCELA_STATE_DIR` from your shell, because Parcela removes inherited `PARCELA_` variables. The path above follows any state directory.
+The [configuration reference](configuration.md) lists every field. The [CLI reference](cli.md) lists commands, flags, and task syntax.

@@ -226,8 +226,10 @@ pub fn proxy_status(value: &Value, style: &Style) -> String {
         return text;
     };
     text.push_str(&format!("  {:<9}{}\n", "log", cell(&value["log"])));
-    if let Some(warning) = value["version_warning"].as_str() {
-        text.push_str(&format!("  {} {warning}\n", style.bad()));
+    for key in ["version_warning", "relay_warning"] {
+        if let Some(warning) = value[key].as_str() {
+            text.push_str(&format!("  {} {warning}\n", style.bad()));
+        }
     }
     if value["trusted"] != true {
         text.push_str(&format!(

@@ -468,6 +468,7 @@ pub fn preflight(
         token: String::new(),
         front_door: crate::frontdoor::FrontDoor::load(registry.state_path())?,
         version: router::VERSION.into(),
+        protocol: router::PROTOCOL,
     };
     let reserved = registry.hosts(&workspace.id)?;
     for (service, host) in manifest.service_hosts(&workspace.hostname)? {
@@ -679,15 +680,6 @@ impl Owner<'_> {
                 return Ok(128 + self.signals.received() as i32);
             }
             self.record.refresh(self.path)?;
-            if let Some(pending) = self.control.receive(&self.record.session)? {
-                let response = self.answer(&pending.action, requested_stop);
-                if let Err(error) = pending.reply(&self.record.session, response) {
-                    eprintln!("parcela: owner reply failed: {error:#}");
-                }
-                if *requested_stop {
-                    return Ok(0);
-                }
-            }
             let listeners = Listeners::inspect(endpoints.iter().map(|e| e.backend_port))?;
             let roots = self.supervisor.roots();
             let observed = endpoints
@@ -821,8 +813,24 @@ impl Owner<'_> {
                 "not ready after {timeout}s: {}",
                 waiting.join("; ")
             );
-            thread::sleep(Duration::from_millis(200));
+            self.idle(Duration::from_millis(200), requested_stop)?;
         }
+    }
+
+    /// Wait between checks, answering control requests as they arrive rather than after the wait.
+    fn idle(&mut self, wait: Duration, requested_stop: &mut bool) -> Result<()> {
+        let until = Instant::now() + wait;
+        while !*requested_stop && Instant::now() < until {
+            let Some(pending) = self.control.receive(&self.record.session)? else {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            let response = self.answer(&pending.action, requested_stop);
+            if let Err(error) = pending.reply(&self.record.session, response) {
+                eprintln!("parcela: owner reply failed: {error:#}");
+            }
+        }
+        Ok(())
     }
 
     /// Ticks the graph and saves which processes started and exited, right after each start.
@@ -849,7 +857,11 @@ impl Owner<'_> {
                 &self.supervisor.roots(),
                 &self.record.manifest,
                 &self.record.share,
-            ),
+            )
+            .map(|mut live| {
+                live["services"] = self.supervisor.list()["services"].take();
+                live
+            }),
             Action::Stop => {
                 self.enter(Phase::Stopping)?;
                 *requested_stop = true;

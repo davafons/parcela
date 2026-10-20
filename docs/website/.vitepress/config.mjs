@@ -3,6 +3,7 @@ import { slug } from 'github-slugger';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
+import { brandNames } from '../brands.mjs';
 import { card, groups, meta, prepareContent, route, srcDir, watchSources } from '../content.mjs';
 
 const project = fileURLToPath(new URL('..', import.meta.url));
@@ -12,8 +13,7 @@ const site = process.env.DOCS_SITE ?? 'https://parcela.run';
 prepareContent();
 writeFileSync(join(srcDir, 'public/robots.txt'), `User-agent: *\nAllow: /\n\nSitemap: ${site}${base}sitemap.xml\n`);
 
-// docs/faq/index.md -> faq, index.md -> index.
-const slugOf = (relativePath) => relativePath.replace(/^docs\//, '').replace(/\/?index\.md$/, '') || 'index';
+const slugOf = (relativePath) => relativePath === 'docs/index.md' ? 'docs' : relativePath.replace(/^docs\//, '').replace(/\/?index\.md$/, '') || 'index';
 
 export default defineConfig({
   srcDir,
@@ -80,6 +80,7 @@ export default defineConfig({
     anchor: { slugify: slug },
     config(markdown) {
       markdown.block.ruler.disable('snippet');
+      brandNames(markdown);
       const render = markdown.renderer.render.bind(markdown.renderer);
       markdown.renderer.render = (...args) => `<div v-pre>\n${render(...args)}\n</div>`;
     },
@@ -87,9 +88,10 @@ export default defineConfig({
   themeConfig: {
     logo: '/assets/logo.svg',
     nav: [
+      { text: 'Docs', link: route('docs') },
       { text: 'Get started', link: route('getting-started') },
       { text: 'Guides', items: groups.find(({ label }) => label === 'Guides').pages.map(([slug, text]) => ({ text, link: route(slug) })) },
-      { text: 'FAQ', link: route('faq') },
+      { text: 'Reference', items: groups.find(({ label }) => label === 'Reference').pages.map(([slug, text]) => ({ text, link: route(slug) })) },
     ],
     outline: [2, 3],
     search: { provider: 'local' },

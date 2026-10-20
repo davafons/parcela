@@ -1,248 +1,180 @@
-# CLI guide
+# CLI reference
 
-Every Parcela command acts on one environment: the checkout in the current directory, unless you pick another one. This page groups the commands by what you want to do. Run `parcela <command> --help` for the full flag list.
+`parcela [GLOBAL OPTIONS] COMMAND` acts on the current checkout unless another target is selected. With no command, it shows checkout status or the next setup step. `parcela <command> --help` lists its public options.
 
-## Pick the environment
+## Global options
 
-These flags work with every command:
+| Option | Meaning |
+| --- | --- |
+| `-C`, `--path DIR` | Checkout directory. Configuration lookup walks from this directory to its parents. Defaults to the current directory. |
+| `-w`, `--workspace ENV` | A registered environment, from any directory: one of its URLs or hostnames, with or without `.localhost` and the port, its name when only one environment has it, or its ID from `parcela ls --json`. Conflicts with `--path`. |
+| `--state-dir DIR` | State directory. Precedence is this option, `PARCELA_STATE_DIR`, `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`. |
+| `--json` | JSON output even in a terminal. |
+| `--help`, `-h` | Help. |
+| `--version`, `-V` | Version. |
 
-| Flag | Meaning |
-|---|---|
-| `--path DIR` | Act on the checkout at `DIR` instead of the current directory. Parcela uses the nearest `parcela.yaml` at or above it. |
-| `--workspace ID` | Act on a registered environment by its ID. Get IDs from `parcela ls --json`. Conflicts with `--path`. |
-| `--state-dir DIR` | Use another state directory. The default is `PARCELA_STATE_DIR`, then `$XDG_STATE_HOME/parcela`, then `~/.local/state/parcela`. |
-| `--json` | Print JSON, even in a terminal. |
+## Output
 
-`parcela` with no command shows the current checkout's status, or the next command to run:
+Commands print text in a terminal and one JSON document when stdout is piped or `--json` is given. Exceptions are `url` and `logs`, which print plain text, and `task` and `run`, which pass through command output. Errors go to stderr with the prefix `parcela:`. `NO_COLOR` disables terminal colors.
 
-```text
-$ parcela
-No parcela.yaml here. Create one with `parcela init`, then run `parcela up`.
-See `parcela --help` for every command.
-```
+For example, `parcela status --json | jq -r .state` reads the environment state.
 
-## Text and JSON output
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Success. |
+| `1` | Command failure, failed doctor check, or no proxy for `proxy status`. |
+| `2` | Invalid arguments. |
+| `124` | A task exceeded `timeout_seconds`. |
+| Other | Exit code from the command executed by `task` or `run`. |
 
-In a terminal, commands print aligned text. When stdout is a pipe, or with `--json`, they print one JSON document. Parse the JSON, not the text:
-
-```sh
-parcela status --json | jq -r .state
-```
-
-```text
-ready
-```
-
-`url` and `logs` always print plain text, so `curl "$(parcela url)"` works. `task` and `run` pass their command's output through unchanged. Errors go to stderr and start with `parcela:`. Colors appear only in a terminal, and `NO_COLOR` turns them off.
-
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| 0 | Success. |
-| 1 | The command failed, `doctor` found a problem, or `proxy status` found no proxy. |
-| 2 | Bad arguments. |
-| 124 | A task ran past its `timeout_seconds`. |
-| other | `task` and `run` exit with the code of the command they ran. |
-
-## Start and stop
-
-### parcela init
+## init
 
 ```text
 parcela init [--name NAME] [--command CMD]
 ```
 
-Writes a minimal `parcela.yaml` in the current directory. It guesses the web command from `package.json`, a Rails app or Django, and serves the directory with Python otherwise. `--command` sets the command. `--name` sets the project name. `init` never overwrites an existing file.
+Writes a minimal `parcela.yaml` without replacing an existing file. The command is inferred from `package.json`, Rails, or Django, with a Python file server as fallback. `--command` overrides the guess. `--name` sets the project name.
 
-```text
-$ parcela init
-✓ Created /Users/you/code/hello/parcela.yaml
-  web  python3 -m http.server $PORT --bind 127.0.0.1
-  url  https://hello.localhost:1443
-
-Next: parcela up
-```
-
-### parcela up
+## up
 
 ```text
 parcela up [--detach] [--setup] [--name NAME | --primary] [--backend-port N] [--lan] [--lan-ip IP] [--tailscale]
 ```
 
-Starts every service in `parcela.yaml` and waits until each HTTP service answers. On an environment's first `up` it runs `hooks.setup` first, and on every `up` it runs `hooks.prestart`. A hook that fails stops `up` before the other services start. It registers the checkout the first time, and starts the proxy if it is not running. On an environment that is already ready, `up` prints its URLs and exits 0. If the services kept running after Parcela was interrupted, `up` takes control of them again instead of starting a second copy.
+Registers the checkout on first use, starts the proxy if needed, and starts the configured services. HTTP routes open after all HTTP services pass readiness. A ready environment is reused. If the owner process died but services survived, `up` adopts the recorded processes instead of starting duplicates.
 
-- Without `--detach`, `up` stays in the foreground and prints each process's output, prefixed with its name. Ctrl-C stops everything.
-- Until the environment is first ready, a hook that fails, an HTTP service that exits, or any process that exits nonzero stops `up` and says which one, with its exit code. A process that finishes with 0, like an asset build, is fine. After that, an exited process is reported and nothing restarts it; if an HTTP service stops listening on its port for longer than the readiness timeout, the environment stops. The timeout is `readiness_timeout_seconds` in `parcela.yaml`, 60 seconds by default.
-- `--detach` returns once the services are ready and leaves them running.
-- `--setup` runs `hooks.setup` again, as on a new environment.
-- `--name NAME` names this checkout on its first `up`. `--primary` gives a linked checkout the project URL.
-- `--backend-port N` sets the default service's port. Other ports are picked for you.
-- `--lan` and `--tailscale` also serve the environment to your other devices. See [Open it on your phone or another device](#open-it-on-your-phone-or-another-device).
+| Option | Effect |
+| --- | --- |
+| `--detach`, `-d` | Returns after readiness and leaves services running. Without it, process output streams in the foreground and Ctrl-C stops the run. |
+| `--setup` | Runs `hooks.setup` again. Otherwise setup runs only until its first success per environment. |
+| `--name NAME` | Chooses a preview name on first registration. Conflicts with `--primary` and `--workspace`. |
+| `--primary` | Gives a checkout the project's main URL if available. Conflicts with `--workspace`. |
+| `--backend-port N` | Sets the default HTTP service's backend port. Minimum 1024. Other ports are leased automatically. |
+| `--lan` | Shares this run at `.local` names on the LAN. Also set by `PARCELA_LAN=1`. |
+| `--lan-ip IP` | Chooses the LAN IPv4 address. |
+| `--tailscale` | Shares this run through `tailscale serve`. Also set by `PARCELA_TAILSCALE=1`. Never uses Funnel. |
 
-```text
-$ parcela up --detach
-✓ hello is running at https://hello.localhost:1443
-  api       https://api-hello.localhost:1443
+`hooks.prestart` runs on every new start after setup. A hook failure, an HTTP service exit, or a nonzero process exit before first readiness stops startup. A non-HTTP process may finish with code 0.
 
-  parcela logs    show service output
-  parcela status  check health
-  parcela down    stop it
-```
+After readiness, ordinary services are not restarted automatically. Exits are reported. If an HTTP service stops listening for longer than the readiness timeout, `readiness_timeout_seconds` in `parcela.yaml` (60 seconds by default), the environment stops. Sharing publishers have a separate retry policy.
 
-```text
-$ parcela up --name review --detach
-✓ review (hello) is running at https://review-hello.localhost:1443
-  api       https://api-review-hello.localhost:1443
-```
+The first `up` in a terminal may offer system CA trust. `PARCELA_NO_TRUST=1` suppresses it. Nonterminal runs never change trust.
 
-### parcela down
+## down
 
 ```text
 parcela down [--all | --all-projects]
+parcela stop [--all | --all-projects]
 ```
 
-Stops the environment's services and workers: once nothing that depends on a service is still running, its `stop` command runs, if it has one, and then it gets SIGTERM, and SIGKILL after 10 seconds. If a `stop` command fails, `down` says so; run it again. `stop` is the same command. Source, data and the environment's URLs stay. Running `down` again does nothing.
+Stops the selected environment in reverse dependency order. Once nothing that depends on a service is running, its `stop` command runs, if it has one, then its process group receives SIGTERM, then SIGKILL after 10 seconds if needed. If a `stop` command fails, `down` says so; run it again. Repeated stops are harmless. Source, data, and registered names remain.
 
-- `--all` stops every running environment of this project.
-- `--all-projects` stops every running environment on the machine.
+`--all` stops this project's environments. `--all-projects` stops environments across projects. Both conflict with `--workspace` and with each other.
 
-```text
-$ parcela down
-✓ Stopped hello
-$ parcela down
-✓ hello is not running
-```
-
-### parcela restart
+## restart
 
 ```text
 parcela restart [--detach] [--setup] [--backend-port N] [--lan] [--lan-ip IP] [--tailscale]
 ```
 
-Stops everything and starts it again from the current `parcela.yaml`. Use it after any change, including added, removed or renamed services. It checks that the new configuration can start before it stops the running one. When the services' URLs change, it can only reserve the new ones after the old run stops. Sharing does not carry over: pass `--lan` or `--tailscale` again.
+Checks the replacement configuration, then stops and starts the whole environment. New URL reservations happen after the old run stops. Options have the same meanings as for `up`. Sharing flags must be supplied for the new run.
 
-## Inspect
-
-### parcela status
+## status
 
 ```text
 parcela status
 ```
 
-Shows whether the environment is running and checks it live: each service's HTTP health and URL, each worker's process state, and the named ports.
+Shows registered URLs, live HTTP health, process state, and named ports.
 
-```text
-$ parcela status
-hello primary  ready
-  https://hello.localhost:1443
-  SERVICE  HTTP   URL
-  api      ready  https://api-hello.localhost:1443
-  web      ready  https://hello.localhost:1443
-  PROCESS  STATE    PID
-  api      running  53311
-  ticker   running  53308
-  web      running  53318
-  db        21565  PARCELA_PORT_DB
-  path /Users/you/code/hello
-```
+| Environment state | Meaning |
+| --- | --- |
+| `ready` | The environment is running and HTTP checks pass. |
+| `starting` | Startup is in progress. |
+| `unhealthy` | A live health check fails. |
+| `stopping` | Shutdown is in progress. |
+| `stopped` | The environment is stopped. |
+| `unknown` | The supervisor cannot be contacted reliably. |
 
-The state is one of `ready`, `starting`, `unhealthy`, `stopping`, `stopped` or `unknown`. [Troubleshooting](troubleshooting.md) says what to do for each. A process is `pending`, `running`, `stopping`, `restarting`, `completed` (exited 0, like a finished hook), `exited` or `skipped` (a dependency stopped before it could start).
+Process states are `pending`, `running`, `stopping`, `restarting`, `completed`, `exited`, and `skipped`. `completed` means exit code 0. `skipped` means a dependency stopped before the process could start. The JSON response includes a `diagnostic` field for failures.
 
-### parcela ls
+## ls
 
 ```text
 parcela ls
 ```
 
-Lists every environment on the machine, across projects. It also lists sibling jj workspaces and Git worktrees of the current project that have not been started yet.
+Lists registered environments across projects. Inside a project, it also lists unregistered sibling jj workspaces and Git worktrees as `not started`. Listing creates no registrations.
 
-```text
-$ parcela ls
-PROJECT  NAME     STATE        URL                                   PATH
-hello    signup   ready        https://signup-hello.localhost:1443   /Users/you/code/signup
-hello    primary  ready        https://hello.localhost:1443          /Users/you/code/hello
-hello    billing  not started  https://billing-hello.localhost:1443  /Users/you/code/billing
-```
-
-### parcela logs
+## logs
 
 ```text
 parcela logs [SERVICE] [--tail N] [--follow]
 ```
 
-Prints the last lines of every service, worker and hook of the latest run, each line prefixed with its name. Name one to see only its output. `--tail` is the number of lines per process, 100 by default. `--follow`, or `-f`, keeps printing new lines until Ctrl-C or until the environment stops. The logs stay after `down`, until the next run starts, so `logs` also shows why a run stopped. Each process writes to `log/processes/<name>.log` in its runtime directory, which is cut to `<name>.log.1` past 16 MB.
+Prints output from the latest run's services, workers, and hooks. Without a name, lines carry process-name prefixes. `--tail` defaults to 100 lines per process and accepts 1 through 10000. `--follow`, or `-f`, streams until interrupted or the environment stops.
+
+Logs remain after shutdown until the next start. Files are under `log/processes/<name>.log` in the runtime directory, with one rotated `<name>.log.1` after 16 MB. Detached owner output is in `log/owner.log`.
+
+## url
 
 ```text
-$ parcela logs --tail 2
-api    | 127.0.0.1 - - [18/Oct/2026 19:06:52] "GET / HTTP/1.1" 200 -
-api    | 127.0.0.1 - - [18/Oct/2026 19:06:53] "GET / HTTP/1.1" 200 -
-ticker | tick 1
-ticker | tick 2
-web    | 127.0.0.1 - - [18/Oct/2026 19:06:52] "GET / HTTP/1.1" 200 -
-
-$ parcela logs ticker --tail 2
-tick 2
-tick 3
+parcela url [SERVICE]
 ```
 
-### parcela url
+Prints the default service's URL or the named HTTP service's URL. Registered URLs remain available while stopped.
+
+## open
 
 ```text
-parcela url [--service NAME]
+parcela open [SERVICE]
 ```
 
-Prints the URL of the default service, or of `NAME`. It works while the environment is stopped too.
+Opens the default service's URL, or the named service's, in the browser set in `$BROWSER`, or the system's default browser. Refuses a stopped environment.
 
-```text
-$ parcela url --service api
-https://api-hello.localhost:1443
-```
-
-### parcela doctor
+## doctor
 
 ```text
 parcela doctor
 ```
 
-Checks Caddy, `lsof`, `ps`, the nearest `parcela.yaml`, the state directory and the proxy. It changes nothing. Every failed check says how to fix it, and the command exits 1 until all pass. It also validates `parcela.yaml`, so run it after you edit the file.
+Checks Caddy, `lsof`, `ps`, configuration, the state directory, and the proxy without changing them. Each failure includes a fix. Exit code 1 means at least one check failed. Browser trust is not checked.
+
+JSON has the shape `{ready, checks: [{name, ok, detail, fix}], notes}`.
+
+## rm
 
 ```text
-$ parcela doctor
-✓ caddy   v2.11.7 at /opt/homebrew/bin/caddy
-✓ lsof    /usr/sbin/lsof
-✓ ps      /bin/ps
-✓ config  /Users/you/code/hello/parcela.yaml (project hello)
-✓ state   /Users/you/.local/state/parcela (private)
-✓ proxy   not running; `parcela up` starts it on HTTPS on :1443
-· HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.
-
-Next step: parcela up
+parcela rm [--prune]
 ```
 
-With `--json` it prints `{"ready": bool, "checks": [{"name", "ok", "detail", "fix"}], "notes": [...]}`.
+Forgets a stopped environment and releases names and ports. Refuses a running environment. A configured `hooks.teardown` runs first. If it fails, registration remains. Parcela itself retains source and the runtime directory.
 
-### parcela upgrade
+`--prune` applies to stopped environments whose checkout directory no longer exists. It conflicts with `--workspace`.
+
+## task
 
 ```text
-parcela upgrade [--nightly | --stable]
+parcela task NAME [-- ARGS...]
 ```
 
-Upgrades a Parcela installed by `install.sh`: it downloads the installer and runs it again, which replaces `~/.local/bin/parcela` and updates Caddy there if needed. A nightly build stays on nightly; `--stable` switches to the latest release, `--nightly` to the newest build of main. For a Homebrew or `cargo` install it changes nothing and prints the command to run instead. Then run `parcela proxy restart`.
+Runs a configured task with the environment's variables. The environment must have started at least once and may be stopped. Arguments after `--` are appended to the task command. Output and exit status pass through, except a timeout exits 124.
 
-It is the only command that downloads anything, and only when you run it. Parcela never checks for updates.
-
-### parcela telemetry
+## run
 
 ```text
-parcela telemetry [status | enable | disable]
+parcela run [--name NAME | --primary] [--backend-port N] -- COMMAND...
 ```
 
-Shows or changes whether Parcela sends anonymous usage data. `DO_NOT_TRACK=1` and `PARCELA_TELEMETRY_DISABLED=1` also turn it off, and `PARCELA_TELEMETRY_DEBUG=1` prints what would be sent instead of sending it. [Telemetry](telemetry.md) lists every field.
+Runs a foreground command as the project's only HTTP service. Requires a `parcela.yaml` with a single service. The command must listen on `127.0.0.1:$PORT`.
 
-## Proxy and HTTPS
+Arguments execute without a shell. Shell expansion requires an explicit shell, for example:
 
-### parcela proxy
+```sh
+parcela run -- sh -c 'exec python3 -m http.server "$PORT" --bind 127.0.0.1'
+```
+
+## proxy
 
 ```text
 parcela proxy start [--port N]
@@ -253,141 +185,64 @@ parcela proxy install
 parcela proxy uninstall
 ```
 
-The proxy is one background Caddy that serves the URLs of every environment. `up` starts it when it is not running, and if it dies while environments run, for example because Caddy crashed or was killed, they start it again within a few seconds. You rarely need these commands.
+One background Caddy serves all environments. Owners recover an unexpected proxy exit. An explicit `proxy stop` keeps it stopped until `proxy start` or the next `up`.
 
-- `start --port N` listens on port `N` and saves it for later starts. The default is 1443, or `PARCELA_HTTPS_PORT` when it is set and nothing is saved. With `--port 443`, URLs have no port, like `https://hello.localhost`. Parcela never runs as root, so that works only where the system lets a normal user listen on 443: on Linux after `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`. On macOS, use `install`.
-- `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`. It says how many environments that affects.
-- `restart` replaces the proxy. Run it after upgrading Parcela.
-- `status` shows the port, process IDs, version and log file. It exits 1 when the proxy is not running.
-- `install`, on macOS, makes URLs portless, like `https://hello.localhost`. It asks for your password once to add the launchd service `org.parcela.https`, which owns port 443 on 127.0.0.1 and hands each connection to `nc` running as you, relaying it to the proxy's port. No Parcela code runs as root, and it survives reboots. It refuses when another program uses 443. It also takes port 80 when that is free, so `http://hello.localhost` redirects to `https://`; a busy 80 only loses that redirect. Restart running environments afterwards to pick up the new URLs. `uninstall` removes it.
+| Subcommand | Effect |
+| --- | --- |
+| `start` | Starts the proxy. `--port` chooses and saves its port. An occupied port causes an error naming its owner. |
+| `stop` | Stops routing for every environment. App processes keep running. |
+| `restart` | Replaces the proxy, including after an upgrade. Briefly interrupts URLs. |
+| `status` | Shows the port, PIDs, version, and log path. Exits 1 if stopped. |
+| `install` | On macOS, installs a launchd relay on loopback port 443 after a password prompt. Uses port 80 for redirects when free. Refuses an occupied 443. |
+| `uninstall` | Removes the macOS relay. |
 
-```text
-$ parcela proxy status
-✓ Proxy running: HTTPS on :1443
-  urls     https://<name>.localhost:1443
-  pid      95029 (Caddy 95034)
-  version  Parcela 0.4.0
-  log      /Users/you/.local/state/parcela/proxy/proxy.log
-  Run `parcela trust` to trust these URLs
-```
+The default port is 1443. `PARCELA_HTTPS_PORT` applies when no port is saved. Port 443 omits the port from URLs and requires permission to bind it. The proxy redirects plain HTTP on its listener to HTTPS.
 
-The proxy answers plain HTTP on its port with a redirect to HTTPS, so `http://hello.localhost:1443` works too.
-
-If the port is busy, `start` fails and names the process that holds it. It never stops that process and never picks another port.
-
-### parcela trust
+## trust
 
 ```text
 parcela trust [--print]
 ```
 
-Adds Parcela's local certificate authority to the system trust store, so browsers accept its URLs. It prints what it adds and how to undo it, then runs `caddy trust`, which may ask for your password. You need it once per machine: every project shares the one authority.
+Adds Caddy's local CA to the system trust store using `caddy trust`. Prints the certificate and undo command before the system password prompt. All projects use the same CA.
 
-The first `up` in a terminal does this for you when the authority is not trusted yet, behind the same password prompt, and asks only once per authority. It never happens without a terminal, so agents, scripts and CI never change trust, and `PARCELA_NO_TRUST=1` turns it off.
+`--print` only prints the certificate path and changes no trust settings. See [Use local HTTPS](faq.md#clients-and-certificates).
 
-`--print` prints the certificate's path and changes nothing. Use it with `curl`:
-
-```sh
-curl --cacert "$(parcela trust --print)" "$(parcela url)"
-```
-
-## Open it on your phone or another device
-
-By default every URL answers on this machine only. `up` and `restart` can also serve one environment to other devices. Each flag shares that environment alone, for that run, and `down` ends it.
-
-### On the same Wi-Fi: --lan
+## upgrade
 
 ```text
-$ parcela up --detach --lan
-✓ hello is running at https://hello.localhost:1443
-            https://hello.local:1443
-  api       https://api-hello.localhost:1443
-            https://api-hello.local:1443
+parcela upgrade [--nightly | --stable]
 ```
 
-Each service also answers at a `.local` name, which the device on your network resolves over mDNS. Parcela publishes the names with `dns-sd` on macOS or `avahi-publish` on Linux, and Caddy listens on this machine's LAN address with the same port. Devices on the network reach only the environments started with `--lan`.
+For shell-installer installations, downloads and runs the installer. Retains the release channel unless `--nightly` or `--stable` is given. For Homebrew or Cargo, prints the matching upgrade command without changing the installation. Parcela does not check for updates automatically.
 
-The device does not trust Parcela's certificate authority, so it warns first. To stop the warning, install the certificate from `parcela trust --print` on the device. If the network changes, run `parcela restart --lan`. `--lan-ip IP` picks the address when the detected one is wrong, for example behind a VPN. `--lan` refuses a public address, so a machine with one, such as a cloud VM, cannot serve its app to the internet this way. `PARCELA_LAN=1` in the environment works like `--lan`, and `PARCELA_TAILSCALE=1` like `--tailscale`.
-
-### On your tailnet: --tailscale
+## telemetry
 
 ```text
-$ parcela up --detach --tailscale
-✓ hello is running at https://hello.localhost:1443
-            https://mb.tail1234.ts.net
-  api       https://api-hello.localhost:1443
-            https://mb.tail1234.ts.net:8443
+parcela telemetry [status | enable | disable]
 ```
 
-Each service gets its own HTTPS port on this machine's tailnet name, through `tailscale serve`. Tailscale's certificate is trusted everywhere, so there is no warning. Only devices on your tailnet can open it. It never uses Funnel. It needs the Tailscale CLI, a connected machine and HTTPS certificates turned on for the tailnet. Parcela picks ports that `tailscale serve status` shows free, and leaves the rest of your serve configuration alone.
+Shows or changes the saved telemetry preference. Without a subcommand, shows status. Environment overrides and event fields are in [Telemetry](telemetry.md).
 
-### Let the dev server accept the names
-
-Dev servers such as Vite and Rails refuse hostnames they do not know. Parcela puts the shared ones in `PARCELA_SHARE_HOSTS`, separated by commas. For Vite:
-
-```js
-server: {
-  allowedHosts: (process.env.PARCELA_SHARE_HOSTS ?? '').split(',').filter(Boolean),
-},
-```
-
-The publishers show up in `parcela status` and `parcela logs` as `parcela-lan-<service>` and `parcela-tailscale-<service>`. A link that the app builds from `PARCELA_URL` still points at `.localhost`, which other devices cannot open.
-
-## Projects and cleanup
-
-### parcela rm
-
-```text
-parcela rm [--prune]
-```
-
-Forgets a stopped environment and frees its URLs and ports. It refuses a running environment. If `parcela.yaml` has `hooks.teardown`, `rm` runs it first, and a failed teardown keeps the environment registered. Parcela itself leaves the source and the runtime directory on disk.
-
-`--prune` forgets every stopped environment whose checkout directory no longer exists. Run it after you delete worktrees.
-
-```text
-$ parcela rm --prune
-✓ Forgot signup (hello); released api-signup-hello.localhost, signup-hello.localhost
-  data kept in /Users/you/.local/state/parcela/environments/c8af904e-1dff-495a-b4ce-0b163c9b2077
-```
-
-## Tasks and one-off commands
-
-### parcela task
-
-```text
-parcela task NAME [-- ARGS...]
-```
-
-Runs a task from the `tasks` section of `parcela.yaml` with the environment's variables: its ports, URLs, `DATABASE_URL` and so on. Arguments after `--` are appended to the task's command. The environment must have been started at least once. It can be stopped.
-
-```text
-$ parcela task psql -- -tAc 'show port'
-26341
-```
-
-### parcela run
-
-```text
-parcela run [--name NAME | --primary] [--backend-port N] -- COMMAND...
-```
-
-Runs one command in the foreground as the project's only web service, instead of the services in `parcela.yaml`. It still needs a `parcela.yaml` for the project name. The command must listen on `127.0.0.1:$PORT`. `run` passes the command through as-is, with no shell, so wrap it in `sh -c` to use variables. It works only in projects with a single service.
-
-```text
-$ parcela run -- sh -c 'exec python3 -m http.server "$PORT" --bind 127.0.0.1'
-Serving HTTP on 127.0.0.1 port 23225 (http://127.0.0.1:23225/) ...
-✓ hello is running at https://hello.localhost:1443
-  Press Ctrl-C to stop
-```
-
-## Agents
-
-### parcela skill
+## skill
 
 ```text
 parcela skill
 parcela --skill
 ```
 
-Prints the agent instructions bundled with this binary as Markdown. It reads no project or state, so it works anywhere. [Parallel worktrees and agents](worktrees.md#set-up-a-coding-agent) shows how to install it for Claude Code.
+Prints the bundled agent instructions as Markdown without reading project or state. [Worktrees and agents](worktrees.md#set-up-a-coding-agent) covers installation.
+
+## completion
+
+```text
+parcela completion bash|zsh|fish|elvish|powershell
+```
+
+Prints a completion script for commands and flags. Load it from your shell's startup file:
+
+```sh
+source <(parcela completion zsh)          # ~/.zshrc
+source <(parcela completion bash)         # ~/.bashrc
+parcela completion fish | source          # ~/.config/fish/config.fish
+```

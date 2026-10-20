@@ -14,6 +14,8 @@
 
 ### Changed
 
+- Documentation centers on getting started, app configuration, parallel worktrees, and troubleshooting. Older guide URLs redirect to retained sections. Tool names have icons and accent colors, and code examples wrap within the page.
+
 - Parcela sends anonymous usage data: the command, flag names, exit code, a duration range, version, OS, install method and a random install ID, never paths, names, URLs or values. Nothing is sent before a one-time notice. `parcela telemetry disable`, `DO_NOT_TRACK=1` or `PARCELA_TELEMETRY_DISABLED=1` turns it off, and `PARCELA_TELEMETRY_DEBUG=1` prints the event instead. See https://parcela.run/docs/telemetry/.
 - The repository moved to `github.com/lostcoords/parcela` and the Homebrew tap to `lostcoords/tap`: `brew install lostcoords/tap/parcela`. The old addresses redirect.
 - The website moved to `https://parcela.run`: the landing page at the root, the docs under `/docs/`, and `install.sh` and the schema at `https://parcela.run/install.sh` and `https://parcela.run/schema/v1.json`. `parcela init`, `parcela upgrade` and the schema's `$id` use the new addresses. `parcela.davafons.com` no longer serves the site.

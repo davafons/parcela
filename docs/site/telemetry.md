@@ -4,20 +4,20 @@ description: What Parcela's anonymous usage data contains, where it goes, and ho
 
 # Telemetry
 
-Parcela reports which commands run and how they end, so we can see which features are used, which platforms to support and where things fail. It never reports what a command acts on: no paths, project, environment or service names, URLs, ports, argument values, environment variables or error messages.
+Parcela sends anonymous command events to help maintainers understand use and failures. Events exclude paths, project names, environment names, service names, URLs, ports, argument values, environment variables, and error messages.
 
-## Turn it off
+## Controls
 
-Any one of these turns it off:
+| Control | Effect |
+| --- | --- |
+| `parcela telemetry status` | Shows the effective setting and why it is disabled, if applicable. |
+| `parcela telemetry disable` | Saves a disabled preference. |
+| `parcela telemetry enable` | Saves an enabled preference. Environment overrides still apply. |
+| `DO_NOT_TRACK=1` | Disables telemetry for commands that inherit the variable. |
+| `PARCELA_TELEMETRY_DISABLED=1` | Disables telemetry for commands that inherit the variable. |
+| `PARCELA_TELEMETRY_DEBUG=1` | Prints the event to stderr instead of sending it. |
 
-```sh
-parcela telemetry disable
-```
-
-- `DO_NOT_TRACK=1` or `PARCELA_TELEMETRY_DISABLED=1` in the environment.
-- `parcela telemetry status` shows whether it is on and why not.
-
-`parcela telemetry enable` turns it back on. The choice is saved in the state directory, `telemetry.json` in `~/.local/state/parcela`, so a different `--state-dir` or `PARCELA_STATE_DIR` has its own; the environment variables apply everywhere.
+The saved preference is `telemetry.json` in the state directory. A different state directory has its own preference. Environment overrides apply across state directories.
 
 ## When it is sent
 
@@ -57,6 +57,7 @@ $ PARCELA_TELEMETRY_DEBUG=1 parcela up --detach --name review
 
 | Field | What it is |
 | --- | --- |
+| `schema`, `event` | `1` and `command`, identifying the event format. |
 | `command` | The subcommand, such as `up` or `proxy install`. |
 | `flags` | The names of the flags given on the command line, never their values: `--name review` is reported as `--name`. |
 | `exit` | The exit code. |
@@ -70,4 +71,4 @@ $ PARCELA_TELEMETRY_DEBUG=1 parcela up --detach --name review
 
 ## Where it goes
 
-`parcela.run/api/telemetry` is a Cloudflare Worker in this repository (`docs/website/worker.mjs`). It rejects any event with fields or values outside the table above, and forwards the rest to [PostHog](https://posthog.com) Cloud US as anonymous events: no person profiles and no location. PostHog keeps them for its plan's retention period. The address is ours, so a firewall or proxy rule for that one URL also stops it.
+`parcela.run/api/telemetry` is a Cloudflare Worker in this repository (`docs/website/worker.mjs`). It rejects any event with fields or values outside the table above, and forwards the rest to [PostHog](https://posthog.com) Cloud US as anonymous events. Person profiles and location enrichment are disabled. PostHog keeps them according to the configured plan's retention policy. The address is ours, so a firewall or proxy rule for that one URL also stops it.

@@ -26,14 +26,14 @@ pub struct Args {
 #[command(next_help_heading = "Global options")]
 pub struct Global {
     /// Checkout directory
-    #[arg(long, global = true, default_value = ".")]
+    #[arg(short = 'C', long, global = true, default_value = ".")]
     pub path: PathBuf,
     /// State directory [env: PARCELA_STATE_DIR]
     #[arg(long, global = true)]
     pub state_dir: Option<PathBuf>,
-    /// Environment ID, instead of --path
-    #[arg(long, global = true, conflicts_with = "path")]
-    pub workspace: Option<uuid::Uuid>,
+    /// Environment by name, URL or ID, instead of --path
+    #[arg(short, long, global = true, conflicts_with = "path")]
+    pub workspace: Option<String>,
     /// Print JSON (default when not a terminal)
     #[arg(long, global = true)]
     pub json: bool,
@@ -43,7 +43,7 @@ pub struct Global {
 pub struct Cli {
     pub path: PathBuf,
     pub state_dir: Option<PathBuf>,
-    pub workspace: Option<uuid::Uuid>,
+    pub workspace: Option<String>,
     pub json: bool,
     pub command: Command,
 }
@@ -157,7 +157,14 @@ pub enum Command {
     /// Print the environment's URL
     Url {
         /// Service name
-        #[arg(long)]
+        service: Option<String>,
+        // Earlier spelling, kept for scripts and installed agent skills.
+        #[arg(long = "service", hide = true, conflicts_with = "service")]
+        service_flag: Option<String>,
+    },
+    /// Open the environment's URL in the browser
+    Open {
+        /// Service name
         service: Option<String>,
     },
     /// Remove a stopped environment
@@ -234,6 +241,11 @@ pub enum Command {
     /// Print the agent skill
     #[command(long_flag = "skill")]
     Skill,
+    /// Print shell completions
+    Completion {
+        /// Shell
+        shell: clap_complete::Shell,
+    },
     /// Manage anonymous usage data
     Telemetry {
         #[command(subcommand)]

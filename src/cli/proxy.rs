@@ -55,7 +55,8 @@ fn running(state: &Path, router: &Router) -> Value {
         "pid": owner.as_ref().map(|(daemon, _)| daemon.pid),
         "caddy_pid": owner.as_ref().map(|(_, caddy)| caddy.pid),
         "version": router.version,
-        "version_warning": proxy::version_warning(router),
+        "version_warning": proxy::protocol_warning(router),
+        "relay_warning": parcela::relay::http_warning(),
         "log": proxy::log_path(state),
         "owned_admin_verified": true,
         // Whether the system trust store accepts the CA; null before it exists.

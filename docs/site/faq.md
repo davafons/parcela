@@ -2,112 +2,158 @@
 
 ## What does Parcela change on my machine?
 
-- **Files.** State in `~/.local/state/parcela`, or `$XDG_STATE_HOME/parcela` (mode 700), and sockets in a per-user directory: `$(getconf DARWIN_USER_TEMP_DIR)parcela` on macOS, `/tmp/parcela-<uid>` on Linux. Nothing in your checkout except the `parcela.yaml` that `parcela init` writes.
-- **Binaries.** `install.sh` puts `parcela`, and Caddy when it is missing, in `~/.local/bin`. It never uses `sudo`.
-- **Listeners.** One Caddy on `127.0.0.1:1443`, and your services on loopback ports from 20000–29999. Nothing listens on your network unless you run `up --lan` or `up --tailscale`, and only for that run.
-- **Trust.** Parcela's certificate authority is added to the system trust store only by `parcela trust` or the first `up` in a terminal, behind the system password prompt. Scripts, agents and CI never change trust.
-- **System services.** None, unless you run `parcela proxy install` on macOS for URLs without a port.
+Parcela stores its registry, logs, certificates, and environment data in a private state directory. The default is `~/.local/state/parcela`. Unix sockets live in a per-user temporary directory. [State locations](configuration.md#state-locations) lists the paths and overrides.
 
-Over the network, Parcela sends anonymous usage data, which commands ran and how they ended and never what they acted on, unless you turn it off: see [Telemetry](telemetry.md). `parcela upgrade` downloads only when you run it. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
+`parcela init` writes `parcela.yaml` in your checkout. Your configured commands and hooks can write other files or change external services.
 
-## Is trusting the certificate authority safe?
+The shared proxy listens on `127.0.0.1:1443` by default. Backends use loopback ports leased from 20000 through 29999. LAN and tailnet access require a sharing flag for that run. System services require `parcela proxy install`.
 
-It is the same trade-off as [mkcert](https://github.com/FiloSottile/mkcert): a local root that browsers trust, so `https://*.localhost` works without warnings.
+Parcela sends anonymous command telemetry unless disabled. [Telemetry](telemetry.md) describes its fields and controls.
 
-- The authority is Caddy's local CA, generated on your machine. Its private key is in `~/.local/state/parcela/proxy/data/pki/authorities/local/root.key`, readable only by your user.
-- It has no name constraints. Whoever can read that key can issue a certificate your browser accepts for any site. Do not sync or back up `~/.local/state/parcela` to places other people can read, and keep it out of dotfiles repositories.
-- A program that can read files as your user can already do more harm than this, for example by reading your browser profile.
+## What does trusting the certificate authority allow?
 
-`parcela trust` prints the exact undo command before it changes anything:
+Caddy generates a local root certificate so browsers can accept Parcela's HTTPS URLs. Trust is added only by `parcela trust` or a first `up` in a terminal, behind the system password prompt.
 
-```sh
-caddy untrust --cert "$(parcela trust --print)"
-```
+The CA has no name constraints. Anyone who obtains its private key can issue certificates your system accepts for any hostname. The key lives under the private state directory at `proxy/data/pki/authorities/local/root.key`. Keep that directory out of shared backups and dotfiles repositories.
 
-To never be asked, set `PARCELA_NO_TRUST=1`. Browsers then warn on every URL, and tools need `--cacert "$(parcela trust --print)"`.
+Use `parcela trust` to add trust. To undo it, run `caddy untrust --cert "$(parcela trust --print)"` before deleting the state directory. Set `PARCELA_NO_TRUST=1` to suppress automatic terminal trust attempts.
 
 ## Why port 1443?
 
-A normal user can listen on it without `sudo`, and Parcela never takes a port another program holds. For URLs without a port:
+A normal user can bind port 1443 without `sudo`. Parcela refuses occupied ports rather than taking them over. On macOS, `parcela proxy install` installs a password-protected launchd relay on loopback port 443. It also relays port 80 when free. Restart environments to update their URLs. `parcela proxy uninstall` removes it.
 
-- **macOS:** `parcela proxy install` adds a launchd service that owns `127.0.0.1:443` and relays each connection to the proxy as you. No Parcela code runs as root. `parcela proxy uninstall` removes it.
-- **Linux:** `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`, then `parcela proxy start --port 443`.
+On Linux, explicitly allow unprivileged port 443 with `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`, then run `parcela proxy start --port 443`. This system setting affects all local processes.
 
-## Do `*.localhost` names work everywhere?
+## Why use .localhost names?
 
-Browsers resolve every `*.localhost` name to loopback themselves, as [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) asks. So does curl. Other clients use the system resolver: macOS resolves them, and on Linux it depends on systemd-resolved or `nss-myhostname`. [Frameworks and data](frameworks.md) has the details, and how to make Node, Python, Ruby and Go trust the certificate.
+Names such as `signup-shop.localhost` identify an environment while keeping traffic on the local machine. Browsers treat `.localhost` specially, so no project DNS setup is needed. Other clients depend on their resolver. See [Clients and certificates](#clients-and-certificates).
 
-In Safari, type the scheme, `https://shop.localhost:1443`, or Safari may search for the name instead.
+## How is Parcela different from a hostname proxy?
 
-## How is it different from portless, localias or puma-dev?
+Parcela runs a declared group of processes per checkout. That includes workers and databases alongside web servers, dependencies and readiness checks, setup hooks, environment data directories, and one stop command for the group. Caddy handles the HTTPS proxying.
 
-[portless](https://github.com/vercel-labs/portless) names each dev server, and puts a worktree's branch in front. localias and puma-dev name a port or a directory. Parcela runs what a checkout's `parcela.yaml` declares: web servers, workers and databases, each HTTP service behind a readiness check before it is routed, with leased ports, a setup hook and a private data directory for each new worktree. `parcela down` stops all of it.
+## When is a container a better fit?
 
-## Why not Docker Compose, devcontainers or a container per agent?
+Use containers when you need isolated execution or exact runtime images. Parcela runs native commands as your user, so editors, debuggers, and file watchers use the local filesystem directly.
 
-Use them if you need isolated execution or exact production images. Parcela is for the common case where your app already runs natively with `bin/dev` or `npm run dev`: it adds no image builds, no file sync and no VM on macOS. Each process is a normal process of your user, so debuggers, file watchers and your editor work unchanged.
-
-A service can still be a container, like PostgreSQL per environment with its files in the environment's data directory:
-
-```yaml
-ports: [db]
-services:
-  db:
-    command: >-
-      docker run --rm -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:$PARCELA_PORT_DB:5432
-      -v "$PARCELA_DATA_DIR/postgres:/var/lib/postgresql/data" postgres:17
-    healthcheck: pg_isready -h 127.0.0.1 -p "$PARCELA_PORT_DB"
-```
+A Parcela service can still run a container. Bind its published ports to loopback and choose its data path explicitly. [Keep environment data separate](frameworks.md#separate-data) covers database choices.
 
 A project that already has a `docker-compose.yml` can run it as one service next to its native apps. See [Docker Compose](frameworks.md#docker-compose).
 
-## How does it relate to Conductor, Vibe Kanban, Claude Code and other agent tools?
+## How does it fit with coding agent tools?
 
-Those manage agents and worktrees. Parcela runs the app inside each worktree, so it works under any of them, or with plain `git worktree add`. `parcela --skill` prints instructions that teach an agent to start, check and stop its own environment.
+An agent manager can create checkouts and run agents. Parcela runs the app inside each checkout. The embedded operating skill tells an agent how to select, inspect, start, and stop its own environment. See [Worktrees and agents](worktrees.md).
 
 ## Does each worktree get its own database?
 
-Only if `parcela.yaml` says so. Parcela separates ports, URLs, processes and logs, and gives each environment a private `PARCELA_DATA_DIR`. Two checkouts that read the same `.env` share the same database. [Keep data separate](worktrees.md#keep-data-separate) and [Frameworks and data](frameworks.md) show SQLite, PostgreSQL, Redis and file uploads per worktree.
+Only when the configuration gives it one. Parcela separates processes, ports, URLs, and logs. A shared `.env` can still point every checkout at one database. [Keep environment data separate](frameworks.md#separate-data) covers SQLite, PostgreSQL, Redis, and uploads.
 
 ## Does it work on Windows or WSL?
 
-Windows is not supported. Parcela uses Unix sockets, process groups and `flock`. WSL 2 runs Linux binaries, but it is untested: a browser on Windows would need to reach the WSL loopback and trust the authority itself.
+Windows is unsupported. Parcela uses Unix sockets, process groups, and `flock`. WSL 2 is untested. A Windows browser would also need to reach the WSL listener and trust its CA.
+
+## Is the configuration stable?
+
+`parcela.yaml` requires `version: 1`. Missing or unsupported versions are rejected. Parcela is experimental, so the format may change. Breaking changes belong in the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md).
 
 ## Why AGPL?
 
-So improvements to Parcela stay open, including in hosted versions of it. It covers Parcela's own code. Your app only runs under Parcela, like under a shell, so the license puts no terms on your code. There is no contributor license agreement. See [COPYRIGHT](https://github.com/lostcoords/parcela/blob/main/COPYRIGHT) for the exact terms.
+The project uses AGPL-3.0-only to keep improvements to Parcela available as source, including changes to hosted versions. See [COPYRIGHT](https://github.com/lostcoords/parcela/blob/main/COPYRIGHT) and [LICENSE](https://github.com/lostcoords/parcela/blob/main/LICENSE) for the terms. There is no contributor license agreement.
 
-## Is the configuration format stable?
 
-`parcela.yaml` has `version: 1`. Parcela is experimental, so it may still change, and every change is in the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md). A file without `version: 1` is refused, never misread, and the error says which version this Parcela reads.
+## Clients and certificates
 
-## How do I upgrade?
 
-Upgrade the way you installed:
+### Name resolution
+
+Browsers resolve `localhost` and every subdomain of it to loopback without asking DNS. curl 7.85.0 and later do the same. Other programs ask the system resolver:
+
+- **macOS.** The system resolver answers any `*.localhost` with `::1` and `127.0.0.1`, as checked on macOS 26 with Python, Node, Ruby and Go. The proxy listens on 127.0.0.1 only, so a client must fall back from `::1`; common ones do.
+- **Go's own resolver** does not resolve `*.localhost`: `lookup foo.localhost: no such host` on Go 1.27 with `GODEBUG=netdns=go`. On Linux, Go hands `*.localhost` to glibc only when `/etc/nsswitch.conf` lists `myhostname` or `resolve` for hosts and the binary has cgo. A `CGO_ENABLED=0` binary always uses its own.
+- **Linux.** glibc resolves `*.localhost` only through systemd-resolved or [`nss-myhostname`](https://www.freedesktop.org/software/systemd/man/latest/nss-myhostname.html). Without them, add the names to `/etc/hosts`, or call the backend port.
+
+For calls from the app itself, the backend port in `PARCELA_SERVICE_<NAME>_PORT` avoids the question.
+
+### Certificate bundles
+
+`parcela trust` adds Parcela's certificate authority to the system trust store. Programs with their own CA list do not see it. `parcela trust --print` prints the root certificate's path and changes nothing. It is in the state directory, by default `~/.local/state/parcela/proxy/data/pki/authorities/local/root.crt`, and exists once the proxy has started.
+
+| Client | Variable | Effect |
+|---|---|---|
+| Node | `NODE_EXTRA_CA_CERTS` | Adds to Node's built-in list. Read at startup. |
+| Node 22.19+, 24.6+ | `NODE_USE_SYSTEM_CA=1` | Also trusts the system store, so `parcela trust` is enough. Same as `--use-system-ca`. |
+| Python `requests` | `REQUESTS_CA_BUNDLE` | Replaces certifi's bundle. |
+| Python httpx | `SSL_CERT_FILE` | Replaces certifi's bundle. |
+| Python `ssl`, `urllib` | `SSL_CERT_FILE` | Replaces OpenSSL's default file. |
+| Ruby `Net::HTTP` | `SSL_CERT_FILE` | Replaces OpenSSL's default file. |
+| Go | `SSL_CERT_FILE` | Replaces the default file on Linux. On macOS Go uses the system store, so `parcela trust` is enough; from Go 1.27, setting the variable there replaces the store too. |
+| curl | `--cacert` | `curl --cacert "$(parcela trust --print)" "$(parcela url)"` |
+
+A bundle containing only the local root omits the public roots used by other HTTPS calls, so create a combined bundle first:
 
 ```sh
-brew upgrade parcela      # Homebrew
-parcela upgrade           # install.sh: downloads and runs it again
-cargo install --git https://github.com/lostcoords/parcela --locked --force   # from source
+mkdir -p ~/.local/share
+cat "$(python3 -m certifi)" "$(parcela trust --print)" > ~/.local/share/dev-ca.pem
+export REQUESTS_CA_BUNDLE=~/.local/share/dev-ca.pem
 ```
 
-`parcela upgrade` knows how it was installed: for Homebrew or `cargo` it prints the matching command instead.
+Export the variable in the shell that runs `parcela up`, since commands inherit it. To set it in `parcela.yaml` instead, build the path from the runtime directory, which sits in the same state directory:
 
-Then run `parcela proxy restart`, so the proxy runs the new version. Running environments keep going through it; `up` and `proxy status` warn while an older proxy is still running. Read the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md) first: a release with breaking changes, like 0.4, says what to stop before upgrading.
+```yaml
+env:
+  NODE_EXTRA_CA_CERTS: ${PARCELA_RUNTIME_DIR}/../../proxy/data/pki/authorities/local/root.crt
+```
 
-Parcela never checks for new versions. `parcela upgrade` is the only command that downloads anything, and only when you run it.
+Inside a service, `parcela trust --print` does not see a `PARCELA_STATE_DIR` from your shell, because Parcela removes inherited `PARCELA_` variables. The path above follows any state directory.
 
-## How do I uninstall it?
+The [Node CA options](https://nodejs.org/api/cli.html#node_extra_ca_certsfile) and [Go system certificate pool](https://pkg.go.dev/crypto/x509#SystemCertPool) describe the runtime-specific trust behavior.
+
+## Upgrade Parcela
+
+Read the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md) for release-specific steps. Then use the method that installed Parcela.
+
+| Installation | Command |
+| --- | --- |
+| Shell installer | `parcela upgrade` |
+| Homebrew | `brew upgrade parcela` |
+| Cargo | `cargo install --git https://github.com/lostcoords/parcela --locked --force` |
+
+`parcela upgrade` retains the current release channel. Use `--nightly` or `--stable` to switch. For Homebrew and Cargo installations, it prints the appropriate command instead of replacing the binary.
+
+Update the shared proxy when a brief interruption to all environment URLs is acceptable:
 
 ```sh
-parcela down --all-projects                    # stop every environment
-parcela rm                                     # in each checkout whose hooks.teardown drops outside data
-caddy untrust --cert "$(parcela trust --print)" # if you trusted the authority
-parcela proxy uninstall                        # macOS, if you ran proxy install
-parcela proxy stop
-rm -rf ~/.local/state/parcela                  # all state, including environment data
-rm -rf "$(getconf DARWIN_USER_TEMP_DIR)parcela"  # macOS sockets; /tmp/parcela-$(id -u) on Linux
-rm ~/.local/bin/parcela
+parcela proxy restart
 ```
 
-Remove `~/.local/bin/caddy` too if `install.sh` installed it and nothing else uses it. With Homebrew, run `brew uninstall parcela`. Parcela writes nothing into your checkouts except the `parcela.yaml` from `init`. Data your hooks put elsewhere, such as databases on a shared server, stays until you drop it.
+Parcela does not check for updates automatically.
+
+## Remove Parcela
+
+Save any data you need before removing state. A configured `hooks.teardown` can delete external data when `rm` runs.
+
+1. Stop all environments.
+
+   ```sh
+   parcela down --all-projects
+   ```
+
+2. In each checkout whose teardown hook you want to run, run `parcela rm`.
+3. If you trusted the certificate authority, remove that trust before deleting its certificate.
+
+   ```sh
+   caddy untrust --cert "$(parcela trust --print)"
+   ```
+
+4. On macOS, if you installed the port 443 relay, run `parcela proxy uninstall`.
+5. Stop the proxy.
+
+   ```sh
+   parcela proxy stop
+   ```
+
+6. Remove the binary with `brew uninstall parcela`, `cargo uninstall parcela`, or `rm ~/.local/bin/parcela`, matching your installation.
+7. If you want to delete all retained environment data, delete the state directory. Its default is `~/.local/state/parcela`. Check any `--state-dir`, `PARCELA_STATE_DIR`, or `XDG_STATE_HOME` override first.
+8. Remove the socket directory if it remains. It is `$(getconf DARWIN_USER_TEMP_DIR)parcela` on macOS or `/tmp/parcela-$(id -u)` on Linux.
+
+Remove `~/.local/bin/caddy` only if the installer added it and nothing else uses it. Data your commands created elsewhere remains until you remove it yourself.

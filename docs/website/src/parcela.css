@@ -40,12 +40,13 @@
   --vp-font-family-base: 'Parcela Rounded', 'Inter', ui-sans-serif, system-ui, sans-serif;
   --vp-font-family-mono: 'Parcela Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
+  --parcela-sidebar-text: #171b20;
   --parcela-blue: #34bfed;
   --parcela-blue-deep: #0a8fd1;
   --parcela-frame: #cfd5db;
   --parcela-slot: #eef0f3;
   --parcela-glow: 0 0 0 3px rgba(52, 191, 237, 0.28), 0 6px 18px rgba(10, 143, 209, 0.18);
-  --parcela-card: 0 1px 2px rgba(75, 81, 87, 0.06), 0 6px 20px rgba(75, 81, 87, 0.07);
+  --parcela-card: 0 1px 2px rgba(75, 81, 87, 0.04), 0 4px 12px rgba(75, 81, 87, 0.04);
   --parcela-page: linear-gradient(180deg, #ffffff 0%, #eef1f4 100%);
   --parcela-bg-mark: rgba(75, 81, 87, 0.26);
   --parcela-github: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12c0 5.303 3.438 9.8 8.205 11.385c.6.113.82-.258.82-.577c0-.285-.01-1.04-.015-2.04c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729c1.205.084 1.838 1.236 1.838 1.236c1.07 1.835 2.809 1.305 3.495.998c.108-.776.417-1.305.76-1.605c-2.665-.3-5.466-1.332-5.466-5.93c0-1.31.465-2.38 1.235-3.22c-.135-.303-.54-1.523.105-3.176c0 0 1.005-.322 3.3 1.23c.96-.267 1.98-.399 3-.405c1.02.006 2.04.138 3 .405c2.28-1.552 3.285-1.23 3.285-1.23c.645 1.653.24 2.873.12 3.176c.765.84 1.23 1.91 1.23 3.22c0 4.61-2.805 5.625-5.475 5.92c.42.36.81 1.096.81 2.22c0 1.606-.015 2.896-.015 3.286c0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E");
@@ -68,7 +69,7 @@
   --vp-c-tip-soft: var(--vp-c-brand-soft);
   --vp-code-color: #0a75ae;
   --vp-code-bg: #e9f6fc;
-  --vp-code-block-bg: #f5f7f9;
+  --vp-code-block-bg: #ffffff;
   --vp-code-copy-code-bg: #ffffff;
 
   --vp-button-brand-bg: #ffffff;
@@ -94,10 +95,11 @@
 }
 
 :root.dark {
+  --parcela-sidebar-text: #eef1f4;
   --parcela-frame: #3a4148;
   --parcela-slot: #1f2428;
   --parcela-glow: 0 0 0 3px rgba(52, 191, 237, 0.35), 0 6px 18px rgba(52, 191, 237, 0.15);
-  --parcela-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
+  --parcela-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
   --parcela-page: linear-gradient(180deg, #181c20 0%, #121518 100%);
   --parcela-bg-mark: rgba(230, 234, 238, 0.17);
 
@@ -166,7 +168,7 @@ body {
 
 /* White pills that light up blue on hover. */
 .VPButton {
-  border-width: 2px;
+  border-width: 1px;
   font-weight: 700;
   box-shadow: var(--parcela-card);
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
@@ -225,11 +227,11 @@ body {
   background: var(--vp-c-bg-alt);
 }
 
-.VPSidebarItem.level-0 > .item > .text {
-  color: var(--vp-c-text-3);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.VPSidebar .VPSidebarItem.level-0 > .item > .text,
+.VPSidebar .VPSidebarItem.level-0.has-active > .item > .text {
+  color: var(--parcela-sidebar-text);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .VPSidebarItem.level-1 .link {
@@ -248,7 +250,7 @@ body {
 
 /* Code sits in squircle slots with a gray frame that lights up blue on hover. */
 .vp-doc div[class*='language-'] {
-  border: 2px solid var(--parcela-frame);
+  border: 1px solid var(--parcela-frame);
   border-radius: 18px;
   box-shadow: var(--parcela-card);
   transition: border-color 0.2s ease, box-shadow 0.25s ease;
@@ -266,14 +268,70 @@ body {
   }
 }
 
+/* After a copy, the button itself widens, its icon fades into "Copied!", and after two
+   seconds it eases back to the icon. VitePress's own tag beside it is turned off. */
+.vp-doc [class*='language-'] > button.copy {
+  transition:
+    width 0.25s ease,
+    background-size 0.2s ease,
+    border-color 0.25s,
+    background-color 0.25s,
+    opacity 0.25s;
+}
+
+.vp-doc [class*='language-'] > button.copy::after {
+  content: 'Copied!';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--vp-c-brand-1);
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.vp-doc [class*='language-'] > button.copy.copied,
+.vp-doc [class*='language-'] > button.copy:hover.copied {
+  width: 80px;
+  border-radius: 4px;
+  background-size: 0;
+  opacity: 1;
+}
+
+.vp-doc [class*='language-'] > button.copy.copied::after {
+  opacity: 1;
+  transition-delay: 0.1s;
+}
+
+.vp-doc [class*='language-'] > button.copy.copied::before,
+.vp-doc [class*='language-'] > button.copy:hover.copied::before {
+  display: none;
+}
+
+/* Code blocks show no language label. Touch screens cannot hover, so the copy button always
+   shows there. */
+.vp-doc [class*='language-'] > span.lang {
+  display: none;
+}
+
+@media (hover: none) {
+  .vp-doc [class*='language-'] > button.copy {
+    opacity: 1;
+  }
+}
+
 .vp-doc :not(pre) > code {
   border-radius: 8px;
 }
 
 .vp-doc table {
+  display: table;
+  width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  border: 2px solid var(--parcela-frame);
+  border: 1px solid var(--parcela-frame);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -282,6 +340,10 @@ body {
 .vp-doc th,
 .vp-doc td {
   border: 0;
+}
+
+.vp-doc :is(th, td) {
+  overflow-wrap: anywhere;
 }
 
 .vp-doc td {
@@ -419,7 +481,7 @@ body {
 
 .VPHome .vp-doc div[class*='language-'] + div.language-text {
   margin-top: 0;
-  border-top: 2px dashed var(--vp-c-divider);
+  border-top: 1px dashed var(--vp-c-divider);
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
@@ -480,3 +542,68 @@ body {
 .VPNavBar .social-links {
   margin-left: 8px;
 }
+
+.VPSidebar .group + .group {
+  border-top: 0;
+  padding-top: 16px;
+}
+
+.VPSidebar .VPSidebarItem.level-1 > .item .text,
+.VPSidebar .VPSidebarItem.level-1.is-active > .item .link > .text {
+  color: var(--parcela-sidebar-text);
+}
+
+.vp-doc hr {
+  display: none;
+}
+
+.vp-doc h2 {
+  border-top: 0;
+}
+
+/* Sized like inline code, so the two sit side by side in a sentence. */
+.vp-doc .tool-name {
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tool-color) 9%, transparent);
+  color: var(--tool-color);
+  font-size: var(--vp-code-font-size);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.vp-doc .tool-name svg {
+  display: inline-block;
+  width: 0.88em;
+  height: 0.88em;
+  margin-right: 0.25em;
+  vertical-align: -0.12em;
+  fill: currentColor;
+}
+
+.dark .vp-doc .tool-name {
+  color: var(--tool-dark);
+  background: color-mix(in srgb, var(--tool-dark) 12%, transparent);
+}
+
+.vp-doc :is(h1, h2, h3, h4) .tool-name {
+  font-size: 0.9em;
+}
+
+.vp-doc [class*='language-'] pre,
+.vp-doc [class*='language-'] code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.vp-doc [class*='language-'] code {
+  width: 100%;
+  min-width: 0;
+  tab-size: 2;
+}
+
+.vp-doc [class*='language-'] code .line {
+  white-space: inherit;
+}
+

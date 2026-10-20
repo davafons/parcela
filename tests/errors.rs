@@ -75,18 +75,37 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
     let t = TempDir::new().unwrap();
     let root = t.path().canonicalize().unwrap();
     let state = root.join("state");
-    let output = cli(&root, &state, &["status"]);
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "parcela: nothing is registered yet; start this checkout with `parcela up`\n"
+    let no_manifest = format!(
+        "parcela: no parcela.yaml in {} or above; create one with `parcela init`, or pass --path to a configured checkout\n",
+        root.display()
     );
-    let output = cli(&root, &state, &["up"]);
+    for command in ["status", "up", "url", "logs"] {
+        let output = cli(&root, &state, &[command]);
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            no_manifest,
+            "{command}"
+        );
+    }
+    let named = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(&state)
+        .args(["-w", "shop", "status"])
+        .output()
+        .unwrap();
     assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        format!(
-            "parcela: no parcela.yaml in {} or above; create one with `parcela init`, or pass --path to a configured checkout\n",
-            root.display()
-        )
+        String::from_utf8_lossy(&named.stderr),
+        "parcela: no environment named shop; list environments with parcela ls\n"
+    );
+    let id = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(&state)
+        .args(["-w", "6b0f2c3e-1111-4222-8333-444455556666", "status"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&id.stderr),
+        "parcela: unknown environment ID; list environments with parcela ls\n"
     );
     let mut bare = Command::new(env!("CARGO_BIN_EXE_parcela"));
     bare.arg("--path").arg(&root).arg("--state-dir").arg(&state);
@@ -104,8 +123,47 @@ fn missing_manifest_and_unstarted_checkout_point_to_the_next_command() {
         serde_json::from_slice::<serde_json::Value>(&bare.stdout).unwrap(),
         serde_json::json!({"hint": "Not started yet. Run `parcela up`."})
     );
+    for command in ["status", "url"] {
+        let output = cli(&app, &state, &[command]);
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "parcela: this checkout has not been started; start it with `parcela up`\n",
+            "{command}"
+        );
+    }
     up(&app, &state, &[]);
     let bare = cli(&app, &state, &[]);
     let status: serde_json::Value = serde_json::from_slice(&bare.stdout).unwrap();
     assert_eq!(status["state"], "stopped");
+    for command in ["status", "url"] {
+        let output = cli(&app, &state, &[command]);
+        assert!(output.status.success(), "{command}");
+    }
+
+    // Renaming the project strands the registration; the message names the way out, and it works.
+    fs::write(
+        app.join("parcela.yaml"),
+        "version: 1\nproject: shop\nservices: {web: {command: bin/web, http: {healthcheck: /}}}\n",
+    )
+    .unwrap();
+    let id = status["workspace"]["id"].as_str().unwrap();
+    let renamed = cli(&app, &state, &["status"]);
+    assert_eq!(
+        String::from_utf8_lossy(&renamed.stderr),
+        format!(
+            "parcela: parcela.yaml now gives this checkout shop.localhost, but it was started as app.localhost; forget the old one with `parcela -w {id} rm`, then run `parcela up`\n"
+        )
+    );
+    let forget = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(&state)
+        .args(["-w", id, "rm"])
+        .output()
+        .unwrap();
+    assert!(
+        forget.status.success(),
+        "{}",
+        String::from_utf8_lossy(&forget.stderr)
+    );
+    assert!(up(&app, &state, &[]).contains("1443"));
 }

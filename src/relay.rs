@@ -72,7 +72,11 @@ fn plist(user: &str, target: u16, http: bool) -> String {
 
 /// Whether the installed relay already owns port 80.
 fn relays_http() -> bool {
-    std::fs::read_to_string(PLIST).is_ok_and(|plist| plist.contains("<string>80</string>"))
+    std::fs::read_to_string(PLIST).is_ok_and(|plist| takes_http(&plist))
+}
+
+fn takes_http(plist: &str) -> bool {
+    plist.contains("<string>80</string>")
 }
 
 /// Who holds `port` on loopback, if anyone.
@@ -84,6 +88,14 @@ fn busy(port: u16) -> Option<String> {
 
 pub fn installed() -> bool {
     Path::new(PLIST).exists()
+}
+
+/// A relay installed by an older release skips port 80; while 80 is free, reinstalling adds the
+/// http:// redirect.
+pub fn http_warning() -> Option<String> {
+    (installed() && !relays_http() && busy(80).is_none()).then(|| {
+        "http:// URLs do not redirect; run `parcela proxy install` to relay port 80".to_owned()
+    })
 }
 
 fn sudo(script: &str, args: &[&str]) -> Result<()> {
@@ -171,6 +183,12 @@ mod tests {
             "{plist}"
         );
         assert_eq!(plist.matches("<string>1443</string>").count(), 1, "{plist}");
+    }
+
+    #[test]
+    fn a_relay_without_port_80_is_told_apart() {
+        assert!(super::takes_http(&super::plist("you", 1443, true)));
+        assert!(!super::takes_http(&super::plist("you", 1443, false)));
     }
 
     #[test]

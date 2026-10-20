@@ -2,6 +2,8 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useData } from 'vitepress';
 import { agents } from './agents.js';
+import InstallCommand from './InstallCommand.vue';
+import AgentInstall from './AgentInstall.vue';
 
 const { frontmatter } = useData();
 const current = ref(0);
@@ -47,9 +49,30 @@ onBeforeUnmount(() => clearInterval(timer));
     >{{ agent.name }}</span></span></span></span></span>
   </h1>
   <p class="tagline">{{ frontmatter.hero.tagline }}</p>
+  <InstallCommand class="install" />
+  <p class="agent-install"><AgentInstall /></p>
 </template>
 
 <style scoped>
+.install {
+  margin: 28px auto 0;
+  max-width: 520px;
+}
+
+.agent-install {
+  margin: 10px 0 -12px;
+  text-align: center;
+}
+
+/* On phones the whole command fits on one line, clear of the copy button. */
+@media (max-width: 480px) {
+  .install :deep(code) {
+    padding: 0 54px 0 12px;
+    font-size: 10px;
+    letter-spacing: -0.02em;
+  }
+}
+
 .line {
   display: block;
 }

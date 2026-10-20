@@ -433,6 +433,85 @@ fn foreign_database_is_not_initialized_or_modified() {
 }
 
 #[test]
+fn url_takes_the_service_like_logs_does() {
+    let temp = TempDir::new().unwrap();
+    let state = temp.path().join("state");
+    let path = checkout(temp.path(), "demo");
+    register(&path, &state, &["--name", "auth"]);
+    let url = |args: &[&str]| {
+        let output = cli(&path, &state, args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    assert_eq!(url(&["url"]), "https://auth-demo.localhost:1443\n");
+    assert_eq!(
+        url(&["url", "api"]),
+        "https://api-auth-demo.localhost:1443\n"
+    );
+    assert_eq!(url(&["url", "--service", "api"]), url(&["url", "api"]));
+    let unknown = cli(&path, &state, &["url", "nope"]);
+    assert!(!unknown.status.success());
+}
+
+#[test]
+fn workspace_selects_an_environment_by_name_url_or_host() {
+    let temp = TempDir::new().unwrap();
+    let state = temp.path().join("state");
+    let demo = checkout(temp.path(), "demo");
+    register(&demo, &state, &["--name", "auth"]);
+    let other = checkout(temp.path(), "other");
+    fs::write(
+        other.join("parcela.yaml"),
+        MANIFEST.replace("project: demo", "project: other"),
+    )
+    .unwrap();
+    register(&other, &state, &["--name", "auth"]);
+    let id = |path: &Path| value(&cli(path, &state, &["context"]))["workspace"]["id"].clone();
+    let select = |selector: &str| {
+        Command::new(env!("CARGO_BIN_EXE_parcela"))
+            .arg("--state-dir")
+            .arg(&state)
+            .args(["-w", selector, "context"])
+            .output()
+            .unwrap()
+    };
+    for (selector, path) in [
+        ("auth-demo", &demo),
+        ("auth-demo.localhost", &demo),
+        ("https://api-auth-demo.localhost:1443/cart", &demo),
+        ("auth-other.local", &other),
+        ("HTTPS://AUTH-DEMO.LOCALHOST", &demo),
+    ] {
+        assert_eq!(
+            value(&select(selector))["workspace"]["id"],
+            id(path),
+            "{selector}"
+        );
+    }
+    let ambiguous = select("auth");
+    assert!(!ambiguous.status.success());
+    assert!(
+        String::from_utf8_lossy(&ambiguous.stderr)
+            .contains("auth names 2 environments; use one of: auth-demo, auth-other"),
+        "{}",
+        String::from_utf8_lossy(&ambiguous.stderr)
+    );
+    let short = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .arg("--state-dir")
+        .arg(&state)
+        .arg("-C")
+        .arg(&demo)
+        .arg("context")
+        .output()
+        .unwrap();
+    assert_eq!(value(&short)["workspace"]["id"], id(&demo));
+}
+
+#[test]
 fn uuid_target_inspection_and_stop_survive_missing_source() {
     let temp = TempDir::new().unwrap();
     let path = checkout(temp.path(), "app");

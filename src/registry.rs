@@ -12,6 +12,7 @@ use std::{
 use uuid::Uuid;
 
 const VERSION: i64 = 4;
+pub const NOT_STARTED: &str = "this checkout has not been started; start it with `parcela up`";
 const SESSION_COLUMNS: &str =
     "environment_id, token, router_token, generation, backend_port, status, kind, public_url";
 const COLUMNS: &str = "id, project_id, source, role, label, hostname, generation, vcs";
@@ -425,13 +426,14 @@ impl Registry {
             )
             .optional()?;
         let Some(workspace) = workspace else {
-            bail!("this checkout is not running yet; start it with parcela up");
+            bail!(NOT_STARTED);
         };
+        let hostname = manifest.hostname(workspace.role == Role::Primary, &workspace.label)?;
         ensure!(
-            workspace.project_id == manifest.project.id
-                && workspace.hostname
-                    == manifest.hostname(workspace.role == Role::Primary, &workspace.label)?,
-            "manifest identity/name changed; explicit rebind is not implemented"
+            workspace.project_id == manifest.project.id && workspace.hostname == hostname,
+            "parcela.yaml now gives this checkout {hostname}, but it was started as {}; forget the old one with `parcela -w {} rm`, then run `parcela up`",
+            workspace.hostname,
+            workspace.id
         );
         Ok(workspace)
     }

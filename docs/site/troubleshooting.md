@@ -4,7 +4,7 @@ description: What to check when an environment does not start, a URL does not lo
 
 # Troubleshooting
 
-Start with these two commands. Most problems show up in one of them:
+Check tools and configuration, then inspect the selected environment:
 
 ```sh
 parcela doctor
@@ -38,11 +38,11 @@ parcela: last lines of /Users/you/.local/state/parcela/environments/<id>/log/own
 parcela: services stopped before they were ready; full log: /Users/you/.local/state/parcela/environments/<id>/log/owner.log
 ```
 
-The message says what each service did instead: `nothing listens on its $PORT`, a status code, or that another process holds the port. Check that its command:
+The message says what each service did instead: `nothing listens on its $PORT`, a status code, or that another process holds the port. Check the service configuration:
 
-- listens on `$PORT`, not a fixed port,
-- binds `127.0.0.1`,
-- answers its `http.healthcheck` path with a 2xx status.
+- Pass `$PORT` to the server command.
+- Bind to `127.0.0.1`.
+- Set `http.healthcheck` to a path that returns 2xx.
 
 `parcela logs web` shows the service's own output, also after the environment stopped.
 
@@ -62,13 +62,13 @@ The environment is registered but not running, or it is still starting. Run `par
 
 Run `parcela status` and look at the `parcela-lan-*` and `parcela-tailscale-*` processes. `parcela logs parcela-tailscale-web` shows why one stopped.
 
-- **A `.local` name does not resolve.** The device must be on the same network, and some guest or office Wi-Fi blocks mDNS. After the laptop changes networks, run `parcela restart --lan`.
-- **The page says the host is not allowed.** The dev server refuses the shared name. Add `PARCELA_SHARE_HOSTS` to its allowed hosts, as shown in [the CLI guide](cli.md#let-the-dev-server-accept-the-names).
+- **A `.local` name does not resolve.** The device must be on the same network, and some guest or office Wi-Fi blocks mDNS. After the laptop changes networks, run `parcela restart --detach --lan`.
+- **The page says the host is not allowed.** The dev server refuses the shared name. Add `PARCELA_SHARE_HOSTS` to its allowed hosts, as shown in [the sharing guide](worktrees.md#let-the-dev-server-accept-the-names).
 - **`--tailscale` refuses to start.** It says what is missing: the CLI, `tailscale up`, or HTTPS certificates in the tailnet's DNS settings.
 
 ## The dev server rejects the host
 
-Rails, Django and Vite accept `*.localhost` names in development by default, but not the `.local` and tailnet names of `--lan` and `--tailscale`, nor any name once you set an allow list yourself. Add the names from `PARCELA_SHARE_HOSTS`, or derive them from `PARCELA_URL`. [Frameworks and data](frameworks.md#host-checks) shows the setting for each framework.
+Rails, Django and Vite accept `*.localhost` names in development by default, but not the `.local` and tailnet names of `--lan` and `--tailscale`, nor any name once you set an allow list yourself. Add the names from `PARCELA_SHARE_HOSTS`, or derive them from `PARCELA_URL`. [Configure frameworks](frameworks.md#framework-settings) shows the setting for each framework.
 
 ## Safari searches instead of opening the URL
 
@@ -84,7 +84,7 @@ Another checkout owns that name. Start this one with another name: `parcela up -
 
 ## A checkout keeps its old name
 
-Parcela remembers a checkout's name after the first `up`. To rename it, run `parcela down`, `parcela rm`, then `parcela up --name NEW`. The renamed checkout gets a new runtime directory, so move any files you keep in `PARCELA_RUNTIME_DIR` yourself.
+Parcela remembers a checkout's name after the first `up`. To rename it, run `parcela down`, `parcela rm`, then `parcela up --name NEW`. Read any teardown hook before `rm`, because it can delete external data. The new registration gets a new runtime directory. Move retained data yourself if needed.
 
 ## `logs` has nothing to show
 
@@ -97,10 +97,12 @@ parcela: no logs yet; run parcela up first
 ## The proxy is from another Parcela version
 
 ```text
-parcela: the running proxy is from Parcela <old>, this is <new>; run `parcela proxy restart` to update it
+parcela: the running proxy is from Parcela <old>, older than this <new>; run `parcela proxy restart` to update it
 ```
 
-You upgraded Parcela while the old proxy was running. It keeps serving. Run `parcela proxy restart` when nothing needs the URLs for a moment.
+Releases share a running proxy until one changes how the proxy works. This one did, and the old proxy is still running. It keeps serving. Run `parcela proxy restart` when nothing needs the URLs for a moment.
+
+If the message says the proxy is newer, another Parcela on this machine is newer than the one you ran. Run `parcela upgrade`.
 
 ## The state is `unknown`
 
@@ -112,4 +114,4 @@ Don't kill processes by PID or delete files in the state directory to fix this. 
 
 ## Something else
 
-Run `parcela status --json` and read its `diagnostic` field. Report bugs at [github.com/lostcoords/parcela/issues](https://github.com/lostcoords/parcela/issues) with that output and the matching `owner.log`.
+Run `parcela status --json` and read its `diagnostic` field. Review the output and matching `owner.log` for secrets or private paths before including them in a [bug report](https://github.com/lostcoords/parcela/issues).

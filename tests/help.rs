@@ -53,3 +53,27 @@ fn every_command_and_flag_is_described_in_plain_words() {
     }
     assert!(seen > 17, "walked only {seen} help pages");
 }
+
+/// The bash script the CLI prints completes subcommands and their flags.
+#[test]
+fn bash_completion_completes_commands_and_flags() {
+    let script = Command::new(env!("CARGO_BIN_EXE_parcela"))
+        .args(["completion", "bash"])
+        .output()
+        .unwrap();
+    assert!(script.status.success());
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), &script.stdout).unwrap();
+    let complete = |line: &str| {
+        let output = Command::new("bash")
+            .arg("-c")
+            .arg(r#"source "$1"; COMP_LINE=$2; read -ra COMP_WORDS <<< "$COMP_LINE"; COMP_CWORD=$((${#COMP_WORDS[@]}-1)); COMP_POINT=${#COMP_LINE}; _parcela parcela "${COMP_WORDS[COMP_CWORD]}" "${COMP_WORDS[COMP_CWORD-1]}"; echo "${COMPREPLY[*]}""#)
+            .args(["bash", file.path().to_str().unwrap(), line])
+            .output()
+            .unwrap();
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    assert_eq!(complete("parcela stat"), "status");
+    assert_eq!(complete("parcela proxy ins"), "install");
+    assert_eq!(complete("parcela up --det"), "--detach");
+}

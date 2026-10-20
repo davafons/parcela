@@ -235,7 +235,7 @@ fn a_busy_port_fails_naming_its_holder_and_keeps_the_saved_profile() {
 }
 
 #[test]
-fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
+fn only_a_proxy_on_another_protocol_warns() {
     let Some(caddy) = caddy() else {
         eprintln!("skipped: caddy is not on PATH");
         return;
@@ -252,16 +252,39 @@ fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
         .success()
     );
     let record = proxy.state.join("proxy/router.json");
-    let mut router: Value = serde_json::from_str(&fs::read_to_string(&record).unwrap()).unwrap();
-    router["version"] = json!("0.0.1");
-    parcela::private::write_json(&record, &router).unwrap();
+    let rewrite = |version: &str, protocol: Option<u32>| {
+        let mut router: Value =
+            serde_json::from_str(&fs::read_to_string(&record).unwrap()).unwrap();
+        router["version"] = json!(version);
+        match protocol {
+            Some(protocol) => router["protocol"] = json!(protocol),
+            None => drop(router.as_object_mut().unwrap().remove("protocol")),
+        }
+        parcela::private::write_json(&record, &router).unwrap();
+    };
+    let status = || json_of(&cli(&proxy.state, &["--json", "proxy", "status"]));
 
+    // Another release on the same protocol shares the proxy quietly.
+    rewrite("0.0.2", Some(parcela::router::PROTOCOL));
+    assert_eq!(status()["version_warning"], Value::Null);
+
+    rewrite("0.0.3", Some(parcela::router::PROTOCOL + 1));
+    assert_eq!(
+        status()["version_warning"],
+        format!(
+            "the running proxy is from Parcela 0.0.3, newer than this {}; run `parcela upgrade`",
+            env!("PARCELA_VERSION")
+        )
+    );
+
+    // A proxy started before the protocol was recorded is older.
+    rewrite("0.0.1", None);
     let warning = format!(
-        "the running proxy is from Parcela 0.0.1, this is {}; run `parcela proxy restart` to update it",
+        "the running proxy is from Parcela 0.0.1, older than this {}; run `parcela proxy restart` to update it",
         env!("PARCELA_VERSION")
     );
-    let status = json_of(&cli(&proxy.state, &["--json", "proxy", "status"]));
-    assert_eq!(status["version_warning"], warning);
+    let before = status();
+    assert_eq!(before["version_warning"], warning);
     let start = cli(&proxy.state, &["--json", "proxy", "start"]);
     assert!(start.status.success());
     assert_eq!(stderr(&start), format!("parcela: {warning}\n"));
@@ -274,7 +297,7 @@ fn a_proxy_from_another_parcela_version_warns_with_the_restart_command() {
     let restarted = json_of(&restarted);
     assert_eq!(restarted["version"], env!("PARCELA_VERSION"));
     assert_eq!(restarted["version_warning"], Value::Null);
-    assert_ne!(restarted["pid"], status["pid"]);
+    assert_ne!(restarted["pid"], before["pid"]);
 }
 
 fn on_path(program: &str) -> bool {
@@ -441,5 +464,78 @@ fn a_port_only_root_may_use_is_refused_with_the_reason() {
         ),
         "{}",
         stderr(&started)
+    );
+}
+
+#[test]
+fn open_hands_the_running_url_to_the_browser_and_refuses_a_stopped_one() {
+    if !["caddy", "python3"].iter().all(|program| on_path(program)) {
+        eprintln!("skipped: needs caddy and python3 on PATH");
+        return;
+    }
+    let proxy = Proxy::new();
+    let root = proxy._t.path().canonicalize().unwrap();
+    let port = free_port().to_string();
+    let app = root.join("notes");
+    fs::create_dir(&app).unwrap();
+    fs::write(
+        app.join("parcela.yaml"),
+        "version: 1\nproject: notes\nservices: {web: {command: python3 -m http.server $PORT --bind 127.0.0.1, http: {healthcheck: /}}}\n",
+    )
+    .unwrap();
+    let _environments = Environments {
+        state: &proxy.state,
+        paths: vec![app.clone()],
+    };
+    let opened = root.join("opened");
+    let browser = root.join("browser");
+    fs::write(
+        &browser,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+            opened.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(
+        &browser,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    let parcela = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_parcela"))
+            .arg("--path")
+            .arg(&app)
+            .arg("--state-dir")
+            .arg(&proxy.state)
+            .env("PARCELA_HTTPS_PORT", &port)
+            .env("BROWSER", format!("{} --new-window", browser.display()))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let up = parcela(&["up", "--detach"]);
+    assert!(up.status.success(), "{}", stderr(&up));
+    let url = format!("https://notes.localhost:{port}");
+
+    let open = parcela(&["--json", "open"]);
+    assert!(open.status.success(), "{}", stderr(&open));
+    assert_eq!(json_of(&open), json!({ "url": url }));
+    assert_eq!(
+        fs::read_to_string(&opened).unwrap(),
+        format!("--new-window {url}\n")
+    );
+
+    assert!(!parcela(&["open", "nope"]).status.success());
+    assert!(parcela(&["down"]).status.success());
+    let stopped = parcela(&["open"]);
+    assert_eq!(
+        stderr(&stopped),
+        "parcela: notes is not running; start it with `parcela up`\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&opened).unwrap(),
+        format!("--new-window {url}\n"),
+        "nothing opened while stopped"
     );
 }

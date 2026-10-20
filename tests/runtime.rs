@@ -115,6 +115,7 @@ fn caddy_config_is_exact_owned_loopback_no_trust_no_persist() {
         token: Uuid::new_v4().to_string(),
         front_door: FrontDoor::on(34443),
         version: router::VERSION.into(),
+        protocol: router::PROTOCOL,
     };
     let session = registry
         .begin_session(
@@ -277,6 +278,7 @@ fn port_443_urls_carry_no_port() {
         token: Uuid::new_v4().to_string(),
         front_door: FrontDoor::on(443),
         version: router::VERSION.into(),
+        protocol: router::PROTOCOL,
     };
     assert_eq!(
         router.url("auth-app.localhost"),

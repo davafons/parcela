@@ -168,7 +168,7 @@ fn proxy(state: &Path) -> Check {
         );
     }
     match parcela::proxy::status(state) {
-        Ok(Status::Running(router)) => match parcela::proxy::version_warning(&router) {
+        Ok(Status::Running(router)) => match parcela::proxy::protocol_warning(&router) {
             Some(warning) => Check::fail("proxy", warning, "parcela proxy restart"),
             None => Check::pass(
                 "proxy",
@@ -225,9 +225,10 @@ pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
         proxy(probes.state),
     ];
     let ready = checks.iter().all(|check| check.ok);
-    let notes = [
-        "HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.",
+    let mut notes = vec![
+        "HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.".to_owned(),
     ];
+    notes.extend(parcela::relay::http_warning());
     let next = checks
         .iter()
         .find_map(|check| check.fix.clone())
@@ -246,7 +247,7 @@ pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
                 let mark = if check.ok { style.ok() } else { style.bad() };
                 text.push_str(&format!("{mark} {:<width$}{}\n", check.name, check.detail));
             }
-            for note in notes {
+            for note in &notes {
                 text.push_str(&format!("{}\n", style.dim(&format!("· {note}"))));
             }
             text.push_str(&format!("\nNext step: {}\n", style.bold(&next)));

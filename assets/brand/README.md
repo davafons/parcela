@@ -1,6 +1,6 @@
 # Parcela brand assets
 
-Two designs are retained from the logo studies.
+The SVG is the main logo. The pixel mascot is an alternate mark. Keep the generated reference as the source for the SVG design.
 
 | File | Purpose |
 | --- | --- |
@@ -11,13 +11,19 @@ Two designs are retained from the logo studies.
 
 The outline and eyes use `#111318`. The body is white and the accent is `#315de8`. The outline keeps the white forms visible on light backgrounds and blends into the graphite theme on dark backgrounds.
 
-To rebuild the pixel PNG, install the docs dependencies and run:
+## Rebuild the pixel mascot
+
+Install the docs dependencies and run:
 
 ```sh
 npm ci --prefix docs/website
 node scripts/build-brand-pixel.mjs
 ```
 
+## Display the assets
+
 Display the pixel mark at its native size or an integer multiple. Use nearest-neighbor scaling, or `image-rendering: pixelated` in CSS. Do not use smoothing or fractional scaling when preserving the pixel grid matters.
+
+## Source history
 
 The SVG is a vector cleanup of the selected generated concept, not an SVG returned by the image-generation model. The pixel design is grid-authored. The generated master reference has SHA-256 `62373f4ec80f39a9814bad3c8ab6789c7fd7a5c0f5501353c1b4f5758c8cfd74`.
