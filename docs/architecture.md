@@ -19,7 +19,7 @@ Parcela turns one checkout's configuration into a supervised environment. It own
 
 1. Find and validate the nearest `parcela.yaml`.
 2. Register the checkout on first use. A main checkout gets the project URL. A linked jj workspace or Git worktree gets a preview name.
-3. Reserve service hostnames and lease backend ports from 20000 through 29999. Port leases use one transaction.
+3. Reserve service hostnames and lease backend ports from 20000 through 29999, including each port a `compose` service's containers publish. Port leases use one transaction.
 4. Start the shared proxy if needed.
 5. Build the process graph. Start hook dependencies, setup if due, prestart, and the remaining services in dependency order.
 6. Confirm that every HTTP listener belongs to the graph and that its readiness path returns 2xx.
@@ -79,6 +79,7 @@ Control and Caddy admin sockets use a hash of the state path under a per-user te
 | Module | Responsibility |
 | --- | --- |
 | `config` | Parses format version 1 and validates manifests. |
+| `compose` | Runs a `compose` service: reads the ports its containers publish from `docker compose config` on `up`, writes the environment's Compose override, and forwards a `compose.http` service's `$PORT` to its container, so routing still reaches only listeners the graph holds. |
 | `registry`, `ports` | Stores identity and reservations, leases backend ports. |
 | `startup`, `runtime` | Registers a checkout and coordinates startup and readiness. |
 | `supervisor`, `logs` | Runs the process graph and retains process output. |

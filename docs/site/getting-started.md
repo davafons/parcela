@@ -32,8 +32,9 @@ the whole app in any checkout or worktree, each at its own HTTPS URL.
      127.0.0.1:$PORT and have an http.healthcheck;
    - data that belongs to each environment: SQLite under
      $PARCELA_DATA_DIR, or one database per environment;
-   - containers already in docker-compose.yml as one service
-     that runs `docker compose up`, with a `stop` command, as in
+   - databases and other containers already in docker-compose.yml
+     as one service with `compose: {file, services}`, the apps
+     native, as in
      https://parcela.run/docs/frameworks/#docker-compose;
    - hooks.setup to install packages, copy .env from
      $PARCELA_PRIMARY_DIR and create and seed the database;

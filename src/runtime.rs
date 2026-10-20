@@ -114,6 +114,12 @@ pub fn environment(
     for (name, port) in ports {
         context.insert(crate::config::port_variable(name), port.to_string());
     }
+    context.extend(crate::compose::environment(
+        manifest,
+        &workspace.source,
+        runtime,
+        &workspace.label,
+    )?);
     for (key, value) in &manifest.environment {
         let resolved = resolve(key, value, &context)?;
         context.insert(key.clone(), resolved);
@@ -240,6 +246,9 @@ pub fn run(
                     std::fs::remove_dir_all(&hooks)?;
                 }
                 private::directory(&hooks)?;
+                if let Some(compose) = manifest.compose() {
+                    crate::compose::write_override(&path, compose, &session.ports)?;
+                }
                 let endpoints = session.endpoints(&manifest.default_service);
                 supervisor::plan(
                     manifest,

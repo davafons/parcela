@@ -64,9 +64,49 @@ DATABASES = {
 
 ### PostgreSQL
 
-Choose one server per environment or one database per environment on a shared server.
+Choose a server per environment, a container per environment, or one database per environment on a shared server.
 
 **A server per environment.** Run `postgres` as a service on a named port, as in [the Rails and PostgreSQL example](https://github.com/lostcoords/parcela/blob/main/examples/rails-postgres/parcela.yaml). Its files live in `PARCELA_DATA_DIR` and `down` stops it.
+
+**A container per environment.** Run the image your `docker-compose.yml` already pins, so every worktree and every teammate gets the same version. The Compose file stays as it is:
+
+```yaml
+# docker-compose.yml
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    volumes: [db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+volumes:
+  db:
+```
+
+```yaml
+# parcela.yaml
+env:
+  DATABASE_URL: postgres://postgres:postgres@127.0.0.1:${PARCELA_PORT_POSTGRES}/shop_development
+services:
+  db:
+    compose:
+      file: docker-compose.yml
+      services: [postgres]
+  web:
+    command: bin/rails server -p $PORT -b 127.0.0.1
+    http:
+      healthcheck: /up
+    depends_on: [db]
+hooks:
+  setup:
+    command: bin/rails db:prepare
+    depends_on: [db]
+```
+
+Each environment gets its own container and volume, `shop-signup-postgres-1` and `shop-signup_db`, on its own loopback port. `docker compose exec postgres psql -U postgres` in a task reaches the environment's own server. [Docker Compose](#docker-compose) has the details.
 
 **One shared server, one database per environment.** Name the database after the environment. libpq tools such as `psql`, `createdb` and `dropdb` read `PGHOST`:
 
@@ -100,24 +140,20 @@ hooks:
 
 ### Docker Compose
 
-Keep the containers in `docker-compose.yml` and the apps native. One service runs `docker compose up` in the foreground, so its output is in `parcela logs`, and the apps depend on it:
+Keep the backing services in `docker-compose.yml` and the apps native. A [compose](configuration.md#compose) service starts the Compose services an environment needs, and the apps depend on it:
 
 ```yaml
-ports: [postgres, search]
-
 env:
-  COMPOSE_PROJECT_NAME: shop-${PARCELA_ENVIRONMENT_NAME}
-  POSTGRES_PORT: ${PARCELA_PORT_POSTGRES}
-  SEARCH_PORT: ${PARCELA_PORT_SEARCH}
   DATABASE_URL: postgres://postgres@127.0.0.1:${PARCELA_PORT_POSTGRES}/shop
+  ELASTICSEARCH_URL: http://127.0.0.1:${PARCELA_PORT_SEARCH}
 
 readiness_timeout_seconds: 600
 
 services:
   deps:
-    command: exec docker compose up postgres search
-    healthcheck: test "$(docker compose ps --format '{{.Health}}' postgres search | grep -c '^healthy$')" = 2
-    stop: docker compose stop
+    compose:
+      file: docker-compose.yml
+      services: [postgres, search]
   web:
     command: bin/rails server -p $PORT -b 127.0.0.1
     http:
@@ -125,23 +161,21 @@ services:
     depends_on: [deps]
 ```
 
-```yaml
-# docker-compose.yml
-services:
-  postgres:
-    ports: ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]
-    volumes: [db:/var/lib/postgresql/data]
-  search:
-    ports: ["127.0.0.1:${SEARCH_PORT:-9200}:9200"]
-volumes:
-  db:
+- Each environment is its own Compose project, `shop-primary` or `shop-signup`, with its own containers, network and volumes. Every `docker compose` in hooks and tasks uses it.
+- The ports come from the Compose file: each port a started container publishes is leased. The first one of a service is named after it, like `PARCELA_PORT_SEARCH`, and the others add the container port, like `PARCELA_PORT_SEARCH_9300`. Parcela publishes it on `127.0.0.1` only, through an override file, so fixed host ports and `container_name` in the Compose file stay.
+- `deps` is ready once every listed service runs and is healthy. Give the Compose services a `healthcheck`, or the app may start before the database accepts connections. Raise `readiness_timeout_seconds` for one that is slow on its first start, like Elasticsearch.
+- `down` stops the containers, even if `docker compose up` was killed or Parcela crashed, and keeps the volumes.
+- A built image used by several worktrees needs an `image:` name next to `build:`, or Compose builds one per environment.
+- Compose reads `.env` next to the Compose file for its own variables, such as passwords. Variables from `parcela.yaml` take precedence. The containers start before `setup`, so a new worktree cannot copy it first: point Compose at the main checkout's with `COMPOSE_ENV_FILES: ${PARCELA_PRIMARY_DIR}/.env`.
+- Without Parcela, `docker compose up` names the project after the Compose file's directory. Parcela's names differ, so the main checkout starts with empty volumes. To keep the old data, copy each volume once before the first `parcela up`, with both stacks stopped. The labels tell Compose the volume is its own:
+
+```sh
+docker volume create --label com.docker.compose.project=shop-primary --label com.docker.compose.volume=db shop-primary_db
+docker run --rm -v shop_db:/from:ro -v shop-primary_db:/to busybox cp -a /from/. /to/
 ```
 
-- `COMPOSE_PROJECT_NAME` gives each environment its own containers, network and volumes, which Compose prefixes with the project name. Every `docker compose` in hooks and tasks uses it too.
-- Remove `container_name` and fixed host ports from the Compose file. Two environments cannot share a container name or a port. Publish ports on `127.0.0.1`.
-- `stop` stops the containers even if `docker compose up` was killed or crashed. `down` keeps the volumes. Give the Compose service a `healthcheck` so the count above works.
-- A built image used by several worktrees needs an `image:` name next to `build:`, or Compose builds one per project.
-- Compose reads `.env` next to the Compose file. Variables from `parcela.yaml` take precedence over it.
+- Nothing deletes an environment's volumes. After removing a worktree, run `docker compose -p shop-signup down -v` from the Compose file's directory.
+- A container that serves HTTP, like Mailpit, MinIO's console or Kibana, gets its own URL through `http` under `compose`. See [Containers with URLs](configuration.md#containers-with-urls).
 
 ### Redis, Sidekiq and queues
 

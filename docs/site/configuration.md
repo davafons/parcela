@@ -13,7 +13,7 @@ Both are required. `version` is the file format, and this Parcela reads `1`. A f
 
 ## services
 
-`services` is required. At least one service must have `http`, and exactly one HTTP service must omit `subdomain`. Every long-running process is a service. Each one is a mapping with a `command`:
+`services` is required. At least one service must have `http`, and exactly one HTTP service must omit `subdomain`. Every long-running process is a service. Each one is a mapping with a `command`, or a `compose` file:
 
 ```yaml
 services:
@@ -27,7 +27,8 @@ services:
 
 | Field | Meaning |
 |---|---|
-| `command` | Required. A shell command, run with `bash -c` (`sh -c` where there is no bash) from the checkout root. Its output goes to `parcela logs`. |
+| `command` | A shell command, run with `bash -c` (`sh -c` where there is no bash) from the checkout root. Its output goes to `parcela logs`. Required unless the service has `compose`. |
+| `compose` | Runs containers from a Docker Compose file instead of `command`. See [compose](#compose). |
 | `http` | Makes the service reachable at an HTTPS URL. See below. |
 | `healthcheck` | For services without `http`: a shell command that exits 0 once the service is ready, like `pg_isready`. |
 | `depends_on` | Services to start first. Parcela waits until each one is ready: its HTTP healthcheck answers, its `healthcheck` passes, or, without either, it has started. |
@@ -37,17 +38,96 @@ services:
 
 Service names are DNS labels. `setup` and `prestart` are reserved for hooks. Dependency cycles and unknown dependencies are errors. A service cannot declare both `http` and a shell `healthcheck`.
 
-### stop
+### compose
 
-Parcela stops a service by signaling its processes. That is not enough when `command` only asks another program to run something, such as `docker compose up` asking Docker for containers: if the client is killed or crashes, the containers keep running. `stop` names the command that stops them:
+Keep databases and search engines in your `docker-compose.yml`, at the versions it pins, and run the app natively:
 
 ```yaml
 services:
   deps:
-    command: exec docker compose up postgres
-    healthcheck: docker compose exec postgres pg_isready
-    stop: docker compose stop
+    compose:
+      file: docker-compose.yml
+      services: [postgres, elasticsearch]
+  web:
+    command: bin/rails server -p $PORT -b 127.0.0.1
+    http:
+      healthcheck: /up
+    depends_on: [deps]
 ```
+
+| Field | Meaning |
+|---|---|
+| `file` | Required. The Compose file, relative to the checkout root. Next to `compose.yaml` or `docker-compose.yml`, its override file, like `docker-compose.override.yml`, applies too, as with plain `docker compose`. |
+| `services` | The Compose services to start. Compose also starts what they depend on. |
+| `http` | Containers that serve HTTP, each at its own URL. See [Containers with URLs](#containers-with-urls). Their Compose services start too. |
+
+The Compose file stays as it is, fixed ports and `container_name` included. On `up`, Parcela:
+
+- names the environment's Compose project `<project>-<environment>`, like `shop-primary` or `shop-signup`, so each environment has its own containers, network and volumes;
+- leases a port for every port the started containers publish. A service's first port is named after it, like `PARCELA_PORT_POSTGRES`, and its others add the container port, like `PARCELA_PORT_ELASTICSEARCH_9300`;
+- writes an override file to the environment's runtime directory that publishes those ports on `127.0.0.1` and the leased port, and drops `container_name`;
+- runs `docker compose up` for the services in the foreground, so their output is in `parcela logs`;
+- calls the service ready once each listed Compose service runs and, if it has a `healthcheck`, is healthy;
+- runs `docker compose stop` as the service's [stop](#stop) command. `down` keeps the volumes.
+
+Every service, hook and task gets `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, so a plain `docker compose exec postgres psql` reaches the environment's own containers. Your app reads the leased port from `env`:
+
+```yaml
+env:
+  DATABASE_URL: postgres://postgres@127.0.0.1:${PARCELA_PORT_POSTGRES}/shop
+```
+
+- Only one service can use `compose`. List every Compose service it should start, in `services` or `http`.
+- `docker compose up` gets every variable Parcela sets, so the Compose file can use them: `APP_URL: ${PARCELA_URL:-http://localhost:3000}` keeps working without Parcela.
+- It needs Docker Compose 2.24.4 or newer. `parcela doctor` checks that the file and services exist.
+- Compose reads `.env` next to the Compose file for its own variables. A new worktree does not have it until it is copied, and the containers start before `setup` runs. Point Compose at the main checkout's with `COMPOSE_ENV_FILES: ${PARCELA_PRIMARY_DIR}/.env` in `env` if the containers need it.
+- A built image shared by every worktree needs an `image:` name next to `build:`, or Compose builds one per environment.
+- To delete a worktree's containers and volumes, run `docker compose -p shop-signup down -v` from the Compose file's directory.
+
+#### Containers with URLs
+
+A container that serves HTTP, such as a mail catcher, an admin UI or an app that only runs in Docker, gets an HTTPS URL like a native service:
+
+```yaml
+services:
+  deps:
+    compose:
+      file: docker-compose.yml
+      services: [postgres]
+      http:
+        mail:
+          service: mailpit
+          port: 8025
+          subdomain: mail
+          healthcheck: /
+```
+
+Each key under `http` is a service: `mail` is at `https://mail-shop.localhost:1443`, has `PARCELA_SERVICE_MAIL_URL`, waits for its `healthcheck`, and is shared by `up --lan` and `--tailscale` like any other. Its fields are those of [HTTP services](#http-services), plus:
+
+| Field | Meaning |
+|---|---|
+| `service` | The Compose service. Default: the key. |
+| `port` | Required. The container port that serves HTTP. The Compose file does not need to publish it. |
+
+Leave out `subdomain` on a container that serves the environment's own URL, for an app that runs entirely in Docker. Parcela routes only listeners its own processes hold, and Docker holds a container's published ports, so Parcela runs a small forwarder from the service's `$PORT` to the container.
+
+A container reaches a native service at `host.docker.internal` and the service's port, like `http://host.docker.internal:${PARCELA_SERVICE_API_PORT}`. Native services listen on `127.0.0.1`. OrbStack on macOS forwards that address to the Mac's loopback. On Linux, containers cannot reach the host's loopback.
+
+### stop
+
+Parcela stops a service by signaling its processes. That is not enough when `command` only asks another program to run something, such as `docker run` asking Docker for a container: if the client is killed or crashes, the container keeps running. `stop` names the command that stops it:
+
+```yaml
+ports: [mail]
+services:
+  mail:
+    command: >-
+      exec docker run --rm --name "shop-mail-$PARCELA_ENVIRONMENT_NAME"
+      -p "127.0.0.1:$PARCELA_PORT_MAIL:1025" axllent/mailpit
+    stop: docker stop "shop-mail-$PARCELA_ENVIRONMENT_NAME"
+```
+
+A [compose](#compose) service sets its own.
 
 - It runs whenever the environment stops: on `down`, `restart`, a failed `up` and Ctrl-C. It runs after every service that depends on this one has stopped, and before this service gets SIGTERM.
 - It runs even if `command` already exited, and after Parcela itself crashed: the next `up`, `down` or `recover` runs it for a run that did not finish stopping.
@@ -124,6 +204,7 @@ ports: [db, cache]
 - Each name arrives as `PARCELA_PORT_<NAME>`, uppercased with hyphens turned into underscores: `PARCELA_PORT_CACHE`.
 - An environment keeps the same port across `down`, `up` and `restart` while it is free.
 - No two running environments get the same port. Parcela does not route or check these ports.
+- A [compose](#compose) service adds one for every port its containers publish.
 
 Ports come from 20000 through 29999.
 
@@ -137,7 +218,7 @@ env:
   API_ORIGIN: ${PARCELA_SERVICE_API_URL}
 ```
 
-Values can use `${NAME}` to insert any variable Parcela sets. A placeholder that does not resolve is an error. You cannot set `PORT`, `HOST` or names starting with `PARCELA_`. Commands inherit the launching shell's environment except names starting with `PARCELA_`. Service `env` overrides top-level `env`. Use Parcela-provided variables in placeholders. Arbitrary shell variables such as `${HOME}` are unavailable to interpolation.
+Values can use `${NAME}` to insert any variable Parcela sets. A placeholder that does not resolve is an error. You cannot set `PORT`, `HOST` or names starting with `PARCELA_`, nor `COMPOSE_PROJECT_NAME` or `COMPOSE_FILE` when a service uses `compose`. Commands inherit the launching shell's environment except names starting with `PARCELA_`. Service `env` overrides top-level `env`. Use Parcela-provided variables in placeholders. Arbitrary shell variables such as `${HOME}` are unavailable to interpolation.
 
 ## tasks
 
@@ -207,6 +288,7 @@ Every service, hook and task receives these. Service names are uppercased, with 
 | `PARCELA_ENVIRONMENT_ID` | `7cceea8f-0fd3-4cdc-843f-0883f3c0fc5e` |
 | `PARCELA_ROLE` | `primary` or `preview` |
 | `PARCELA_GENERATION` | `7`, a counter that increases on every start |
+| `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` | `shop-signup`, and the Compose file with the environment's override. Only when a service uses [compose](#compose). |
 
 ## State locations
 

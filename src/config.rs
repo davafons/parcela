@@ -61,6 +61,45 @@ pub struct Process {
     /// A shell command that stops what `command` started outside its own processes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop: Option<String>,
+    /// The Compose services `command` starts, for a `compose` service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compose: Option<Compose>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Compose {
+    /// Relative to the checkout root.
+    pub file: String,
+    pub services: Vec<String>,
+    /// HTTP services that serve a container port, by service name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub routes: BTreeMap<String, ComposeTarget>,
+    /// `services` and everything they depend on, from `docker compose config` at `up`.
+    #[serde(default)]
+    pub started: Vec<String>,
+    /// The ports `started` publishes, each leased like a named port.
+    #[serde(default)]
+    pub ports: Vec<ComposePort>,
+}
+
+/// A container port of a Compose service.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposeTarget {
+    pub service: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComposePort {
+    /// The named port, exported as `PARCELA_PORT_<NAME>`.
+    pub name: String,
+    pub service: String,
+    /// The container port.
+    pub target: u16,
+    pub protocol: String,
 }
 
 /// Commands that prepare an environment. Each runs after the services in its `depends_on` and before every other service.
@@ -159,8 +198,10 @@ struct File {
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 struct FileService {
-    /// A shell command, run from the checkout root. HTTP services listen on `127.0.0.1:$PORT`.
-    command: String,
+    /// A shell command, run from the checkout root. HTTP services listen on `127.0.0.1:$PORT`. Required unless the service has `compose`.
+    command: Option<String>,
+    /// Runs containers from a Docker Compose file instead of `command`, with their own names, ports and volumes in every environment.
+    compose: Option<FileCompose>,
     /// Gives the service a port in `$PORT` and an HTTPS URL.
     http: Option<Http>,
     /// For services without `http`: a shell command that exits 0 once the service is ready.
@@ -175,6 +216,39 @@ struct FileService {
     /// Variables for this service only.
     #[serde(default)]
     env: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+struct FileCompose {
+    /// The Compose file, relative to the checkout root, like `docker-compose.yml`.
+    file: String,
+    /// The Compose services to start. The service is ready once each one runs and, if it has a healthcheck, is healthy.
+    #[serde(default)]
+    services: Vec<String>,
+    /// HTTPS URLs for containers that serve HTTP, keyed by service name like services with `http`. Their Compose services start too.
+    #[serde(default)]
+    http: BTreeMap<String, ComposeHttp>,
+}
+
+/// A container port served at its own URL, like a service with `http`.
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[serde(deny_unknown_fields)]
+struct ComposeHttp {
+    /// The Compose service. Default: the key.
+    service: Option<String>,
+    /// The container port that serves HTTP, like `8025`. It does not need to be published.
+    port: u16,
+    /// The URL prefix, as in `http`. Leave it out on the one service that gets the environment's own URL.
+    subdomain: Option<String>,
+    /// A path that answers 2xx once the container serves, like `/`.
+    #[cfg_attr(test, schemars(regex(pattern = "^/")))]
+    healthcheck: String,
+    /// Also send every subdomain of this service's host to it.
+    #[serde(default)]
+    wildcard: bool,
 }
 
 #[derive(Deserialize)]
@@ -337,37 +411,112 @@ impl Manifest {
         let mut services = BTreeMap::new();
         let mut processes = BTreeMap::new();
         let mut default_service = None;
+        let mut route = |name: &str, http: Http| -> Result<()> {
+            if http.subdomain.is_none() {
+                ensure!(
+                    default_service.replace(name.to_owned()).is_none(),
+                    "only one http service can leave out subdomain; it gets the environment's own URL"
+                );
+            }
+            services.insert(
+                name.to_owned(),
+                Service {
+                    subdomain: http.subdomain,
+                    readiness_path: http.healthcheck,
+                    wildcard: http.wildcard,
+                },
+            );
+            Ok(())
+        };
+        let mut forwarders = Vec::new();
         for (name, service) in file.services {
+            let routed = service.http.is_some();
             if let Some(http) = service.http {
                 ensure!(
                     service.healthcheck.is_none(),
                     "service {name} has http, so its readiness is http.healthcheck; remove healthcheck"
                 );
-                if http.subdomain.is_none() {
-                    ensure!(
-                        default_service.replace(name.clone()).is_none(),
-                        "only one http service can leave out subdomain; it gets the environment's own URL"
-                    );
-                }
-                services.insert(
-                    name.clone(),
-                    Service {
-                        subdomain: http.subdomain,
-                        readiness_path: http.healthcheck,
-                        wildcard: http.wildcard,
-                    },
-                );
+                route(&name, http)?;
             }
-            processes.insert(
-                name,
-                Process {
-                    command: service.command,
+            let process = match (service.command, service.compose) {
+                (Some(command), None) => Process {
+                    command,
                     working_dir: service.working_dir,
                     env: service.env,
                     depends_on: service.depends_on,
                     healthcheck: service.healthcheck,
                     stop: service.stop,
+                    compose: None,
                 },
+                (None, Some(compose)) => {
+                    ensure!(
+                        !routed
+                            && service.healthcheck.is_none()
+                            && service.stop.is_none()
+                            && service.working_dir.is_none(),
+                        "service {name} has compose, so Parcela runs, checks and stops it; remove http, healthcheck, stop and working_dir"
+                    );
+                    let mut started = compose.services;
+                    let mut routes = BTreeMap::new();
+                    for (route_name, http) in compose.http {
+                        let target = ComposeTarget {
+                            service: http.service.unwrap_or_else(|| route_name.clone()),
+                            port: http.port,
+                        };
+                        if !started.contains(&target.service) {
+                            started.push(target.service.clone());
+                        }
+                        route(
+                            &route_name,
+                            Http {
+                                subdomain: http.subdomain,
+                                healthcheck: http.healthcheck,
+                                wildcard: http.wildcard,
+                            },
+                        )?;
+                        forwarders.push((route_name.clone(), name.clone(), target.clone()));
+                        routes.insert(route_name, target);
+                    }
+                    let (command, healthcheck, stop) = crate::compose::commands(&started);
+                    Process {
+                        command,
+                        working_dir: None,
+                        env: service.env,
+                        depends_on: service.depends_on,
+                        healthcheck: Some(healthcheck),
+                        stop: Some(stop),
+                        compose: Some(Compose {
+                            file: compose.file,
+                            services: started,
+                            routes,
+                            started: Vec::new(),
+                            ports: Vec::new(),
+                        }),
+                    }
+                }
+                (Some(_), Some(_)) => {
+                    bail!("service {name} has both command and compose; keep one")
+                }
+                (None, None) => bail!("service {name} needs a command"),
+            };
+            ensure!(
+                processes.insert(name.clone(), process).is_none(),
+                "two services are named {name}"
+            );
+        }
+        for (name, compose, target) in forwarders {
+            let process = Process {
+                command: crate::compose::forward_command(&target)?,
+                working_dir: None,
+                env: BTreeMap::new(),
+                depends_on: vec![compose],
+                healthcheck: None,
+                stop: None,
+                compose: None,
+            };
+            ensure!(
+                processes.insert(name.clone(), process).is_none(),
+                "two services are named {name}"
             );
         }
         Ok(Self {
@@ -485,7 +634,57 @@ impl Manifest {
                 "task {name} timeout must be positive"
             );
         }
-        check_environment(&self.environment).context("invalid env")
+        check_environment(&self.environment).context("invalid env")?;
+        self.check_compose()
+    }
+
+    /// The one service that runs a Compose file, if any.
+    pub fn compose(&self) -> Option<&Compose> {
+        self.processes
+            .values()
+            .find_map(|process| process.compose.as_ref())
+    }
+
+    fn check_compose(&self) -> Result<()> {
+        let mut composes = self
+            .processes
+            .iter()
+            .filter_map(|(name, process)| Some((name, process.compose.as_ref()?)));
+        let Some((name, compose)) = composes.next() else {
+            return Ok(());
+        };
+        ensure!(
+            composes.next().is_none(),
+            "only one service can use compose; list every Compose service in its services"
+        );
+        ensure!(
+            Path::new(&compose.file).is_relative()
+                && !compose.file.is_empty()
+                && !compose.file.contains([':', '\0']),
+            "service {name}: compose.file must be a path relative to parcela.yaml"
+        );
+        ensure!(
+            !compose.services.is_empty(),
+            "service {name}: compose needs at least one Compose service in services or http"
+        );
+        let targets = compose.routes.values().map(|target| &target.service);
+        for service in compose.services.iter().chain(targets) {
+            ensure!(
+                crate::compose::service_name(service),
+                "service {name}: invalid Compose service name {service:?}"
+            );
+        }
+        for key in crate::compose::VARIABLES {
+            ensure!(
+                !self.environment.contains_key(key)
+                    && self
+                        .processes
+                        .values()
+                        .all(|process| !process.env.contains_key(key)),
+                "{key} is set by Parcela for the compose service"
+            );
+        }
+        Ok(())
     }
 
     fn check_dependencies(&self, owner: &str, depends_on: &[String]) -> Result<()> {

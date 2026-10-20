@@ -36,9 +36,9 @@ Parcela runs a declared group of processes per checkout. That includes workers a
 
 Use containers when you need isolated execution or exact runtime images. Parcela runs native commands as your user, so editors, debuggers, and file watchers use the local filesystem directly.
 
-A Parcela service can still run a container. Bind its published ports to loopback and choose its data path explicitly. [Keep environment data separate](frameworks.md#separate-data) covers database choices.
+A `compose` service runs databases, search engines and other containers from your `docker-compose.yml`, at the versions it pins, with their own containers, volumes and loopback ports in every environment. A container that serves HTTP can get its own URL. See [Docker Compose](frameworks.md#docker-compose).
 
-A project that already has a `docker-compose.yml` can run it as one service next to its native apps. See [Docker Compose](frameworks.md#docker-compose).
+See [Docker Compose](frameworks.md#docker-compose).
 
 ## How does it fit with coding agent tools?
 

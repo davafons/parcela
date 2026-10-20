@@ -246,6 +246,9 @@ pub enum Command {
         /// Shell
         shell: clap_complete::Shell,
     },
+    /// Serve a Compose service's container port on $PORT
+    #[command(hide = true)]
+    ComposeForward { service: String, port: u16 },
     /// Manage anonymous usage data
     Telemetry {
         #[command(subcommand)]

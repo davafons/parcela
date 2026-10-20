@@ -226,6 +226,58 @@ fn every_rule_has_one_error() {
             minimal.replace("healthcheck: /", "healthcheck: up"),
             "service web: http.healthcheck must be a path like /up",
         ),
+        (
+            format!("{minimal}  db: {{}}\n"),
+            "service db needs a command",
+        ),
+        (
+            format!(
+                "{minimal}  db: {{command: postgres, compose: {{file: compose.yml, services: [db]}}}}\n"
+            ),
+            "service db has both command and compose; keep one",
+        ),
+        (
+            format!(
+                "{minimal}  db: {{compose: {{file: compose.yml, services: [db]}}, stop: 'true'}}\n"
+            ),
+            "service db has compose, so Parcela runs, checks and stops it; remove http, healthcheck, stop and working_dir",
+        ),
+        (
+            format!("{minimal}  db: {{compose: {{file: compose.yml, services: []}}}}\n"),
+            "service db: compose needs at least one Compose service in services or http",
+        ),
+        (
+            format!("{minimal}  db: {{compose: {{file: /srv/compose.yml, services: [db]}}}}\n"),
+            "service db: compose.file must be a path relative to parcela.yaml",
+        ),
+        (
+            format!("{minimal}  db: {{compose: {{file: compose.yml, services: ['db; rm']}}}}\n"),
+            "service db: invalid Compose service name \"db; rm\"",
+        ),
+        (
+            format!(
+                "{minimal}  db: {{compose: {{file: a.yml, services: [db]}}}}\n  search: {{compose: {{file: b.yml, services: [search]}}}}\n"
+            ),
+            "only one service can use compose; list every Compose service in its services",
+        ),
+        (
+            format!(
+                "{minimal}  db: {{compose: {{file: compose.yml, http: {{web: {{port: 80, subdomain: mail, healthcheck: /}}}}}}}}\n"
+            ),
+            "two services are named web",
+        ),
+        (
+            format!(
+                "{minimal}  db: {{compose: {{file: compose.yml, http: {{mail: {{port: 80, healthcheck: /}}}}}}}}\n"
+            ),
+            "only one http service can leave out subdomain",
+        ),
+        (
+            format!(
+                "{minimal}  db: {{compose: {{file: compose.yml, services: [db]}}}}\nenv: {{COMPOSE_PROJECT_NAME: shop}}\n"
+            ),
+            "COMPOSE_PROJECT_NAME is set by Parcela for the compose service",
+        ),
     ] {
         let message = error(&text);
         assert!(message.contains(expected), "{text}\n{message}");
@@ -235,6 +287,40 @@ fn every_rule_has_one_error() {
         error(&minimal.replace("command: bin/web,", "cmd: bin/web,"))
             .contains("unknown field `cmd`")
     );
+}
+
+#[test]
+fn a_compose_service_runs_checks_and_stops_its_containers() {
+    let manifest = Manifest::parse(
+        "version: 1\nproject: shop\nservices:\n  deps:\n    compose:\n      file: docker-compose.yml\n      services: [postgres, search]\n  web: {command: bin/web, http: {healthcheck: /}, depends_on: [deps]}\n",
+    )
+    .unwrap();
+    let deps = &manifest.processes["deps"];
+    assert_eq!(deps.command, "exec docker compose up postgres search");
+    assert_eq!(deps.stop.as_deref(), Some("docker compose stop"));
+    assert!(deps.healthcheck.as_deref().unwrap().ends_with("= 2"));
+    assert_eq!(manifest.compose().unwrap().file, "docker-compose.yml");
+}
+
+#[test]
+fn a_container_can_serve_the_environments_url() {
+    let manifest = Manifest::parse(
+        "version: 1\nproject: blog\nservices:\n  stack:\n    compose:\n      file: compose.yaml\n      services: [db]\n      http:\n        wordpress: {port: 80, healthcheck: /}\n        mail: {service: mailpit, port: 8025, subdomain: mail, healthcheck: /}\n",
+    )
+    .unwrap();
+    assert_eq!(manifest.default_service, "wordpress");
+    assert_eq!(manifest.services["mail"].subdomain.as_deref(), Some("mail"));
+    assert_eq!(
+        manifest.compose().unwrap().services,
+        ["db", "mailpit", "wordpress"]
+    );
+    let mail = &manifest.processes["mail"];
+    assert!(
+        mail.command.ends_with(" compose-forward mailpit 8025"),
+        "{}",
+        mail.command
+    );
+    assert_eq!(mail.depends_on, ["stack"]);
 }
 
 #[test]

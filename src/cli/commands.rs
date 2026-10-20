@@ -207,6 +207,10 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         );
         return Ok(0);
     }
+    if let Command::ComposeForward { service, port } = &cli.command {
+        parcela::compose::forward(service, *port)?;
+        return Ok(0);
+    }
     if let Command::Upgrade { nightly, stable } = cli.command {
         return super::upgrade::run(nightly, stable);
     }
@@ -234,9 +238,10 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         Ok((registry, workspace))
     };
     match cli.command {
-        Command::Skill | Command::Upgrade { .. } | Command::Completion { .. } => {
-            unreachable!("handled above")
-        }
+        Command::Skill
+        | Command::Upgrade { .. }
+        | Command::Completion { .. }
+        | Command::ComposeForward { .. } => unreachable!("handled above"),
         Command::Init { name, command } => {
             let front_door = FrontDoor::load(&state)?;
             super::init::run(
@@ -511,7 +516,9 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
         );
         (snapshot.source.clone(), snapshot.manifest.clone())
     } else {
-        project(path)?
+        let (source, mut manifest) = project(path)?;
+        parcela::compose::resolve(&mut manifest, &source)?;
+        (source, manifest)
     };
     let readiness_timeout = start
         .readiness_timeout

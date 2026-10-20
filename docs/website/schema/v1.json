@@ -1,12 +1,96 @@
 {
   "$defs": {
+    "ComposeHttp": {
+      "additionalProperties": false,
+      "description": "A container port served at its own URL, like a service with `http`.",
+      "properties": {
+        "healthcheck": {
+          "description": "A path that answers 2xx once the container serves, like `/`.",
+          "pattern": "^/",
+          "type": "string"
+        },
+        "port": {
+          "description": "The container port that serves HTTP, like `8025`. It does not need to be published.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "service": {
+          "description": "The Compose service. Default: the key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subdomain": {
+          "description": "The URL prefix, as in `http`. Leave it out on the one service that gets the environment's own URL.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wildcard": {
+          "default": false,
+          "description": "Also send every subdomain of this service's host to it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "port",
+        "healthcheck"
+      ],
+      "type": "object"
+    },
+    "FileCompose": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "description": "The Compose file, relative to the checkout root, like `docker-compose.yml`.",
+          "type": "string"
+        },
+        "http": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ComposeHttp"
+          },
+          "description": "HTTPS URLs for containers that serve HTTP, keyed by service name like services with `http`. Their Compose services start too.",
+          "type": "object"
+        },
+        "services": {
+          "default": [],
+          "description": "The Compose services to start. The service is ready once each one runs and, if it has a healthcheck, is healthy.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
     "FileService": {
       "additionalProperties": false,
       "description": "A long-running process.",
       "properties": {
         "command": {
-          "description": "A shell command, run from the checkout root. HTTP services listen on `127.0.0.1:$PORT`.",
-          "type": "string"
+          "description": "A shell command, run from the checkout root. HTTP services listen on `127.0.0.1:$PORT`. Required unless the service has `compose`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "compose": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileCompose"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Runs containers from a Docker Compose file instead of `command`, with their own names, ports and volumes in every environment."
         },
         "depends_on": {
           "default": [],
@@ -57,9 +141,6 @@
           ]
         }
       },
-      "required": [
-        "command"
-      ],
       "type": "object"
     },
     "Hook": {
