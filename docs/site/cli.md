@@ -222,6 +222,16 @@ Next step: parcela up
 
 With `--json` it prints `{"ready": bool, "checks": [{"name", "ok", "detail", "fix"}], "notes": [...]}`.
 
+### parcela upgrade
+
+```text
+parcela upgrade [--nightly | --stable]
+```
+
+Upgrades a Parcela installed by `install.sh`: it downloads the installer and runs it again, which replaces `~/.local/bin/parcela` and updates Caddy there if needed. A nightly build stays on nightly; `--stable` switches to the latest release, `--nightly` to the newest build of main. For a Homebrew or `cargo` install it changes nothing and prints the command to run instead. Then run `parcela proxy restart`.
+
+It is the only command that downloads anything, and only when you run it. Parcela never checks for updates.
+
 ## Proxy and HTTPS
 
 ### parcela proxy

@@ -6,6 +6,7 @@ mod inventory;
 mod output;
 mod proxy;
 mod render;
+mod upgrade;
 
 use clap::Parser;
 

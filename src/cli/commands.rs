@@ -133,6 +133,9 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             .write_all(include_bytes!("../../.agents/skills/parcela/SKILL.md"))?;
         return Ok(0);
     }
+    if let Command::Upgrade { nightly, stable } = cli.command {
+        return super::upgrade::run(nightly, stable);
+    }
     let state = state_dir(cli.state_dir)?;
     if let Some(id) = cli.workspace
         && !matches!(cli.command, Command::Init { .. } | Command::Doctor { .. })
@@ -146,7 +149,7 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         Ok((registry, workspace))
     };
     match cli.command {
-        Command::Skill => unreachable!("printed above"),
+        Command::Skill | Command::Upgrade { .. } => unreachable!("handled above"),
         Command::Init { name, command } => {
             let front_door = FrontDoor::load(&state)?;
             super::init::run(

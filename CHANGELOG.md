@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- `parcela upgrade` reruns `install.sh` for an install.sh install, staying on nightly or stable unless `--nightly` or `--stable` says otherwise. For Homebrew and `cargo` installs it prints the command to run instead.
+
 ### Changed
 
 - `up` and `proxy status` suggest `parcela trust` only while the certificate authority is not trusted. `proxy status --json` reports it as `trusted` instead of the always-false `browser_trust_verified`.

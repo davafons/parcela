@@ -8,7 +8,7 @@
 - **Trust.** Parcela's certificate authority is added to the system trust store only by `parcela trust` or the first `up` in a terminal, behind the system password prompt. Scripts, agents and CI never change trust.
 - **System services.** None, unless you run `parcela proxy install` on macOS for URLs without a port.
 
-Parcela sends nothing over the network. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
+Parcela sends nothing over the network, except `parcela upgrade` when you run it. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
 
 ## Is trusting the certificate authority safe?
 
@@ -84,14 +84,16 @@ So improvements to Parcela stay open, including in hosted versions of it. It cov
 Upgrade the way you installed:
 
 ```sh
-brew upgrade parcela                                       # Homebrew
-curl -fsSL https://parcela.davafons.com/install.sh | sh    # install.sh: run it again
+brew upgrade parcela      # Homebrew
+parcela upgrade           # install.sh: downloads and runs it again
 cargo install --git https://github.com/davafons/parcela --locked --force   # from source
 ```
 
+`parcela upgrade` knows how it was installed: for Homebrew or `cargo` it prints the matching command instead.
+
 Then run `parcela proxy restart`, so the proxy runs the new version. Running environments keep going through it; `up` and `proxy status` warn while an older proxy is still running. Read the [changelog](https://github.com/davafons/parcela/blob/main/CHANGELOG.md) first: a release with breaking changes, like 0.4, says what to stop before upgrading.
 
-Parcela never updates itself or checks for new versions, so it makes no network calls of its own.
+Parcela never checks for new versions. `parcela upgrade` is the only command that downloads anything, and only when you run it.
 
 ## How do I uninstall it?
 

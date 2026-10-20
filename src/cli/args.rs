@@ -212,6 +212,15 @@ pub enum Command {
         #[arg(last = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Upgrade Parcela
+    Upgrade {
+        /// Install the newest build of main
+        #[arg(long, conflicts_with = "stable")]
+        nightly: bool,
+        /// Install the latest release
+        #[arg(long)]
+        stable: bool,
+    },
     /// Reattach to services left running
     #[command(hide = true)]
     Recover {
