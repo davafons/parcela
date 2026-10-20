@@ -403,6 +403,8 @@ fn stdout_is(path: &std::path::Path) -> bool {
 
 /// A process log is copied to `<name>.log.1` and emptied past this size.
 const LOG_LIMIT: u64 = 16 * 1024 * 1024;
+/// How long the running loop keeps going while it cannot inspect its processes and listeners.
+const INSPECTION_GRACE: Duration = Duration::from_secs(30);
 
 /// Whether this run still owes the environment its one-time `hooks.setup`.
 fn setup_pending(manifest: &Manifest, runtime: &std::path::Path) -> bool {
@@ -673,6 +675,7 @@ impl Owner<'_> {
         let mut published = None;
         let mut proxy_checked = Instant::now();
         let mut proxy_error: Option<String> = None;
+        let mut inspection_failing: Option<Instant> = None;
         loop {
             if *requested_stop {
                 return Ok(0);
@@ -688,18 +691,36 @@ impl Owner<'_> {
                 *requested_stop = true;
                 return Ok(128 + self.signals.received() as i32);
             }
-            self.record.refresh(self.path)?;
-            let listeners = Listeners::inspect(endpoints.iter().map(|e| e.backend_port))?;
-            let roots = self.supervisor.roots();
-            let observed = endpoints
-                .iter()
-                .map(|endpoint| {
-                    Ok((
-                        endpoint.service.clone(),
-                        listeners.owned(endpoint.backend_port, &roots)?,
-                    ))
-                })
-                .collect::<Result<BTreeMap<_, _>>>()?;
+            let observation = self.record.refresh(self.path).and_then(|()| {
+                let listeners = Listeners::inspect(endpoints.iter().map(|e| e.backend_port))?;
+                let roots = self.supervisor.roots();
+                let observed = endpoints
+                    .iter()
+                    .map(|endpoint| {
+                        Ok((
+                            endpoint.service.clone(),
+                            listeners.owned(endpoint.backend_port, &roots)?,
+                        ))
+                    })
+                    .collect::<Result<BTreeMap<_, _>>>()?;
+                Ok((listeners, observed))
+            });
+            // `ps` and `lsof` can miss their deadline on a loaded machine, so a failed check is
+            // retried, and only one that keeps failing stops the environment.
+            let (listeners, observed) = match observation {
+                Ok(observation) => {
+                    inspection_failing = None;
+                    observation
+                }
+                Err(error) => {
+                    let since = *inspection_failing.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= INSPECTION_GRACE {
+                        return Err(error);
+                    }
+                    self.idle(Duration::from_millis(200), requested_stop)?;
+                    continue;
+                }
+            };
             if ready && observed != listener {
                 self.enter(Phase::Starting)?;
                 if let Ok(router) = router::current(self.registry.state_path()) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - 2026-10-20
+
+### Fixed
+
+- A running environment no longer stops when one check of its processes or listeners is slow, as on a loaded machine. Before, one `ps` or `lsof` call over its time limit stopped every service, with `backend control command timed out`. It stops only when checks keep failing for 30 seconds.
+
 ## 0.5.1 - 2026-10-20
 
 ### Fixed
