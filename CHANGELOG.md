@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `parcela upgrade` always installs the latest release unless `--nightly` is given, instead of staying on nightly for a nightly or locally built binary. `--stable` is gone.
+
 ## 0.5.0 - 2026-10-20
 
 Databases and other containers can come from the project's own `docker-compose.yml`, with their own containers, volumes, ports and URLs in every environment, next to native apps. `parcela.yaml` files from 0.4 work unchanged.

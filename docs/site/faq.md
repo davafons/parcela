@@ -118,7 +118,7 @@ Read the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.m
 | Homebrew | `brew upgrade parcela` |
 | Cargo | `cargo install --git https://github.com/lostcoords/parcela --locked --force` |
 
-`parcela upgrade` retains the current release channel. Use `--nightly` or `--stable` to switch. For Homebrew and Cargo installations, it prints the appropriate command instead of replacing the binary.
+`parcela upgrade` installs the latest release. Use `--nightly` for the newest build of `main`. For Homebrew and Cargo installations, it prints the appropriate command instead of replacing the binary.
 
 Update the shared proxy when a brief interruption to all environment URLs is acceptable:
 

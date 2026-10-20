@@ -41,7 +41,8 @@ fn reruns_install_sh_for_an_install_sh_install() {
         String::from_utf8_lossy(&output.stdout),
         "install.sh --nightly\n"
     );
-    let output = upgrade("~/.local/bin/parcela", &["--stable"]);
+    // The test binary is a build of main, and still gets the latest release.
+    let output = upgrade("~/.local/bin/parcela", &[]);
     assert_eq!(String::from_utf8_lossy(&output.stdout), "install.sh\n");
 }
 

@@ -47,7 +47,7 @@ pub(super) fn install_method() -> &'static str {
     }
 }
 
-pub(super) fn run(nightly: bool, stable: bool) -> Result<i32> {
+pub(super) fn run(nightly: bool) -> Result<i32> {
     let home = PathBuf::from(std::env::var_os("HOME").context("HOME missing")?);
     let cargo_home =
         std::env::var_os("CARGO_HOME").map_or_else(|| home.join(".cargo"), PathBuf::from);
@@ -63,8 +63,6 @@ pub(super) fn run(nightly: bool, stable: bool) -> Result<i32> {
             exe.display()
         ),
     }
-    // A nightly build stays on nightly unless told otherwise.
-    let nightly = nightly || (!stable && env!("PARCELA_VERSION").contains('+'));
     let dir = tempfile::tempdir()?;
     let script = dir.path().join("install.sh");
     let fetched = Command::new("curl")

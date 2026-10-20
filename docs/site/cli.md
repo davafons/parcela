@@ -211,10 +211,10 @@ Adds Caddy's local CA to the system trust store using `caddy trust`. Prints the 
 ## upgrade
 
 ```text
-parcela upgrade [--nightly | --stable]
+parcela upgrade [--nightly]
 ```
 
-For shell-installer installations, downloads and runs the installer. Retains the release channel unless `--nightly` or `--stable` is given. For Homebrew or Cargo, prints the matching upgrade command without changing the installation. Parcela does not check for updates automatically.
+For shell-installer installations, downloads and runs the installer. Installs the latest release, or with `--nightly` the newest build of `main`. For Homebrew or Cargo, prints the matching upgrade command without changing the installation. Parcela does not check for updates automatically.
 
 ## telemetry
 

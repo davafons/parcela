@@ -211,8 +211,8 @@ pub fn run(mut cli: Cli) -> Result<i32> {
         parcela::compose::forward(service, *port)?;
         return Ok(0);
     }
-    if let Command::Upgrade { nightly, stable } = cli.command {
-        return super::upgrade::run(nightly, stable);
+    if let Command::Upgrade { nightly } = cli.command {
+        return super::upgrade::run(nightly);
     }
     let state = state_dir(cli.state_dir)?;
     let mut id = None;

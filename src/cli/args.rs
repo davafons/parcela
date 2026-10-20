@@ -222,11 +222,8 @@ pub enum Command {
     /// Upgrade Parcela
     Upgrade {
         /// Install the newest build of main
-        #[arg(long, conflicts_with = "stable")]
-        nightly: bool,
-        /// Install the latest release
         #[arg(long)]
-        stable: bool,
+        nightly: bool,
     },
     /// Reattach to services left running
     #[command(hide = true)]
