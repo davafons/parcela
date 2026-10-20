@@ -232,6 +232,14 @@ Upgrades a Parcela installed by `install.sh`: it downloads the installer and run
 
 It is the only command that downloads anything, and only when you run it. Parcela never checks for updates.
 
+### parcela telemetry
+
+```text
+parcela telemetry [status | enable | disable]
+```
+
+Shows or changes whether Parcela sends anonymous usage data. `DO_NOT_TRACK=1` and `PARCELA_TELEMETRY_DISABLED=1` also turn it off, and `PARCELA_TELEMETRY_DEBUG=1` prints what would be sent instead of sending it. [Telemetry](telemetry.md) lists every field.
+
 ## Proxy and HTTPS
 
 ### parcela proxy

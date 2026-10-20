@@ -95,3 +95,5 @@ parcela --workspace "$ENVIRONMENT_ID" down
 ## Limits
 
 Parcela is a local development runner, not a sandbox. It does not restart individual services, copy data between environments or prove browser trust. This skill and `--help` are not runtime proof.
+
+Parcela sends anonymous usage data unless it is turned off (https://parcela.run/docs/telemetry/). Leave `parcela telemetry` and `DO_NOT_TRACK` as the user set them unless they ask.

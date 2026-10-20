@@ -38,7 +38,7 @@ shop     signup   ready  https://signup-shop.localhost:1443  /Users/you/signup
 shop     primary  ready  https://shop.localhost:1443         /Users/you/shop
 ```
 
-No Docker and no root. Parcela runs the processes itself and uses [Caddy](https://caddyserver.com) for HTTPS and routing.
+No Docker and no root. Parcela runs the processes itself and uses [Caddy](https://caddyserver.com) for HTTPS and routing. It sends anonymous usage data, never paths or names; `parcela telemetry disable` turns it off ([Telemetry](https://parcela.run/docs/telemetry/)).
 
 ## Install
 

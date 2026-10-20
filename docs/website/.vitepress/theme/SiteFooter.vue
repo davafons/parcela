@@ -23,6 +23,7 @@ const columns = [
     { text: 'FAQ', href: withBase('/docs/faq/') },
     { text: 'Troubleshooting', href: withBase('/docs/troubleshooting/') },
     { text: 'Frameworks and data', href: withBase('/docs/frameworks/') },
+    { text: 'Telemetry', href: withBase('/docs/telemetry/') },
   ] },
   { title: 'Project', links: [
     { text: 'GitHub', href: repo, icon: 'github' },

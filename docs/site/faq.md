@@ -8,7 +8,7 @@
 - **Trust.** Parcela's certificate authority is added to the system trust store only by `parcela trust` or the first `up` in a terminal, behind the system password prompt. Scripts, agents and CI never change trust.
 - **System services.** None, unless you run `parcela proxy install` on macOS for URLs without a port.
 
-Parcela sends nothing over the network, except `parcela upgrade` when you run it. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
+Over the network, Parcela sends anonymous usage data, which commands ran and how they ended and never what they acted on, unless you turn it off: see [Telemetry](telemetry.md). `parcela upgrade` downloads only when you run it. Sharing with `--lan` publishes mDNS names, and `--tailscale` runs `tailscale serve`, both until the run stops.
 
 ## Is trusting the certificate authority safe?
 

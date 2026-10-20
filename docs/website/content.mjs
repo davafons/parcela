@@ -22,6 +22,7 @@ export const groups = [
   { label: 'Reference', pages: [
     ['configuration', 'Configuration', 'docs/site/configuration.md'],
     ['operating-skill', 'Operating skill', '.agents/skills/parcela/SKILL.md'],
+    ['telemetry', 'Telemetry', 'docs/site/telemetry.md'],
   ] },
 ];
 export const pages = groups.flatMap((group) => group.pages);

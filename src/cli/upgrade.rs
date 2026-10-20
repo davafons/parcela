@@ -29,6 +29,24 @@ fn classify(exe: &Path, home: &Path, cargo_home: &Path) -> Install {
     }
 }
 
+/// How this binary was installed, for telemetry.
+pub(super) fn install_method() -> &'static str {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return "unknown";
+    };
+    let cargo_home =
+        std::env::var_os("CARGO_HOME").map_or_else(|| home.join(".cargo"), PathBuf::from);
+    let Ok(exe) = std::env::current_exe() else {
+        return "unknown";
+    };
+    match classify(&exe, &home, &cargo_home) {
+        Install::Script => "install.sh",
+        Install::Homebrew => "homebrew",
+        Install::Cargo => "cargo",
+        Install::Unknown => "unknown",
+    }
+}
+
 pub(super) fn run(nightly: bool, stable: bool) -> Result<i32> {
     let home = PathBuf::from(std::env::var_os("HOME").context("HOME missing")?);
     let cargo_home =

@@ -234,6 +234,21 @@ pub enum Command {
     /// Print the agent skill
     #[command(long_flag = "skill")]
     Skill,
+    /// Manage anonymous usage data
+    Telemetry {
+        #[command(subcommand)]
+        command: Option<TelemetryCommand>,
+    },
+}
+
+#[derive(Subcommand, Clone, Copy)]
+pub enum TelemetryCommand {
+    /// Show whether it is on
+    Status,
+    /// Turn it on
+    Enable,
+    /// Turn it off
+    Disable,
 }
 
 #[derive(Subcommand)]

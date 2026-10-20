@@ -138,7 +138,10 @@ pub fn run(mut cli: Cli) -> Result<i32> {
     }
     let state = state_dir(cli.state_dir)?;
     if let Some(id) = cli.workspace
-        && !matches!(cli.command, Command::Init { .. } | Command::Doctor { .. })
+        && !matches!(
+            cli.command,
+            Command::Init { .. } | Command::Doctor { .. } | Command::Telemetry { .. }
+        )
     {
         let registry = Registry::open(&state, false)?.context(NOT_STARTED)?;
         cli.path = by_id(&registry, id)?.source;
@@ -173,6 +176,11 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             Ok(if ready { 0 } else { 1 })
         }
         Command::Proxy { command } => super::proxy::run(&state, command, out),
+        Command::Telemetry { command } => super::telemetry::run(
+            &state,
+            command.unwrap_or(super::args::TelemetryCommand::Status),
+            out,
+        ),
         Command::Trust { print, caddy } => super::proxy::trust(&state, print, &caddy),
         Command::Run {
             name,
