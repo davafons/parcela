@@ -97,9 +97,9 @@ pub enum Command {
         /// Also serve on your tailnet with tailscale serve
         #[arg(long, env = "PARCELA_TAILSCALE", value_parser = clap::builder::FalseyValueParser::new())]
         tailscale: bool,
-        /// Readiness timeout in seconds
-        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
-        readiness_timeout: u64,
+        /// Readiness timeout in seconds, instead of readiness_timeout_seconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
+        readiness_timeout: Option<u64>,
         #[arg(long, hide = true)]
         launch_file: Option<PathBuf>,
     },
@@ -133,9 +133,9 @@ pub enum Command {
         /// Also serve on your tailnet with tailscale serve
         #[arg(long, env = "PARCELA_TAILSCALE", value_parser = clap::builder::FalseyValueParser::new())]
         tailscale: bool,
-        /// Readiness timeout in seconds
-        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
-        readiness_timeout: u64,
+        /// Readiness timeout in seconds, instead of readiness_timeout_seconds
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=86400), hide = true)]
+        readiness_timeout: Option<u64>,
         #[arg(long, hide = true)]
         launch_file: Option<PathBuf>,
     },

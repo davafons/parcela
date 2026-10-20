@@ -74,10 +74,30 @@ services:
 | `http` | Makes the service reachable at an HTTPS URL. See below. |
 | `healthcheck` | For services without `http`: a shell command that exits 0 once the service is ready, like `pg_isready`. |
 | `depends_on` | Services to start first. Parcela waits until each one is ready: its HTTP healthcheck answers, its `healthcheck` passes, or, without either, it has started. |
+| `stop` | A shell command that stops what `command` started outside its own processes, like `docker compose stop`. See [stop](#stop). |
 | `working_dir` | A directory relative to the checkout root to run `command` in. |
 | `env` | Variables for this service only. Values can use `${NAME}`, like the top-level `env`. |
 
 Service names are DNS labels. `setup` and `prestart` are taken by hooks.
+
+### stop
+
+Parcela stops a service by signaling its processes. That is not enough when `command` only asks another program to run something, such as `docker compose up` asking Docker for containers: if the client is killed or crashes, the containers keep running. `stop` names the command that stops them:
+
+```yaml
+services:
+  deps:
+    command: exec docker compose up postgres
+    healthcheck: docker compose exec postgres pg_isready
+    stop: docker compose stop
+```
+
+- It runs whenever the environment stops: on `down`, `restart`, a failed `up` and Ctrl-C. It runs after every service that depends on this one has stopped, and before this service gets SIGTERM.
+- It runs even if `command` already exited, and after Parcela itself crashed: the next `up`, `down` or `recover` runs it for a run that did not finish stopping.
+- It gets the service's variables and `working_dir`, writes to `parcela logs <service>`, and has 120 seconds.
+- If it fails, `down` says so and the environment stays interrupted. Run `parcela down` again, which runs it again. Write it so it can run twice.
+
+Without `stop`, a service gets SIGTERM and, 10 seconds later, SIGKILL.
 
 ### HTTP services
 
@@ -103,6 +123,14 @@ services:
 | `wildcard` | `true` also sends every subdomain of the service's host to it, for subdomain-per-tenant apps: `https://kobe.shop.localhost:1443`, and `https://kobe.signup-shop.localhost:1443` in the `signup` worktree. `.local` names from `--lan` cover the host only. |
 
 Every environment of the project uses the same prefixes in front of its own name: the `signup` worktree's API is at `https://api-signup-shop.localhost:1443`.
+
+## readiness_timeout_seconds
+
+```yaml
+readiness_timeout_seconds: 600
+```
+
+How long `up` and `restart` wait for every service to be ready, from 1 to 86400. The default is 60. Time spent in hooks does not count, but waiting for a dependency's `healthcheck` does, so raise it for services that are slow on their first start, such as a container image that is built first.
 
 ## hooks
 

@@ -138,10 +138,18 @@ pub fn down(registry: &Registry, workspace: &Workspace) -> Result<Value> {
         if current.status == SessionStatus::Stopping && owner_died() {
             return finish_stop();
         }
-        ensure!(
-            current.status != SessionStatus::Interrupted,
-            "shutdown incomplete: a process did not exit; run parcela down again"
-        );
+        if current.status == SessionStatus::Interrupted {
+            let reason = crate::owner::Record::read(&path, &current)
+                .ok()
+                .and_then(|record| record.diagnostic)
+                .map(|reason| {
+                    reason
+                        .trim_start_matches("shutdown incomplete; ")
+                        .to_owned()
+                })
+                .unwrap_or_else(|| "a process did not exit".into());
+            anyhow::bail!("shutdown incomplete: {reason}; run parcela down again");
+        }
         if current.status == SessionStatus::Stopped
             && let Ok(_released) = private::Lock::acquire(&path.join("owner.lock"))
         {
@@ -232,7 +240,7 @@ pub fn detached(
     command.arg("--launch-file").arg(path.join("launch.json"));
     let signals = Signals::new()?;
     let mut owner = OwnedChild::spawn_logged(&mut command, log)?;
-    let deadline = Instant::now() + Duration::from_secs(timeout.saturating_add(5));
+    // The owner enforces the readiness timeout itself, and does not count time spent in hooks.
     loop {
         ensure!(signals.received() == 0, "detached startup interrupted");
         ensure!(
@@ -256,11 +264,6 @@ pub fn detached(
                 json!({"workspace": resolved_workspace, "session": session, "detached": true, "live": live, "owner_log": log_path}),
             );
         }
-        ensure!(
-            Instant::now() < deadline,
-            "services were not ready in time; full log: {}",
-            log_path.display()
-        );
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -393,7 +396,7 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
         .arg(&workspace.id)
         .arg("recover");
     let mut owner = OwnedChild::spawn_logged(&mut command, log)?;
-    let deadline = Instant::now() + Duration::from_secs(65);
+    // The recovery owner enforces the readiness timeout itself.
     loop {
         if let Some(exit) = owner.poll()? {
             let current = current_session(registry, &session)?;
@@ -420,7 +423,6 @@ pub fn recover_detached(registry: &Registry, workspace: &Workspace) -> Result<Va
             owner.detach();
             return Ok(json!({"session":current,"recovered":true,"detached":true,"live":live}));
         }
-        ensure!(Instant::now() < deadline, "recovery readiness timed out");
         std::thread::sleep(Duration::from_millis(100));
     }
 }

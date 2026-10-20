@@ -373,7 +373,8 @@ struct Start {
     request: startup::Request,
     restart: bool,
     backend_port: Option<u16>,
-    readiness_timeout: u64,
+    /// `--readiness-timeout`; `readiness_timeout_seconds` from parcela.yaml otherwise.
+    readiness_timeout: Option<u64>,
     detach: bool,
     setup: bool,
     share: Share,
@@ -397,6 +398,9 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
     } else {
         project(path)?
     };
+    let readiness_timeout = start
+        .readiness_timeout
+        .unwrap_or(manifest.readiness_timeout_seconds);
     let (mut registry, workspace) = if start.restart || snapshot.is_some() {
         ensure!(
             start.request.name.is_none() && !start.request.primary,
@@ -474,7 +478,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             &workspace,
             launch,
             start.backend_port,
-            start.readiness_timeout,
+            readiness_timeout,
             start.share,
         )?;
     }
@@ -497,7 +501,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             &workspace,
             launch,
             start.backend_port,
-            start.readiness_timeout,
+            readiness_timeout,
             start.share,
         )?;
         workspace
@@ -512,7 +516,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
             &workspace,
             launch,
             start.backend_port,
-            start.readiness_timeout,
+            readiness_timeout,
             start.share,
         );
     }
@@ -525,7 +529,7 @@ fn start(state: &Path, path: &Path, start: Start, out: Output) -> Result<i32> {
         &registry,
         &workspace,
         start.backend_port,
-        start.readiness_timeout,
+        readiness_timeout,
         start.share,
         &manifest,
     )

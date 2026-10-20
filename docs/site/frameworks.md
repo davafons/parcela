@@ -97,6 +97,51 @@ hooks:
 - Environment names can contain hyphens. `createdb`, `dropdb` and Rails quote the name. Quote it yourself in raw SQL.
 - To start a worktree from a copy of the main checkout's data, run `createdb -T shop_primary "shop_$PARCELA_ENVIRONMENT_NAME"` in `setup` instead. PostgreSQL refuses while anything is connected to `shop_primary`, so stop the main checkout first.
 
+### Docker Compose
+
+Keep the containers in `docker-compose.yml` and the apps native. One service runs `docker compose up` in the foreground, so its output is in `parcela logs`, and the apps depend on it:
+
+```yaml
+ports: [postgres, search]
+
+env:
+  COMPOSE_PROJECT_NAME: shop-${PARCELA_ENVIRONMENT_NAME}
+  POSTGRES_PORT: ${PARCELA_PORT_POSTGRES}
+  SEARCH_PORT: ${PARCELA_PORT_SEARCH}
+  DATABASE_URL: postgres://postgres@127.0.0.1:${PARCELA_PORT_POSTGRES}/shop
+
+readiness_timeout_seconds: 600
+
+services:
+  deps:
+    command: exec docker compose up postgres search
+    healthcheck: test "$(docker compose ps --format '{{.Health}}' postgres search | grep -c '^healthy$')" = 2
+    stop: docker compose stop
+  web:
+    command: bin/rails server -p $PORT -b 127.0.0.1
+    http:
+      healthcheck: /up
+    depends_on: [deps]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  postgres:
+    ports: ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]
+    volumes: [db:/var/lib/postgresql/data]
+  search:
+    ports: ["127.0.0.1:${SEARCH_PORT:-9200}:9200"]
+volumes:
+  db:
+```
+
+- `COMPOSE_PROJECT_NAME` gives each environment its own containers, network and volumes, which Compose prefixes with the project name. Every `docker compose` in hooks and tasks uses it too.
+- Remove `container_name` and fixed host ports from the Compose file. Two environments cannot share a container name or a port. Publish ports on `127.0.0.1`.
+- `stop` stops the containers even if `docker compose up` was killed or crashed. `down` keeps the volumes. Give the Compose service a `healthcheck` so the count above works.
+- A built image used by several worktrees needs an `image:` name next to `build:`, or Compose builds one per project.
+- Compose reads `.env` next to the Compose file. Variables from `parcela.yaml` take precedence over it.
+
 ### Redis, Sidekiq and queues
 
 Run a Redis per environment on a named port. Its dump goes to `PARCELA_DATA_DIR`:

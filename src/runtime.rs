@@ -916,6 +916,12 @@ impl Owner<'_> {
                 self.record.manifest.shutdown_timeout_seconds
             );
         }
+        // Its processes are gone, but what the stop command manages may still run.
+        if let Some(failure) = self.supervisor.stop_failure() {
+            self.record.diagnostic = Some(failure.clone());
+            self.enter(Phase::Interrupted)?;
+            anyhow::bail!("shutdown incomplete: {failure}; run parcela down again");
+        }
         self.record.phase = Phase::Stopped;
         self.record.save(self.path)?;
         self.registry
@@ -983,7 +989,7 @@ pub fn recover(
         record.abandoned(&lock)?,
         "original owner or ownership lock is not safely recoverable"
     );
-    if converge_crashed(registry, &path, &session, &lock)? {
+    if converge_crashed(registry, workspace, &session, &lock)? {
         return Ok(
             json!({"environment_id":workspace.id,"generation":session.generation,"state":"stopped","recovered":true}),
         );
@@ -1010,6 +1016,7 @@ pub fn recover(
     registry.session_status(&session, record.phase.status())?;
     let mut resolved = workspace.clone();
     resolved.generation = session.generation;
+    let timeout = record.manifest.readiness_timeout_seconds;
     let nodes = recorded_graph(registry, &record, &resolved, &path)?;
     let supervisor = Supervisor::adopt(nodes, &path, &record.children);
     let setup = record.session.kind == "up" && setup_pending(&record.manifest, &path);
@@ -1034,7 +1041,7 @@ pub fn recover(
         setup,
         ready: was_ready,
     }
-    .monitor(60);
+    .monitor(timeout);
     if let Some(echo) = echo {
         echo.finish();
     }
@@ -1048,10 +1055,11 @@ pub fn recover(
 /// It signals nothing; any surviving or unprovable identity leaves the session untouched.
 fn converge_crashed(
     registry: &mut Registry,
-    path: &std::path::Path,
+    workspace: &Workspace,
     session: &Session,
     lock: &Lock,
 ) -> Result<bool> {
+    let path = &registry.runtime_path(workspace);
     let Ok(mut record) = Record::read(path, session) else {
         // The owner died after leasing ports and before saving its record, which it does before
         // starting any process. The caller holds owner.lock, so that owner is gone.
@@ -1065,6 +1073,7 @@ fn converge_crashed(
     if !record.abandoned(lock)? || !record.quiescent() {
         return Ok(false);
     }
+    finish_stop_commands(registry, workspace, &mut record, path)?;
     record.phase = Phase::Stopped;
     record.save(path)?;
     record
@@ -1077,6 +1086,55 @@ fn converge_crashed(
     Ok(true)
 }
 
+/// Runs the `stop` commands a crashed run still owes, for services whose processes are gone but
+/// whose containers or other outside resources may still run. The caller holds owner.lock.
+fn finish_stop_commands(
+    registry: &mut Registry,
+    workspace: &Workspace,
+    record: &mut Record,
+    path: &std::path::Path,
+) -> Result<()> {
+    let owed = record.children.iter().any(|(name, child)| {
+        !child.stopped
+            && record
+                .manifest
+                .processes
+                .get(name)
+                .is_some_and(|process| process.stop.is_some())
+    });
+    if !owed {
+        return Ok(());
+    }
+    let mut resolved = workspace.clone();
+    resolved.generation = record.session.generation;
+    let nodes = recorded_graph(registry, record, &resolved, path)?;
+    let mut supervisor = Supervisor::adopt(nodes, path, &record.children);
+    supervisor.stop();
+    let deadline = Instant::now() + Duration::from_secs(record.manifest.shutdown_timeout_seconds);
+    while supervisor.finished().is_none() && Instant::now() < deadline {
+        if supervisor.tick(|_| Ok(()))? {
+            record.children = supervisor.children();
+            record.save(path)?;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    record.children = supervisor.children();
+    let failure = supervisor.stop_failure().or_else(|| {
+        supervisor
+            .finished()
+            .is_none()
+            .then(|| "a stop command did not finish".to_owned())
+    });
+    if let Some(failure) = failure {
+        record.diagnostic = Some(failure.clone());
+        record.phase = Phase::Interrupted;
+        record.save(path)?;
+        registry.session_status(&record.session, SessionStatus::Interrupted)?;
+        anyhow::bail!("shutdown incomplete: {failure}; run parcela down again");
+    }
+    record.save(path)
+}
+
 /// Lets a new run replace a predecessor that crashed together with its whole recorded tree.
 pub fn converge_crashed_session(
     registry: &mut Registry,
@@ -1086,7 +1144,7 @@ pub fn converge_crashed_session(
     if let Some(session) = registry.session(&workspace.id)?
         && session.status != SessionStatus::Stopped
     {
-        return converge_crashed(registry, &registry.runtime_path(workspace), &session, lock);
+        return converge_crashed(registry, workspace, &session, lock);
     }
     Ok(false)
 }

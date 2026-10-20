@@ -24,6 +24,7 @@ fn web(
             identity: Some(identity.clone()),
             exit: None,
             restarts: 0,
+            stopped: false,
         },
     )])
 }

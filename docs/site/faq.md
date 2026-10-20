@@ -59,6 +59,8 @@ services:
     healthcheck: pg_isready -h 127.0.0.1 -p "$PARCELA_PORT_DB"
 ```
 
+A project that already has a `docker-compose.yml` can run it as one service next to its native apps. See [Docker Compose](frameworks.md#docker-compose).
+
 ## How does it relate to Conductor, Vibe Kanban, Claude Code and other agent tools?
 
 Those manage agents and worktrees. Parcela runs the app inside each worktree, so it works under any of them, or with plain `git worktree add`. `parcela --skill` prints instructions that teach an agent to start, check and stop its own environment.

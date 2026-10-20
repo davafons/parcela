@@ -25,6 +25,9 @@ pub struct Manifest {
     pub ports: Vec<String>,
     pub environment: BTreeMap<String, String>,
     pub shutdown_timeout_seconds: u64,
+    /// How long `up` waits for the services to be ready, unless `--readiness-timeout` says.
+    #[serde(default = "default_readiness_timeout")]
+    pub readiness_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -55,6 +58,9 @@ pub struct Process {
     pub depends_on: Vec<String>,
     /// A shell command that exits 0 once a non-HTTP service is ready.
     pub healthcheck: Option<String>,
+    /// A shell command that stops what `command` started outside its own processes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<String>,
 }
 
 /// Commands that prepare an environment. Each runs after the services in its `depends_on` and before every other service.
@@ -107,6 +113,11 @@ pub struct Task {
 /// The only `parcela.yaml` format version this build reads.
 pub const VERSION: u32 = 1;
 const SHUTDOWN_TIMEOUT_SECONDS: u64 = 300;
+const READINESS_TIMEOUT_SECONDS: u64 = 60;
+
+fn default_readiness_timeout() -> u64 {
+    READINESS_TIMEOUT_SECONDS
+}
 
 /// `parcela.yaml` as written. Every field has one spelling and one shape.
 /// Reference: https://parcela.run/docs/configuration/
@@ -138,6 +149,9 @@ struct File {
     /// Commands to run with `parcela task NAME`.
     #[serde(default)]
     tasks: BTreeMap<String, Task>,
+    /// How long `up` waits for every service to be ready, in seconds. Time spent in hooks does not count. Default 60.
+    #[cfg_attr(test, schemars(range(min = 1, max = 86400)))]
+    readiness_timeout_seconds: Option<u64>,
 }
 
 /// A long-running process.
@@ -151,6 +165,8 @@ struct FileService {
     http: Option<Http>,
     /// For services without `http`: a shell command that exits 0 once the service is ready.
     healthcheck: Option<String>,
+    /// A shell command that stops what `command` started outside its own processes, like `docker compose stop`. It runs when the environment stops, before the service is signaled, even if `command` already exited.
+    stop: Option<String>,
     /// Services to start, and wait for, before this one.
     #[serde(default)]
     depends_on: Vec<String>,
@@ -350,6 +366,7 @@ impl Manifest {
                     env: service.env,
                     depends_on: service.depends_on,
                     healthcheck: service.healthcheck,
+                    stop: service.stop,
                 },
             );
         }
@@ -368,6 +385,9 @@ impl Manifest {
             ports: file.ports,
             environment: file.env,
             shutdown_timeout_seconds: SHUTDOWN_TIMEOUT_SECONDS,
+            readiness_timeout_seconds: file
+                .readiness_timeout_seconds
+                .unwrap_or(READINESS_TIMEOUT_SECONDS),
         })
     }
 
@@ -407,6 +427,12 @@ impl Manifest {
                 !process.command.trim().is_empty() && !process.command.contains('\0'),
                 "service {name} needs a command"
             );
+            if let Some(stop) = &process.stop {
+                ensure!(
+                    !stop.trim().is_empty() && !stop.contains('\0'),
+                    "service {name}: stop needs a command"
+                );
+            }
             if let Some(dir) = &process.working_dir {
                 ensure!(
                     Path::new(dir).is_relative(),
@@ -439,6 +465,10 @@ impl Manifest {
             );
             self.check_dependencies(&format!("hooks.{name}"), &hook.depends_on)?;
         }
+        ensure!(
+            (1..=86400).contains(&self.readiness_timeout_seconds),
+            "readiness_timeout_seconds must be between 1 and 86400"
+        );
         let mut ports = std::collections::BTreeSet::new();
         for name in &self.ports {
             port_name(name)?;

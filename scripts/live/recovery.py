@@ -790,13 +790,72 @@ def crashed_tree_up(f):
     assert f.cli(app['path'], 'down').returncode == 0
     return {'up_after_crash_exit': 0, 'next_generation': after['generation'], 'https_code': 200}
 
+DAEMON = """import os, sys, time
+from pathlib import Path
+pidfile = Path(os.environ['PARCELA_RUNTIME_DIR']) / 'daemon.pid'
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        pidfile.write_text(str(os.getpid()))
+        while True: time.sleep(1)
+    os._exit(0)
+os.wait()
+os.execvp('sleep', ['sleep', '100000'])
+"""
+
+def stop_command_after_crash(f):
+    """A service that leaves a daemon outside its process tree, like `docker compose up` leaves
+    containers: its `stop` command must still run after the owner and the tree crashed, and a
+    failed one must leave the run interrupted until `down` succeeds."""
+    app = f.app('stopcmd')
+    (app['path'] / 'daemon.py').write_text(DAEMON)
+    pidfile = app['runtime'] / 'daemon.pid'
+    gate = app['runtime'] / 'stop-may-succeed'
+    app['manifest']['services']['daemon'] = {
+        'command': f"exec python3 '{app['path'] / 'daemon.py'}'",
+        'healthcheck': 'test -f "$PARCELA_RUNTIME_DIR/daemon.pid"',
+        'stop': 'test -f "$PARCELA_RUNTIME_DIR/stop-may-succeed" || exit 7; '
+                'test ! -f "$PARCELA_RUNTIME_DIR/daemon.pid" || { kill "$(cat "$PARCELA_RUNTIME_DIR/daemon.pid")"; rm "$PARCELA_RUNTIME_DIR/daemon.pid"; }',
+    }
+    app['manifest']['services']['web']['depends_on'] = ['daemon']
+    (app['path'] / 'parcela.yaml').write_text(json.dumps(app['manifest']))
+    crash_whole_tree(f, app)
+    daemon = int(pidfile.read_text())
+    os.kill(daemon, 0)
+    failed = f.cli(app['path'], 'down')
+    assert failed.returncode != 0 and 'services.daemon.stop failed with exit code 7' in failed.stderr, failed.stderr
+    assert f.session(app)['status'] == 'interrupted'
+    os.kill(daemon, 0)
+    gate.write_text('yes')
+    down = f.cli(app['path'], 'down')
+    assert down.returncode == 0, down.stderr
+    wait_for(lambda: _dead(daemon))
+    assert f.session(app)['status'] == 'stopped'
+    again = f.cli(app['path'], 'down')
+    assert again.returncode == 0 and json.loads(again.stdout)['already_stopped'] is True, again.stderr
+    retry = f.cli(app['path'], 'up', '--detach', '--backend-port', str(app['port']), '--readiness-timeout', '10')
+    assert retry.returncode == 0, retry.stderr
+    second = int(pidfile.read_text())
+    graceful = f.cli(app['path'], 'down')
+    assert graceful.returncode == 0, graceful.stderr
+    assert not pidfile.exists()
+    wait_for(lambda: _dead(second))
+    return {'failed_stop_exit': failed.returncode, 'retried_down_exit': down.returncode, 'graceful_down_exit': graceful.returncode}
+
+def _dead(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
 CASES = [owner_crash, graceful_stop, duplicate_stop, restart_preflight, proxy_outage, lost_stop_reply,
          recover_surviving_graph, up_recovers_surviving_graph, up_foreground_recovers_surviving_graph, guardian_death, interrupted_stop, completed_stop_receipt,
          replaced_process_birth, long_stream_lease, ongoing_stop_retry, concurrent_crash_stop,
          recover_before_readiness, stop_before_readiness, allocation_without_launch_evidence, recover_racing_stop,
          occupied_replacement_port, invalid_replacement_port, restart_owned_port, leased_replacement_port, detached_recover_running,
          detached_recover_stopping, detached_recover_quiescent, recovered_owner_initialization,
-         crashed_tree_down, crashed_tree_up]
+         crashed_tree_down, crashed_tree_up, stop_command_after_crash]
 
 
 def run(caddy, cases=None):

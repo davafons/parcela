@@ -4,7 +4,13 @@
 
 ### Added
 
+- `services.<name>.stop`: a command that stops what a service started outside its own processes, like `docker compose stop` for a `docker compose up` service. It runs on every stop, after the service's dependents and before its SIGTERM, even if the service already exited or Parcela crashed. A failed one leaves the environment interrupted until `down` runs it again. [Docker Compose](https://parcela.run/docs/frameworks/#docker-compose) shows containers next to native apps.
+- `readiness_timeout_seconds` in `parcela.yaml` sets how long `up` and `restart` wait for the services, instead of 60 seconds.
 - `parcela upgrade` reruns `install.sh` for an install.sh install, staying on nightly or stable unless `--nightly` or `--stable` says otherwise. For Homebrew and `cargo` installs it prints the command to run instead.
+
+### Fixed
+
+- `up --detach` no longer gives up after the readiness timeout while a long `setup` or `prestart` hook is still running; it waits for the owner, which does not count hook time.
 
 ### Changed
 

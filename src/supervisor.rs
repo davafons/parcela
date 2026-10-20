@@ -65,6 +65,9 @@ pub struct Node {
     /// Checked only while another process waits for this one to be healthy.
     pub probe: Option<Probe>,
     pub max_restarts: u32,
+    /// Run when the graph stops, before the process is signaled, for anything the process
+    /// started outside its own process group, like containers.
+    pub stop: Option<String>,
 }
 
 /// The graph for one run of `up`. Commands reach the shell unexpanded, so `$PORT` is each HTTP
@@ -122,6 +125,7 @@ pub fn plan(
             depends_on,
             probe: None,
             max_restarts: 0,
+            stop: None,
         });
     }
     let before_hooks = manifest.hook_dependencies();
@@ -164,6 +168,7 @@ pub fn plan(
             depends_on,
             probe,
             max_restarts: 0,
+            stop: process.stop.clone(),
         });
     }
     // Concurrent `tailscale serve` changes can lose a race on the serve config, so a failed
@@ -178,6 +183,7 @@ pub fn plan(
             depends_on: Vec::new(),
             probe: None,
             max_restarts: 10,
+            stop: None,
         });
     }
     Ok(nodes)
@@ -199,6 +205,7 @@ pub fn literal(
         depends_on: Vec::new(),
         probe: None,
         max_restarts: 0,
+        stop: None,
     }
 }
 
@@ -227,6 +234,9 @@ pub struct Child {
     /// Known once this owner reaped it, or from a hook's exit file.
     pub exit: Option<i32>,
     pub restarts: u32,
+    /// Its `stop` command succeeded, so a successor does not run it again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
 }
 
 /// How long a process has between SIGTERM and SIGKILL.
@@ -235,6 +245,8 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const PROBE_PERIOD: Duration = Duration::from_secs(1);
 const RESTART_BACKOFF: Duration = Duration::from_secs(1);
+/// How long a `stop` command may take before its process group is killed.
+const STOP_COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
 enum State {
     Pending,
@@ -250,6 +262,13 @@ enum Running {
     Own(OwnedChild),
     Adopted,
 }
+/// A node's `stop` command.
+enum Stop {
+    Due,
+    Running(OwnedChild, Instant),
+    /// The exit code; `None` when it was killed or could not start.
+    Done(Option<i32>),
+}
 struct Slot {
     state: State,
     identity: Option<Identity>,
@@ -259,6 +278,7 @@ struct Slot {
     next_probe: Instant,
     probe: Option<(OwnedChild, Instant)>,
     terminated: Option<Instant>,
+    stop: Stop,
 }
 
 pub struct Supervisor {
@@ -302,6 +322,11 @@ impl Supervisor {
                     next_probe: now,
                     probe: None,
                     terminated: None,
+                    stop: if child.is_some_and(|child| child.stopped) {
+                        Stop::Done(Some(0))
+                    } else {
+                        Stop::Due
+                    },
                 }
             })
             .collect();
@@ -335,6 +360,7 @@ impl Supervisor {
                             _ => None,
                         },
                         restarts: slot.restarts,
+                        stopped: matches!(slot.stop, Stop::Done(Some(0))),
                     },
                 )
             })
@@ -624,13 +650,14 @@ impl Supervisor {
         })
     }
 
-    /// The exit code once every process has exited: a literal `run`'s own, else the first
-    /// nonzero one.
+    /// The exit code once every process has exited and, while stopping, every `stop` command
+    /// finished: a literal `run`'s own, else the first nonzero one.
     pub fn finished(&self) -> Option<i32> {
         if !self
             .slots
             .iter()
             .all(|slot| matches!(slot.state, State::Exited(_) | State::Skipped))
+            || (self.stopping && (0..self.nodes.len()).any(|index| self.stop_due(index)))
         {
             return None;
         }
@@ -659,8 +686,75 @@ impl Supervisor {
         self.stopping = true;
     }
 
-    /// Sends SIGTERM to each running process once nothing that depends on it runs, and SIGKILL
-    /// after the grace period. Returns whether a pending process was given up.
+    /// Whether a node still has to run its `stop` command: it has one, started and has not
+    /// finished stopping.
+    fn stop_due(&self, index: usize) -> bool {
+        let slot = &self.slots[index];
+        self.nodes[index].stop.is_some()
+            && slot.started
+            && matches!(slot.stop, Stop::Due | Stop::Running(..))
+    }
+
+    /// Why a `stop` command did not finish the shutdown, once the graph stopped.
+    pub fn stop_failure(&self) -> Option<String> {
+        self.nodes
+            .iter()
+            .zip(&self.slots)
+            .find_map(|(node, slot)| match slot.stop {
+                Stop::Done(Some(0)) | Stop::Due | Stop::Running(..) => None,
+                Stop::Done(Some(code)) => Some(format!(
+                    "services.{}.stop failed with exit code {code}; see parcela logs {}",
+                    node.name, node.name
+                )),
+                Stop::Done(None) => Some(format!(
+                    "services.{}.stop did not finish; see parcela logs {}",
+                    node.name, node.name
+                )),
+            })
+    }
+
+    /// Starts, polls or times out a node's `stop` command. Returns whether it finished.
+    fn stop_command(&mut self, index: usize) -> Result<bool> {
+        let node = &self.nodes[index];
+        let slot = &mut self.slots[index];
+        if let Stop::Running(child, started) = &mut slot.stop {
+            let code = match child.poll()? {
+                Some(status) => Some(process::exit_code(status)),
+                None if started.elapsed() < STOP_COMMAND_TIMEOUT => return Ok(false),
+                None => None,
+            };
+            if let Stop::Running(child, _) = std::mem::replace(&mut slot.stop, Stop::Done(code))
+                && code.is_none()
+            {
+                child.kill_now();
+            }
+            return Ok(true);
+        }
+        let mut command = Command::new(&self.shell);
+        command
+            .arg("-c")
+            .arg(node.stop.as_deref().unwrap_or_default())
+            .current_dir(&node.working_dir);
+        crate::runtime::command_env(&mut command, &node.env);
+        let spawned = crate::logs::open(&self.logs, &node.name)
+            .and_then(|log| OwnedChild::spawn_logged(&mut command, log));
+        slot.stop = match spawned {
+            Ok(child) => Stop::Running(child, Instant::now()),
+            Err(error) => {
+                eprintln!(
+                    "parcela: could not run services.{}.stop: {error:#}",
+                    node.name
+                );
+                Stop::Done(None)
+            }
+        };
+        Ok(matches!(slot.stop, Stop::Done(_)))
+    }
+
+    /// Stops each process once nothing that depends on it is still running or stopping: first
+    /// its `stop` command, if it has one, then SIGTERM, and SIGKILL after the grace period. A
+    /// process that already exited still gets its `stop` command. Returns whether the record
+    /// changed.
     fn stop_tick(&mut self) -> Result<bool> {
         let mut changed = false;
         for slot in &mut self.slots {
@@ -670,18 +764,24 @@ impl Supervisor {
             }
         }
         for index in 0..self.nodes.len() {
-            if !matches!(self.slots[index].state, State::Running(_)) {
+            let running = matches!(self.slots[index].state, State::Running(_));
+            if !running && !self.stop_due(index) {
                 continue;
             }
             let name = &self.nodes[index].name;
-            let dependents_running = self.nodes.iter().zip(&self.slots).any(|(node, slot)| {
-                matches!(slot.state, State::Running(_))
-                    && node
-                        .depends_on
-                        .iter()
-                        .any(|(dependency, _)| dependency == name)
+            let dependents_active = (0..self.nodes.len()).any(|other| {
+                self.nodes[other]
+                    .depends_on
+                    .iter()
+                    .any(|(dependency, _)| dependency == name)
+                    && (matches!(self.slots[other].state, State::Running(_))
+                        || self.stop_due(other))
             });
-            if dependents_running {
+            if dependents_active {
+                continue;
+            }
+            if self.stop_due(index) {
+                changed |= self.stop_command(index)?;
                 continue;
             }
             let slot = &mut self.slots[index];
@@ -756,6 +856,7 @@ mod tests {
                 .collect(),
             probe: None,
             max_restarts: 0,
+            stop: None,
         }
     }
 
@@ -894,5 +995,86 @@ mod tests {
         second.stop();
         run_until(&mut second, |s| s.finished().is_some());
         assert!(!identity.alive());
+    }
+
+    #[test]
+    fn a_stop_command_runs_after_its_dependents_stopped_and_before_the_signal() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let order = temp.path().join("order");
+        let mut db = node(
+            "db",
+            &format!(
+                "trap 'echo db >> {}; exit 0' TERM; while :; do sleep 0.05; done",
+                order.display()
+            ),
+            &[],
+        );
+        db.stop = Some(format!("echo stop >> {}", order.display()));
+        let web = node(
+            "web",
+            &format!(
+                "trap 'echo web >> {}; exit 0' TERM; while :; do sleep 0.05; done",
+                order.display()
+            ),
+            &[("db", Condition::Started)],
+        );
+        let mut supervisor = Supervisor::new(vec![db, web], temp.path()).unwrap();
+        run_until(&mut supervisor, |s| s.roots().len() == 2);
+        supervisor.stop();
+        run_until(&mut supervisor, |s| s.finished().is_some());
+        assert_eq!(std::fs::read_to_string(&order).unwrap(), "web\nstop\ndb\n");
+        assert!(supervisor.children()["db"].stopped);
+        assert_eq!(supervisor.stop_failure(), None);
+    }
+
+    #[test]
+    fn a_service_that_already_exited_still_runs_its_stop_command() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let marker = temp.path().join("stopped");
+        let mut deps = node("deps", "exit 0", &[]);
+        deps.stop = Some(format!("touch {}", marker.display()));
+        let mut supervisor = Supervisor::new(vec![deps], temp.path()).unwrap();
+        run_until(&mut supervisor, |s| s.finished().is_some());
+        assert!(!marker.exists());
+        supervisor.stop();
+        run_until(&mut supervisor, |s| s.finished().is_some());
+        assert!(marker.exists());
+    }
+
+    #[test]
+    fn a_failed_stop_command_is_reported_and_runs_again_for_a_successor() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let attempts = temp.path().join("attempts");
+        let deps = || {
+            let mut deps = node("deps", "exit 0", &[]);
+            deps.stop = Some(format!(
+                "echo try >> {0}; test $(wc -l < {0}) -ge 2",
+                attempts.display()
+            ));
+            deps
+        };
+        let mut first = Supervisor::new(vec![deps()], temp.path()).unwrap();
+        run_until(&mut first, |s| s.finished().is_some());
+        first.stop();
+        run_until(&mut first, |s| s.finished().is_some());
+        assert_eq!(
+            first.stop_failure().unwrap(),
+            "services.deps.stop failed with exit code 1; see parcela logs deps"
+        );
+        let children = first.children();
+        assert!(!children["deps"].stopped);
+        let mut second = Supervisor::adopt(vec![deps()], temp.path(), &children);
+        second.stop();
+        run_until(&mut second, |s| s.finished().is_some());
+        assert_eq!(second.stop_failure(), None);
+        let children = second.children();
+        assert!(children["deps"].stopped);
+        let mut third = Supervisor::adopt(vec![deps()], temp.path(), &children);
+        third.stop();
+        run_until(&mut third, |s| s.finished().is_some());
+        assert_eq!(
+            std::fs::read_to_string(&attempts).unwrap().lines().count(),
+            2
+        );
     }
 }
