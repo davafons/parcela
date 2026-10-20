@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { downloads, pages, repository, route } from './content.mjs';
 
-const base = '/docs/';
+const base = '/';
 const output = process.env.DOCS_OUTPUT ?? join(repository, 'target/docs');
 execFileSync(join(import.meta.dirname, 'node_modules/.bin/vitepress'), ['build'], {
   cwd: import.meta.dirname, stdio: 'inherit', env: { ...process.env, DOCS_BASE: base, DOCS_OUTPUT: output },
@@ -37,7 +37,7 @@ for (const [slug, title, source] of pages) {
   const front = /^---\n([\s\S]*?)\n---\n/.exec(readFileSync(join(repository, source), 'utf8'))?.[1] ?? '';
   if (/^search: false$/m.test(front)) continue;
   const hits = search.search(title, { prefix: true }).map((hit) => hit.id.split('#')[0]);
-  assert.ok(hits.includes(`${base}${slug}/`), `searching "${title}" finds ${source}`);
+  assert.ok(hits.includes(`${base}${route(slug).slice(1)}`), `searching "${title}" finds ${source}`);
 }
 
 const guide = readFileSync(join(repository, 'docs/site/worktrees.md'), 'utf8');

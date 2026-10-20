@@ -16,9 +16,9 @@
 </p>
 
 <p align="center">
-  <a href="https://parcela.davafons.com/docs/">Documentation</a> ·
-  <a href="https://parcela.davafons.com/docs/getting-started/">Getting started</a> ·
-  <a href="https://parcela.davafons.com/docs/faq/">FAQ</a>
+  <a href="https://parcela.run/docs/">Documentation</a> ·
+  <a href="https://parcela.run/docs/getting-started/">Getting started</a> ·
+  <a href="https://parcela.run/docs/faq/">FAQ</a>
 </p>
 
 Parcela starts a checkout's whole dev stack, its web server, API and workers, on ports it picks, and serves it at an HTTPS URL named after the checkout. Every jj workspace and Git worktree gets its own copy, running at the same time, so several coding agents can each try their change against a real app.
@@ -43,7 +43,7 @@ No Docker and no root. Parcela runs the processes itself and uses [Caddy](https:
 ## Install
 
 ```sh
-curl -fsSL https://parcela.davafons.com/install.sh | sh
+curl -fsSL https://parcela.run/install.sh | sh
 ```
 
 It also installs Caddy into `~/.local/bin` when it is missing, checking each download against its release checksums, and never uses `sudo`. With Homebrew: `brew install davafons/tap/parcela`. From source: `cargo install --git https://github.com/davafons/parcela --locked`. Builds cover macOS and Linux.

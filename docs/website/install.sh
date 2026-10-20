@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the latest Parcela release into ~/.local/bin, plus Caddy when no supported version is
 # on PATH. Run with --help for options.
-# Served at https://parcela.davafons.com/install.sh from github.com/davafons/parcela.
+# Served at https://parcela.run/install.sh from github.com/davafons/parcela.
 set -eu
 
 # The version Parcela's live tests run against.
@@ -45,7 +45,7 @@ install_parcela() {
     Darwin-x86_64) target=x86_64-apple-darwin ;;
     Linux-x86_64) target=x86_64-unknown-linux-gnu ;;
     Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-gnu ;;
-    *) echo "no Parcela build for $(uname -s) $(uname -m); see https://parcela.davafons.com/docs/" >&2; exit 1 ;;
+    *) echo "no Parcela build for $(uname -s) $(uname -m); see https://parcela.run/docs/" >&2; exit 1 ;;
   esac
   release=$1
   work=$(mktemp -d)

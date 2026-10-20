@@ -9,9 +9,9 @@ Set up Parcela for this project, so that `parcela up` alone runs the whole
 app in any checkout or worktree, each at its own HTTPS URL.
 
 1. If `parcela --version` fails, install it:
-   curl -fsSL https://parcela.davafons.com/install.sh | sh
+   curl -fsSL https://parcela.run/install.sh | sh
    Then run `parcela doctor` and tell me what it says is missing.
-2. Read `parcela --skill` and https://parcela.davafons.com/docs/configuration/.
+2. Read `parcela --skill` and https://parcela.run/docs/configuration/.
 3. Find how the project runs today: Procfile, bin/dev, docker-compose.yml,
    package.json scripts, Makefile, README. Don't read .env files or secrets.
 4. Write parcela.yaml with the project's real commands:
@@ -54,7 +54,7 @@ You need macOS or Linux, Python 3 and Git. The example app is plain Python, so t
 ## Install Parcela
 
 ```sh
-curl -fsSL https://parcela.davafons.com/install.sh | sh
+curl -fsSL https://parcela.run/install.sh | sh
 ```
 
 It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.com), which serves HTTPS, unless a supported version is already on your `PATH`. `sh -s -- --help` lists its options. With Homebrew instead:
@@ -63,7 +63,7 @@ It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.co
 brew install davafons/tap/parcela
 ```
 
-For the newest build of `main` instead of the latest release, add `--nightly`: `curl -fsSL https://parcela.davafons.com/install.sh | sh -s -- --nightly`. Its `parcela --version` includes the commit, like `0.4.0+20261020.4fed620`.
+For the newest build of `main` instead of the latest release, add `--nightly`: `curl -fsSL https://parcela.run/install.sh | sh -s -- --nightly`. Its `parcela --version` includes the commit, like `0.4.0+20261020.4fed620`.
 
 ## Create the app
 
@@ -111,8 +111,8 @@ Next: parcela up
 `init` looks for `package.json`, a Rails app or Django to guess your dev server. This directory has none of those, so it serves the directory with Python. Open `parcela.yaml`:
 
 ```yaml
-# yaml-language-server: $schema=https://parcela.davafons.com/schema/v1.json
-# Reference: https://parcela.davafons.com/docs/configuration/
+# yaml-language-server: $schema=https://parcela.run/schema/v1.json
+# Reference: https://parcela.run/docs/configuration/
 version: 1
 project: hello
 

@@ -77,7 +77,7 @@ jobs:
         run: |
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" -f sha="$SHA" -F force=true \
             || gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/tags/nightly -f sha="$SHA"
-          notes="Parcela $VERSION, built from $SHA. Install: curl -fsSL https://parcela.davafons.com/install.sh | sh -s -- --nightly"
+          notes="Parcela $VERSION, built from $SHA. Install: curl -fsSL https://parcela.run/install.sh | sh -s -- --nightly"
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly --prerelease --title "Nightly $VERSION" --notes "$notes"
           else

@@ -8,7 +8,7 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /getting-started/
+      link: /docs/getting-started/
     - theme: alt
       text: GitHub
       link: https://github.com/davafons/parcela
@@ -17,7 +17,7 @@ hero:
 ## Install
 
 ```sh
-curl -fsSL https://parcela.davafons.com/install.sh | sh
+curl -fsSL https://parcela.run/install.sh | sh
 ```
 
 Or with Homebrew: `brew install davafons/tap/parcela`. Builds cover macOS and Linux.

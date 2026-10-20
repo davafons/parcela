@@ -165,10 +165,10 @@
       "type": "object"
     }
   },
-  "$id": "https://parcela.davafons.com/schema/v1.json",
+  "$id": "https://parcela.run/schema/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`parcela.yaml` as written. Every field has one spelling and one shape.\nReference: https://parcela.davafons.com/docs/configuration/",
+  "description": "`parcela.yaml` as written. Every field has one spelling and one shape.\nReference: https://parcela.run/docs/configuration/",
   "patternProperties": {
     "^x-": {}
   },

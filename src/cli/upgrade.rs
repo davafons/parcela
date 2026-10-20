@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const INSTALLER: &str = "https://parcela.davafons.com/install.sh";
+const INSTALLER: &str = "https://parcela.run/install.sh";
 
 #[derive(Debug, PartialEq)]
 enum Install {

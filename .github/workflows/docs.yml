@@ -40,12 +40,9 @@ jobs:
       - run: npm run check --prefix docs/website
       - name: Assemble the Pages site
         run: |
-          mkdir -p target/pages
-          mv target/docs target/pages/docs
-          cp target/pages/docs/404.html target/pages/404.html
+          mv target/docs target/pages
           cp docs/website/install.sh target/pages/install.sh
           cp -R docs/website/schema target/pages/schema
-          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=/docs/"><link rel="canonical" href="https://parcela.davafons.com/docs/"><a href="/docs/">Parcela docs</a>\n' > target/pages/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: target/pages

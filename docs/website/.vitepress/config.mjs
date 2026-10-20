@@ -5,8 +5,8 @@ import { resolve } from 'node:path';
 import { groups, prepareContent, route, srcDir, watchSources } from '../content.mjs';
 
 const project = fileURLToPath(new URL('..', import.meta.url));
-const base = process.env.DOCS_BASE ?? '/docs/';
-const site = process.env.DOCS_SITE ?? 'https://parcela.davafons.com';
+const base = process.env.DOCS_BASE ?? '/';
+const site = process.env.DOCS_SITE ?? 'https://parcela.run';
 
 prepareContent();
 
@@ -51,9 +51,9 @@ export default defineConfig({
   themeConfig: {
     logo: '/assets/logo.svg',
     nav: [
-      { text: 'Get started', link: '/getting-started/' },
+      { text: 'Get started', link: route('getting-started') },
       { text: 'Guides', items: groups.find(({ label }) => label === 'Guides').pages.map(([slug, text]) => ({ text, link: route(slug) })) },
-      { text: 'FAQ', link: '/faq/' },
+      { text: 'FAQ', link: route('faq') },
     ],
     outline: [2, 3],
     search: { provider: 'local' },

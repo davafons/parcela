@@ -16,15 +16,15 @@ const icons = {
 
 const columns = [
   { title: 'Docs', links: [
-    { text: 'Get started', href: withBase('/getting-started/') },
-    { text: 'Parallel worktrees', href: withBase('/worktrees/') },
-    { text: 'Configuration', href: withBase('/configuration/') },
-    { text: 'CLI guide', href: withBase('/cli/') },
+    { text: 'Get started', href: withBase('/docs/getting-started/') },
+    { text: 'Parallel worktrees', href: withBase('/docs/worktrees/') },
+    { text: 'Configuration', href: withBase('/docs/configuration/') },
+    { text: 'CLI guide', href: withBase('/docs/cli/') },
   ] },
   { title: 'Help', links: [
-    { text: 'FAQ', href: withBase('/faq/') },
-    { text: 'Troubleshooting', href: withBase('/troubleshooting/') },
-    { text: 'Frameworks and data', href: withBase('/frameworks/') },
+    { text: 'FAQ', href: withBase('/docs/faq/') },
+    { text: 'Troubleshooting', href: withBase('/docs/troubleshooting/') },
+    { text: 'Frameworks and data', href: withBase('/docs/frameworks/') },
   ] },
   { title: 'Project', links: [
     { text: 'GitHub', href: repo, icon: 'github' },

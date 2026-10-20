@@ -1,6 +1,6 @@
 # Documentation site
 
-The site at `https://parcela.davafons.com/docs/` is built with VitePress from Markdown in this repository.
+The site at `https://parcela.run` is built with VitePress from Markdown in this repository.
 
 ## Sources
 
@@ -36,4 +36,4 @@ That serves `http://127.0.0.1:5173/docs/`. Search does not refresh until you res
 
 ## Deploy
 
-Every push to `main` that touches the docs runs `npm run check` and publishes its output to GitHub Pages through the `Documentation` workflow. `DOCS_BASE` (default `/docs/`) and `DOCS_SITE` (default `https://parcela.davafons.com`) set the base path and canonical origin. The workflow adds a root page that redirects to `/docs/` and a copy of the 404 page. The custom domain `parcela.davafons.com` is set in the repository's Pages settings and needs a DNS `CNAME` to `davafons.github.io`.
+Every push to `main` that touches the docs runs `npm run check` and publishes its output to GitHub Pages through the `Documentation` workflow. The landing page is the site root and every other page lives under `/docs/`. `DOCS_BASE` (default `/`) and `DOCS_SITE` (default `https://parcela.run`) set the base path and canonical origin. The workflow adds `install.sh` and `schema/` at the root. The custom domain `parcela.run` is set in the repository's Pages settings; its DNS is on Cloudflare, with the apex pointing at GitHub Pages.

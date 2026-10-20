@@ -24,7 +24,8 @@ export const groups = [
   ] },
 ];
 export const pages = groups.flatMap((group) => group.pages);
-export const route = (slug) => (slug === 'index' ? '/' : `/${slug}/`);
+// The landing page is the site root; every other page lives under /docs/.
+export const route = (slug) => (slug === 'index' ? '/' : `/docs/${slug}/`);
 
 export const downloads = {
   'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
@@ -56,7 +57,7 @@ function write(path, bytes) {
 }
 
 export function prepareContent({ clean = true } = {}) {
-  const files = pages.map(([slug, , source]) => [join(srcDir, slug === 'index' ? 'index.md' : `${slug}/index.md`), render(source)]);
+  const files = pages.map(([slug, , source]) => [join(srcDir, slug === 'index' ? 'index.md' : `docs/${slug}/index.md`), render(source)]);
   if (clean) rmSync(srcDir, { recursive: true, force: true });
   for (const [path, markdown] of files) write(path, markdown);
   for (const [name, source] of Object.entries(downloads)) write(join(srcDir, 'public/assets', name), readFileSync(join(repository, source)));

@@ -212,10 +212,10 @@ Arguments after `--` are appended: `parcela task test -- test/models` runs `bin/
 
 ## Editor support
 
-The file format has a JSON Schema at `https://parcela.davafons.com/schema/v1.json`. Editors with the YAML language server, such as VS Code with the Red Hat YAML extension, use it for completion and validation when the file starts with this line, which `parcela init` writes:
+The file format has a JSON Schema at `https://parcela.run/schema/v1.json`. Editors with the YAML language server, such as VS Code with the Red Hat YAML extension, use it for completion and validation when the file starts with this line, which `parcela init` writes:
 
 ```yaml
-# yaml-language-server: $schema=https://parcela.davafons.com/schema/v1.json
+# yaml-language-server: $schema=https://parcela.run/schema/v1.json
 ```
 
 ## Extension keys

@@ -109,7 +109,7 @@ pub const VERSION: u32 = 1;
 const SHUTDOWN_TIMEOUT_SECONDS: u64 = 300;
 
 /// `parcela.yaml` as written. Every field has one spelling and one shape.
-/// Reference: https://parcela.davafons.com/docs/configuration/
+/// Reference: https://parcela.run/docs/configuration/
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 #[cfg_attr(test, schemars(title = "parcela.yaml", extend("patternProperties" = {"^x-": {}})))]
@@ -305,7 +305,7 @@ impl Manifest {
                 bail!("unsupported version {version}; this Parcela reads version {VERSION}")
             }
             None => bail!(
-                "add `version: {VERSION}` at the top of parcela.yaml; files from Parcela 0.2 and earlier also need the format at https://parcela.davafons.com/docs/configuration/"
+                "add `version: {VERSION}` at the top of parcela.yaml; files from Parcela 0.2 and earlier also need the format at https://parcela.run/docs/configuration/"
             ),
         }
         // `x-` keys are free for YAML anchors and other tools, as in Docker Compose.
@@ -601,13 +601,13 @@ pub fn locate(start: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod schema {
-    /// The schema editors load from https://parcela.davafons.com/schema/v1.json.
+    /// The schema editors load from https://parcela.run/schema/v1.json.
     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/docs/website/schema/v1.json");
 
     #[test]
     fn published_schema_matches_the_parser() {
         let mut schema = serde_json::to_value(schemars::schema_for!(super::File)).unwrap();
-        schema["$id"] = "https://parcela.davafons.com/schema/v1.json".into();
+        schema["$id"] = "https://parcela.run/schema/v1.json".into();
         let text = serde_json::to_string_pretty(&schema).unwrap() + "\n";
         if std::env::var_os("PARCELA_UPDATE_SCHEMA").is_some() {
             std::fs::write(PATH, &text).unwrap();

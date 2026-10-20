@@ -7,7 +7,7 @@ import { withBase } from 'vitepress';
 const install = [
   ['#6F42C1', '#B392F0', 'curl'],
   ['#005CC5', '#79B8FF', ' -fsSL'],
-  ['#032F62', '#9ECBFF', ' https://parcela.davafons.com/install.sh'],
+  ['#032F62', '#9ECBFF', ' https://parcela.run/install.sh'],
   ['#D73A49', '#F97583', ' |'],
   ['#6F42C1', '#B392F0', ' sh'],
 ];
@@ -44,7 +44,7 @@ onBeforeUnmount(() => {
             <pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0"><code><span class="line"><span v-for="([light, dark, text], i) in install" :key="i" :style="{ '--shiki-light': light, '--shiki-dark': dark }">{{ text }}</span></span></code></pre>
           </div>
         </div>
-        <a class="go" :href="withBase('/getting-started/')">Get started</a>
+        <a class="go" :href="withBase('/docs/getting-started/')">Get started</a>
       </div>
       <img class="mascot" :src="withBase('/assets/logo.svg')" alt="" width="200" height="200" aria-hidden="true" />
     </div>

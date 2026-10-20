@@ -8,6 +8,7 @@
 
 ### Changed
 
+- The website moved to `https://parcela.run`: the landing page at the root, the docs under `/docs/`, and `install.sh` and the schema at `https://parcela.run/install.sh` and `https://parcela.run/schema/v1.json`. `parcela init`, `parcela upgrade` and the schema's `$id` use the new addresses. `parcela.davafons.com` no longer serves the site.
 - The proxy redirects plain HTTP on its port to HTTPS. `parcela proxy install` also relays port 80 when it is free, so `http://name.localhost` opens the environment. Run `parcela proxy install` again to add it to an existing install, then `parcela proxy restart`.
 - `up` and `proxy status` suggest `parcela trust` only while the certificate authority is not trusted. `proxy status --json` reports it as `trusted` instead of the always-false `browser_trust_verified`.
 - Rerunning `install.sh` over an earlier version says so and how to finish the upgrade. The FAQ shows how to upgrade each kind of install.

@@ -3,8 +3,8 @@ use anyhow::{Context, Result, bail};
 use parcela::{config::Manifest, frontdoor::FrontDoor};
 use std::{fs, io::Write, path::Path};
 
-const DOCS: &str = "https://parcela.davafons.com/docs/configuration/";
-const SCHEMA: &str = "https://parcela.davafons.com/schema/v1.json";
+const DOCS: &str = "https://parcela.run/docs/configuration/";
+const SCHEMA: &str = "https://parcela.run/schema/v1.json";
 
 /// A guessed dev server command and the evidence it came from.
 struct Suggestion {
