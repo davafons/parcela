@@ -123,10 +123,10 @@ fn files(source: &Path, compose: &Compose) -> Vec<PathBuf> {
 /// Fills in what the compose service starts and the ports it publishes, from the Compose file as
 /// `docker compose config` reads it now, and leases each port with the manifest's named ports.
 pub fn resolve(manifest: &mut Manifest, source: &Path) -> Result<()> {
-    let Some(compose) = manifest
+    let Some((compose_env, compose)) = manifest
         .processes
         .values_mut()
-        .find_map(|process| process.compose.as_mut())
+        .find_map(|process| Some((process.env.clone(), process.compose.as_mut()?)))
     else {
         return Ok(());
     };
@@ -145,6 +145,11 @@ pub fn resolve(manifest: &mut Manifest, source: &Path) -> Result<()> {
     for key in VARIABLES {
         command.env_remove(key);
     }
+    command.envs(known_environment(
+        &manifest.environment,
+        &compose_env,
+        source,
+    )?);
     let output = command
         .output()
         .context("run `docker compose config`; is Docker installed?")?;
@@ -158,6 +163,8 @@ pub fn resolve(manifest: &mut Manifest, source: &Path) -> Result<()> {
         serde_json::from_slice(&output.stdout).context("read `docker compose config`")?;
     (compose.started, compose.ports) =
         published(&config, &compose.services, compose.routes.values())?;
+    compose.volumes = own(&config["volumes"]);
+    compose.networks = own(&config["networks"]);
     for port in &compose.ports {
         ensure!(
             !manifest.ports.contains(&port.name),
@@ -168,6 +175,45 @@ pub fn resolve(manifest: &mut Manifest, source: &Path) -> Result<()> {
         manifest.ports.push(port.name.clone());
     }
     Ok(())
+}
+
+/// The `env` values Compose can read before the environment exists: those that need no port or
+/// environment name, like `COMPOSE_ENV_FILES: ${PARCELA_PRIMARY_DIR}/.env`.
+fn known_environment(
+    environment: &BTreeMap<String, String>,
+    service: &BTreeMap<String, String>,
+    source: &Path,
+) -> Result<BTreeMap<String, String>> {
+    let primary = crate::config::main_checkout(source).unwrap_or_else(|| source.to_owned());
+    let mut known = BTreeMap::from([
+        (
+            "PARCELA_PRIMARY_DIR".to_owned(),
+            primary
+                .to_str()
+                .context("non-UTF-8 checkout path")?
+                .to_owned(),
+        ),
+        ("HOST".to_owned(), "127.0.0.1".to_owned()),
+    ]);
+    for (key, value) in environment.iter().chain(service) {
+        if let Ok(value) = crate::runtime::resolve(key, value, &known) {
+            known.insert(key.clone(), value);
+        }
+    }
+    Ok(known)
+}
+
+/// The volumes or networks the Compose file defines itself, rather than as `external`.
+fn own(definitions: &Value) -> Vec<String> {
+    definitions
+        .as_object()
+        .map_or_else(Vec::new, |definitions| {
+            definitions
+                .iter()
+                .filter(|(_, definition)| definition["external"].as_bool() != Some(true))
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
 }
 
 /// The services `docker compose up services` starts, and the ports they publish, with each route's
@@ -261,12 +307,45 @@ pub fn environment(
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(vec![
-        (
-            VARIABLES[0].into(),
-            format!("{}-{label}", manifest.project.name),
-        ),
+        (VARIABLES[0].into(), project(manifest, label)),
         (VARIABLES[1].into(), files.join(":")),
     ])
+}
+
+fn project(manifest: &Manifest, label: &str) -> String {
+    format!("{}-{label}", manifest.project.name)
+}
+
+/// Removes an environment's containers and network, which need no Compose file, and returns the
+/// volumes it keeps.
+pub fn remove(manifest: &Manifest, label: &str) -> Result<Vec<String>> {
+    if manifest.compose().is_none() {
+        return Ok(Vec::new());
+    }
+    let project = project(manifest, label);
+    let docker = |args: &[&str]| -> Result<String> {
+        let mut command = Command::new("docker");
+        command.args(args).current_dir(std::env::temp_dir());
+        for key in VARIABLES {
+            command.env_remove(key);
+        }
+        let output = command
+            .output()
+            .context("run docker; is Docker installed?")?;
+        ensure!(
+            output.status.success(),
+            "docker {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    docker(&["compose", "-p", &project, "down"])?;
+    let label = format!("label=com.docker.compose.project={project}");
+    Ok(docker(&["volume", "ls", "-q", "--filter", &label])?
+        .lines()
+        .map(str::to_owned)
+        .collect())
 }
 
 /// Writes the override file the environment's [`VARIABLES`] name.
@@ -281,8 +360,9 @@ pub fn write_override(
     )
 }
 
-/// Each started service loses any `container_name`, which two environments cannot share, and
-/// publishes its ports on leased loopback ports instead of the file's own.
+/// Each started service loses any `container_name`, and each volume and network any fixed `name`,
+/// which two environments cannot share. Each service publishes its ports on leased loopback ports
+/// instead of the file's own.
 fn override_text(compose: &Compose, ports: &BTreeMap<String, u16>) -> Result<String> {
     let mut text = String::from("# Written by Parcela for this environment.\nservices:\n");
     for service in &compose.started {
@@ -306,6 +386,17 @@ fn override_text(compose: &Compose, ports: &BTreeMap<String, u16>) -> Result<Str
                 "    ports: !override [{}]\n",
                 published.join(", ")
             ));
+        }
+    }
+    for (section, names) in [
+        ("volumes", &compose.volumes),
+        ("networks", &compose.networks),
+    ] {
+        if !names.is_empty() {
+            text.push_str(&format!("{section}:\n"));
+            for name in names {
+                text.push_str(&format!("  {name}:\n    name: !reset null\n"));
+            }
         }
     }
     Ok(text)
@@ -373,12 +464,38 @@ mod tests {
             routes: BTreeMap::new(),
             started,
             ports,
+            volumes: vec!["data".into()],
+            networks: vec!["default".into()],
         };
         let text = override_text(&compose, &BTreeMap::from([("postgres".into(), 24001)])).unwrap();
         assert_eq!(
             text,
-            "# Written by Parcela for this environment.\nservices:\n  postgres:\n    container_name: !reset null\n    ports: !override [\"127.0.0.1:24001:5432/tcp\"]\n"
+            "# Written by Parcela for this environment.\nservices:\n  postgres:\n    container_name: !reset null\n    ports: !override [\"127.0.0.1:24001:5432/tcp\"]\nvolumes:\n  data:\n    name: !reset null\nnetworks:\n  default:\n    name: !reset null\n"
         );
+    }
+
+    #[test]
+    fn external_volumes_and_networks_stay_shared() {
+        let definitions =
+            json!({"data": {"name": "shop_data"}, "cache": {"name": "cache", "external": true}});
+        assert_eq!(own(&definitions), ["data"]);
+        assert!(own(&Value::Null).is_empty());
+    }
+
+    #[test]
+    fn compose_reads_the_env_that_needs_no_environment() {
+        let environment = BTreeMap::from([
+            (
+                "COMPOSE_ENV_FILES".into(),
+                "${PARCELA_PRIMARY_DIR}/.env".into(),
+            ),
+            ("DATABASE_PORT".into(), "${PARCELA_PORT_POSTGRES}".into()),
+        ]);
+        let service = BTreeMap::from([("IMAGE_TAG".into(), "17".into())]);
+        let known = known_environment(&environment, &service, Path::new("/nowhere")).unwrap();
+        assert_eq!(known["COMPOSE_ENV_FILES"], "/nowhere/.env");
+        assert_eq!(known["IMAGE_TAG"], "17");
+        assert!(!known.contains_key("DATABASE_PORT"));
     }
 
     #[test]

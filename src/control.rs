@@ -47,11 +47,9 @@ pub struct LiveStatus {
     pub http_ready: bool,
     pub listener_owned: bool,
     pub router_owned: bool,
-    #[serde(default)]
     pub route_published: bool,
     pub owner_pid: u32,
     pub listener_pids: Vec<u32>,
-    #[serde(default)]
     pub endpoints: std::collections::BTreeMap<String, EndpointHealth>,
     pub checked_at_unix_ms: u128,
 }

@@ -178,36 +178,20 @@ impl Registry {
                         generation INTEGER NOT NULL CHECK(generation > 0), vcs TEXT NOT NULL,
                         UNIQUE(project_id, label));
                     CREATE UNIQUE INDEX one_primary ON workspaces(project_id) WHERE role = 'primary';
-                    PRAGMA user_version = 1;")?;
+                    CREATE TABLE sessions (
+                        environment_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+                        token TEXT NOT NULL, router_token TEXT NOT NULL, generation INTEGER NOT NULL,
+                        backend_port INTEGER NOT NULL, status TEXT NOT NULL,
+                        kind TEXT NOT NULL, public_url TEXT NOT NULL,
+                        endpoints TEXT NOT NULL DEFAULT '[]', ports TEXT NOT NULL DEFAULT '{}');
+                    CREATE TABLE workspace_hosts (hostname TEXT PRIMARY KEY, environment_id TEXT NOT NULL REFERENCES workspaces(id), service TEXT NOT NULL, UNIQUE(environment_id, service));
+                    CREATE TABLE active_ports (port INTEGER PRIMARY KEY CHECK(port >= 1024 AND port <= 65535), environment_id TEXT NOT NULL REFERENCES sessions(environment_id));
+                    PRAGMA user_version = 4;")?;
             } else {
                 ensure!(
-                    (1..=VERSION).contains(&version),
+                    version == VERSION,
                     "unsupported registry schema {version}; no changes made"
                 );
-            }
-            if version <= 1 {
-                transaction.execute_batch("CREATE TABLE sessions (
-                    environment_id TEXT PRIMARY KEY REFERENCES workspaces(id),
-                    token TEXT NOT NULL, router_token TEXT NOT NULL, generation INTEGER NOT NULL,
-                    backend_port INTEGER NOT NULL, status TEXT NOT NULL,
-                    kind TEXT NOT NULL, public_url TEXT NOT NULL);
-                    CREATE UNIQUE INDEX active_port ON sessions(backend_port) WHERE status != 'stopped';
-                    PRAGMA user_version = 2;")?;
-            }
-            if version <= 2 {
-                transaction.execute_batch("ALTER TABLE sessions ADD COLUMN endpoints TEXT NOT NULL DEFAULT '[]';
-                    CREATE TABLE workspace_hosts (hostname TEXT PRIMARY KEY, environment_id TEXT NOT NULL REFERENCES workspaces(id), service TEXT NOT NULL, UNIQUE(environment_id, service));
-                    INSERT INTO workspace_hosts SELECT hostname, id, '' FROM workspaces;
-                    CREATE TABLE active_ports (port INTEGER PRIMARY KEY CHECK(port >= 1024 AND port <= 65535), environment_id TEXT NOT NULL REFERENCES sessions(environment_id));
-                    INSERT INTO active_ports SELECT backend_port, environment_id FROM sessions WHERE status != 'stopped';
-                    DROP INDEX active_port;
-                    PRAGMA user_version = 3;")?;
-            }
-            if version <= 3 {
-                transaction.execute_batch(
-                    "ALTER TABLE sessions ADD COLUMN ports TEXT NOT NULL DEFAULT '{}';
-                    PRAGMA user_version = 4;",
-                )?;
             }
             transaction.commit()?;
         } else {
@@ -221,10 +205,7 @@ impl Registry {
             if version == 0 && objects == 0 {
                 return Ok(None);
             }
-            ensure!(
-                (1..=VERSION).contains(&version),
-                "unsupported registry schema {version}"
-            );
+            ensure!(version == VERSION, "unsupported registry schema {version}");
         }
         Ok(Some(Self {
             connection,
@@ -791,10 +772,8 @@ pub struct Session {
     pub status: SessionStatus,
     pub kind: String,
     pub public_url: String,
-    #[serde(default)]
     pub endpoints: Vec<Endpoint>,
     /// Named non-HTTP ports leased with the endpoints; kept after stop so the next run can reuse them.
-    #[serde(default)]
     pub ports: BTreeMap<String, u16>,
 }
 impl Session {

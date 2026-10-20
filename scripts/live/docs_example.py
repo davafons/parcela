@@ -45,7 +45,7 @@ def run(caddy, **_):
             assert status['state'] == 'ready' and status['live_health_verified']
             assert all(endpoint['listener_owned'] and endpoint['http_ready'] for endpoint in status['live']['endpoints'].values())
             assert live.cli(path, 'url').stdout.strip() == f'https://{base}:{live.https}'
-            assert live.cli(path, 'url', '--service', 'api').stdout.strip() == f'https://api-{base}:{live.https}'
+            assert live.cli(path, 'url', 'api').stdout.strip() == f'https://api-{base}:{live.https}'
             assert b'Hello from Parcela' in live.request(base, path='/')
             assert json.loads(live.request(f'api-{base}', path='/')) == {'message': f'hello from {name}', 'url': f'https://api-{base}:{live.https}'}
             assert {entry['name']: entry['state'] for entry in status['processes']} == {'web': 'running', 'api': 'running', 'ticker': 'running', 'setup': 'completed'}

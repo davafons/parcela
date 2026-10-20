@@ -128,7 +128,7 @@ With the default proxy port, the page is at `https://hello.localhost:1443` and t
 Open the page. You see "Hello from Parcela". A terminal's first `up` offers system CA trust behind a password prompt. The following command verifies HTTPS with the certificate directly and needs no system trust change:
 
 ```sh
-curl --cacert "$(parcela trust --print)" "$(parcela url --service api)"
+curl --cacert "$(parcela trust --print)" "$(parcela url api)"
 ```
 
 The JSON has `message: "hello from primary"` and the API's URL. Read the worker's output and query the database:
@@ -158,7 +158,7 @@ The page is now at `https://signup-hello.localhost:1443`, and the API has the pr
 Request this checkout's API:
 
 ```sh
-curl --cacert "$(parcela trust --print)" "$(parcela url --service api)"
+curl --cacert "$(parcela trust --print)" "$(parcela url api)"
 parcela task messages
 ```
 

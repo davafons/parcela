@@ -162,19 +162,12 @@ services:
 ```
 
 - Each environment is its own Compose project, `shop-primary` or `shop-signup`, with its own containers, network and volumes. Every `docker compose` in hooks and tasks uses it.
-- The ports come from the Compose file: each port a started container publishes is leased. The first one of a service is named after it, like `PARCELA_PORT_SEARCH`, and the others add the container port, like `PARCELA_PORT_SEARCH_9300`. Parcela publishes it on `127.0.0.1` only, through an override file, so fixed host ports and `container_name` in the Compose file stay.
+- The ports come from the Compose file: each port a started container publishes is leased. The first one of a service is named after it, like `PARCELA_PORT_SEARCH`, and the others add the container port, like `PARCELA_PORT_SEARCH_9300`. Parcela publishes it on `127.0.0.1` only, through an override file, so fixed host ports, `container_name` and volume and network `name`s in the Compose file stay. `external` volumes and networks stay shared.
 - `deps` is ready once every listed service runs and is healthy. Give the Compose services a `healthcheck`, or the app may start before the database accepts connections. Raise `readiness_timeout_seconds` for one that is slow on its first start, like Elasticsearch.
 - `down` stops the containers, even if `docker compose up` was killed or Parcela crashed, and keeps the volumes.
 - A built image used by several worktrees needs an `image:` name next to `build:`, or Compose builds one per environment.
 - Compose reads `.env` next to the Compose file for its own variables, such as passwords. Variables from `parcela.yaml` take precedence. The containers start before `setup`, so a new worktree cannot copy it first: point Compose at the main checkout's with `COMPOSE_ENV_FILES: ${PARCELA_PRIMARY_DIR}/.env`.
-- Without Parcela, `docker compose up` names the project after the Compose file's directory. Parcela's names differ, so the main checkout starts with empty volumes. To keep the old data, copy each volume once before the first `parcela up`, with both stacks stopped. The labels tell Compose the volume is its own:
-
-```sh
-docker volume create --label com.docker.compose.project=shop-primary --label com.docker.compose.volume=db shop-primary_db
-docker run --rm -v shop_db:/from:ro -v shop-primary_db:/to busybox cp -a /from/. /to/
-```
-
-- Nothing deletes an environment's volumes. After removing a worktree, run `docker compose -p shop-signup down -v` from the Compose file's directory.
+- Nothing deletes an environment's volumes. `parcela rm` removes its containers and network and lists the volumes to delete with `docker volume rm`.
 - A container that serves HTTP, like Mailpit, MinIO's console or Kibana, gets its own URL through `http` under `compose`. See [Containers with URLs](configuration.md#containers-with-urls).
 
 ### Redis, Sidekiq and queues

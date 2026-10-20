@@ -81,6 +81,11 @@ pub struct Compose {
     /// The ports `started` publishes, each leased like a named port.
     #[serde(default)]
     pub ports: Vec<ComposePort>,
+    /// The Compose file's own volumes and networks, which each environment gets a copy of.
+    #[serde(default)]
+    pub volumes: Vec<String>,
+    #[serde(default)]
+    pub networks: Vec<String>,
 }
 
 /// A container port of a Compose service.
@@ -491,6 +496,8 @@ impl Manifest {
                             routes,
                             started: Vec::new(),
                             ports: Vec::new(),
+                            volumes: Vec::new(),
+                            networks: Vec::new(),
                         }),
                     }
                 }

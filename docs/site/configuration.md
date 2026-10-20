@@ -61,11 +61,11 @@ services:
 | `services` | The Compose services to start. Compose also starts what they depend on. |
 | `http` | Containers that serve HTTP, each at its own URL. See [Containers with URLs](#containers-with-urls). Their Compose services start too. |
 
-The Compose file stays as it is, fixed ports and `container_name` included. On `up`, Parcela:
+The Compose file stays as it is, fixed ports and names included. On `up`, Parcela:
 
 - names the environment's Compose project `<project>-<environment>`, like `shop-primary` or `shop-signup`, so each environment has its own containers, network and volumes;
 - leases a port for every port the started containers publish. A service's first port is named after it, like `PARCELA_PORT_POSTGRES`, and its others add the container port, like `PARCELA_PORT_ELASTICSEARCH_9300`;
-- writes an override file to the environment's runtime directory that publishes those ports on `127.0.0.1` and the leased port, and drops `container_name`;
+- writes an override file to the environment's runtime directory that publishes those ports on `127.0.0.1` and the leased port, and drops `container_name` and the `name` of every volume and network that is not `external`;
 - runs `docker compose up` for the services in the foreground, so their output is in `parcela logs`;
 - calls the service ready once each listed Compose service runs and, if it has a `healthcheck`, is healthy;
 - runs `docker compose stop` as the service's [stop](#stop) command. `down` keeps the volumes.
@@ -82,7 +82,7 @@ env:
 - It needs Docker Compose 2.24.4 or newer. `parcela doctor` checks that the file and services exist.
 - Compose reads `.env` next to the Compose file for its own variables. A new worktree does not have it until it is copied, and the containers start before `setup` runs. Point Compose at the main checkout's with `COMPOSE_ENV_FILES: ${PARCELA_PRIMARY_DIR}/.env` in `env` if the containers need it.
 - A built image shared by every worktree needs an `image:` name next to `build:`, or Compose builds one per environment.
-- To delete a worktree's containers and volumes, run `docker compose -p shop-signup down -v` from the Compose file's directory.
+- `parcela rm` removes the environment's containers and network and lists the volumes it keeps. Delete them with `docker volume rm`.
 
 #### Containers with URLs
 

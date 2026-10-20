@@ -6,10 +6,11 @@ import uuid
 
 from live.common import SERVICE, Live, wait_for
 
-# A fixed container name and host port, which two copies could not share without Parcela's override.
+# A fixed container name, host port, volume name and network name, which two copies could not share
+# without Parcela's override.
 COMPOSE = '''services:
   files:
-    image: busybox:1.37
+    image: ${FILES_IMAGE:?set in parcela.yaml}
     container_name: parcela-live-files
     command: ["sh", "-c", "echo \\"$$CHECKOUT\\" > /www/index.html && exec httpd -f -p 8080 -h /www"]
     environment:
@@ -21,6 +22,10 @@ COMPOSE = '''services:
       interval: 1s
 volumes:
   www:
+    name: parcela-live-www
+networks:
+  default:
+    name: parcela-live-net
 '''
 
 
@@ -29,6 +34,7 @@ def manifest(project):
 project: {project}
 env:
   CHECKOUT: ${{PARCELA_ENVIRONMENT_NAME}}
+  FILES_IMAGE: busybox:1.37
 services:
   deps:
     compose:
@@ -77,7 +83,10 @@ def run(caddy, **_):
                 published = docker('compose', '-p', f'{project}-{label}', 'port', 'files', '8080').strip()
                 assert published == f'127.0.0.1:{port}', published
             assert ports['primary'] != ports['beta'], ports
-            cases.append('each-copy-runs-its-own-containers-on-a-leased-loopback-port')
+            for label in ('primary', 'beta'):
+                docker('volume', 'inspect', f'{project}-{label}_www')
+                docker('network', 'inspect', f'{project}-{label}_default')
+            cases.append('each-copy-runs-its-own-containers-volumes-and-network-on-a-leased-loopback-port')
 
             for host, label in ((f'site-{project}.localhost', 'primary'), (f'site-beta-{project}.localhost', 'beta')):
                 status, _, body = live.fetch(host, '/')
@@ -104,6 +113,14 @@ def run(caddy, **_):
             assert port == ports['primary'], (port, ports)
             wait_for(lambda: urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=5).read().decode().strip() == 'primary')
             cases.append('up-again-reuses-the-port-and-the-containers')
+
+            live.cli(beta, 'down', timeout=60)
+            removed = json.loads(live.cli(beta, 'rm', timeout=60).stdout)
+            assert removed['forgotten'][0]['kept']['volumes'] == [f'{project}-beta_www'], removed
+            assert docker('ps', '-a', '-q', '--filter', f'label=com.docker.compose.project={project}-beta') == ''
+            assert subprocess.run(['docker', 'network', 'inspect', f'{project}-beta_default'], capture_output=True).returncode != 0
+            docker('volume', 'inspect', f'{project}-beta_www')
+            cases.append('rm-removes-the-containers-and-network-and-keeps-the-volumes')
         finally:
             for label in ('primary', 'beta'):
                 subprocess.run(['docker', 'compose', '-p', f'{project}-{label}', 'down', '-v'], capture_output=True)

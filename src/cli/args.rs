@@ -158,9 +158,6 @@ pub enum Command {
     Url {
         /// Service name
         service: Option<String>,
-        // Earlier spelling, kept for scripts and installed agent skills.
-        #[arg(long = "service", hide = true, conflicts_with = "service")]
-        service_flag: Option<String>,
     },
     /// Open the environment's URL in the browser
     Open {

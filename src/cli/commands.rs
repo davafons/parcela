@@ -426,12 +426,9 @@ pub fn run(mut cli: Cli) -> Result<i32> {
             }
             Ok(0)
         }
-        Command::Url {
-            service,
-            service_flag,
-        } => {
+        Command::Url { service } => {
             let (registry, workspace) = reader()?;
-            let url = service_url(&registry, &workspace, service.or(service_flag))?;
+            let url = service_url(&registry, &workspace, service)?;
             println!("{url}");
             Ok(0)
         }

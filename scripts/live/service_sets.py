@@ -120,7 +120,7 @@ def run(caddy, **_):
         assert current['live']['state'] == 'ready' and set(current['live']['endpoints']) == {'frontend', 'backend'}, current
         assert all(endpoint['http_ready'] and endpoint['listener_owned'] for endpoint in current['live']['endpoints'].values()), current
         assert {entry['name']: entry['state'] for entry in current['processes']} == {'frontend': 'running', 'backend': 'running', 'worker': 'running'}
-        assert cli(primary, 'url', '--service', 'backend').stdout.strip() == f'https://api-sets.localhost:{live.https}'
+        assert cli(primary, 'url', 'backend').stdout.strip() == f'https://api-sets.localhost:{live.https}'
         cases.append('two-origins-one-generation-working-directories-and-worker')
         wait_for(lambda: 'service-set-worker' in cli(primary, 'logs', 'worker', '--tail', '10').stdout, [proxy])
         assert json.loads(cli(primary, 'task', 'probe', '--', 'literal argument with spaces').stdout) == ['literal argument with spaces']

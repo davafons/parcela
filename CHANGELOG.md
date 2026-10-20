@@ -1,10 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 - 2026-10-20
+
+### Fixed
+
+- A `compose` service's volumes and networks with a fixed `name` are now each environment's own. Before, two environments shared them, so two databases could run on one data directory. `external` volumes and networks stay shared.
+- Parcela reads the Compose file with the `env` from `parcela.yaml` that needs no port, like `COMPOSE_ENV_FILES`, as `docker compose up` does. A Compose file that requires such a variable failed before anything started.
+- `parcela proxy restart` replaces a running proxy that this Parcela cannot read, such as one from 0.4. It failed because that proxy still held the port.
 
 ### Changed
 
+- `parcela rm` removes a `compose` service's containers and network, and lists the volumes it keeps.
 - `parcela upgrade` always installs the latest release unless `--nightly` is given, instead of staying on nightly for a nightly or locally built binary. `--stable` is gone.
+
+### Removed
+
+- `parcela url --service NAME`. Use `parcela url NAME`.
+- Migrations for registries from before 0.1.0.
 
 ## 0.5.0 - 2026-10-20
 

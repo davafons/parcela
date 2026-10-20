@@ -32,8 +32,6 @@ pub struct Router {
     pub token: String,
     pub front_door: FrontDoor,
     pub version: String,
-    /// 0 for proxies started before the protocol was recorded.
-    #[serde(default)]
     pub protocol: u32,
 }
 impl Router {
@@ -60,17 +58,11 @@ pub fn current(state: &Path) -> Result<Router> {
     let record: Value = private::read_json(&file)
         .context("the Parcela proxy is not running; start it with `parcela proxy start`")?;
     let router: Router = serde_json::from_value(record.clone()).map_err(|_| {
-        if record.get("version").is_none() {
-            anyhow::anyhow!(
-                "the running proxy was started by an older Parcela; stop that `parcela proxy run` (Ctrl-C or its launch agent), then run `parcela proxy start`"
-            )
-        } else {
-            anyhow::anyhow!(
-                "the proxy record {} is from Parcela {}; run `parcela proxy restart`",
-                file.display(),
-                record["version"]
-            )
-        }
+        anyhow::anyhow!(
+            "the proxy record {} is from Parcela {}; run `parcela proxy restart`",
+            file.display(),
+            record["version"]
+        )
     })?;
     ensure!(
         Uuid::parse_str(&router.token).is_ok(),

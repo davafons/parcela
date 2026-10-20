@@ -251,27 +251,6 @@ fn kernel_locks_and_private_files_reject_symlinks() {
     assert!(private::write_json(&linked, &serde_json::json!({"id":"wrong"})).is_err());
 }
 #[test]
-fn old_registry_migration_is_explicit_and_preserves_ids() {
-    let (temp, registry, manifest, workspace) = fixture();
-    drop(registry);
-    let state = temp.path().join("state");
-    let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
-    connection
-        .execute_batch("DROP TABLE active_ports; DROP TABLE workspace_hosts; DROP TABLE sessions; PRAGMA user_version=1;")
-        .unwrap();
-    drop(connection);
-    let old = Registry::open(&state, false).unwrap().unwrap();
-    assert!(old.session(&workspace.id).unwrap().is_none());
-    drop(old);
-    let migrated = Registry::open(&state, true).unwrap().unwrap();
-    assert_eq!(
-        migrated.current(&workspace.source, &manifest).unwrap().id,
-        workspace.id
-    );
-    assert!(migrated.sessions().unwrap().is_empty());
-}
-
-#[test]
 fn port_443_urls_carry_no_port() {
     let (_temp, registry, _manifest, _workspace) = fixture();
     let router = Router {
@@ -475,64 +454,6 @@ fn secondary_hostname_conflicts_with_preview_base_without_partial_adoption() {
 }
 
 #[test]
-fn legacy_active_session_migration_keeps_identity_and_port_reservation() {
-    let (temp, mut registry, manifest, workspace) = fixture();
-    let token = Uuid::new_v4().to_string();
-    let session = registry
-        .begin_session(
-            &workspace,
-            &token,
-            32030,
-            "up",
-            "https://auth-app.localhost",
-        )
-        .unwrap();
-    let mut legacy = serde_json::to_value(&session).unwrap();
-    legacy.as_object_mut().unwrap().remove("endpoints");
-    let parsed: parcela::registry::Session = serde_json::from_value(legacy).unwrap();
-    assert!(parsed.endpoints.is_empty());
-    assert_eq!(parsed.endpoints("web")[0].hostname, "auth-app.localhost");
-    drop(registry);
-    let state = temp.path().join("state");
-    let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
-    connection.execute_batch("DROP TABLE active_ports; DROP TABLE workspace_hosts; ALTER TABLE sessions DROP COLUMN endpoints; ALTER TABLE sessions DROP COLUMN ports;
-        CREATE UNIQUE INDEX active_port ON sessions(backend_port) WHERE status != 'stopped'; PRAGMA user_version=2;").unwrap();
-    let old = Registry::open(&state, false).unwrap().unwrap();
-    assert_eq!(
-        old.session(&workspace.id).unwrap().unwrap().token,
-        session.token
-    );
-    assert_eq!(
-        connection
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        2
-    );
-    drop(old);
-    let mut migrated = Registry::open(&state, true).unwrap().unwrap();
-    let current = migrated.session(&workspace.id).unwrap().unwrap();
-    assert_eq!(current.token, session.token);
-    assert_eq!(current.generation, 2);
-    assert_eq!(current.backend_port, 32030);
-    let other = temp.path().join("other");
-    fs::create_dir(&other).unwrap();
-    let other = migrated
-        .adopt(&manifest, &other, Role::Preview, "other")
-        .unwrap();
-    assert!(
-        migrated
-            .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
-            .is_err()
-    );
-    migrated
-        .session_status(&current, SessionStatus::Stopped)
-        .unwrap();
-    migrated
-        .begin_session(&other, &token, 32030, "run", "https://other-app.localhost")
-        .unwrap();
-}
-
-#[test]
 fn task_runtime_has_only_generic_dirs_and_strips_only_parcela_variables() {
     let temp = TempDir::new().unwrap();
     let source = temp.path().join("source");
@@ -568,56 +489,25 @@ fn task_runtime_has_only_generic_dirs_and_strips_only_parcela_variables() {
 }
 
 #[test]
-fn schema_3_registry_migrates_to_named_ports_without_losing_the_active_lease() {
-    let (temp, mut registry, _manifest, workspace) = fixture();
-    let token = Uuid::new_v4().to_string();
-    let session = registry
-        .begin_session(
-            &workspace,
-            &token,
-            32040,
-            "up",
-            "https://auth-app.localhost",
-        )
-        .unwrap();
+fn an_older_registry_schema_is_refused_unchanged() {
+    let (temp, registry, _manifest, _workspace) = fixture();
     drop(registry);
     let state = temp.path().join("state");
     let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
-    connection
-        .execute_batch("ALTER TABLE sessions DROP COLUMN ports; PRAGMA user_version=3;")
+    connection.execute_batch("PRAGMA user_version=3;").unwrap();
+    drop(connection);
+    for create in [false, true] {
+        let error = Registry::open(&state, create).err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .starts_with("unsupported registry schema 3"),
+            "{error}"
+        );
+    }
+    let connection = rusqlite::Connection::open(state.join("registry.sqlite3")).unwrap();
+    let version: i64 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    let old = Registry::open(&state, false).unwrap().unwrap();
-    let read = old.session(&workspace.id).unwrap().unwrap();
-    assert_eq!(read.token, session.token);
-    assert!(read.ports.is_empty());
-    drop(old);
-    let mut migrated = Registry::open(&state, true).unwrap().unwrap();
-    assert_eq!(
-        connection
-            .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
-            .unwrap(),
-        4
-    );
-    let current = migrated.session(&workspace.id).unwrap().unwrap();
-    assert_eq!(current.token, session.token);
-    assert_eq!(current.leased_ports(), [32040]);
-    migrated
-        .session_status(&current, SessionStatus::Stopped)
-        .unwrap();
-    let next = migrated
-        .begin_endpoints(
-            &workspace,
-            &token,
-            32041,
-            "up",
-            "https://auth-app.localhost",
-            &[],
-            &BTreeMap::from([("db".into(), 32042)]),
-        )
-        .unwrap();
-    assert_eq!(
-        migrated.session(&workspace.id).unwrap().unwrap().ports,
-        next.ports
-    );
-    assert_eq!(next.leased_ports(), [32041, 32042]);
+    assert_eq!(version, 3);
 }

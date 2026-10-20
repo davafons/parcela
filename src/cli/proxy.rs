@@ -111,9 +111,11 @@ pub fn run(state: &Path, command: ProxyCommand, out: Output) -> Result<i32> {
         }
         ProxyCommand::Restart { listen } => {
             Registry::open(state, true)?.context("cannot create the registry")?;
+            // A proxy this Parcela cannot read still holds the saved port until it stops.
             let running = match proxy::status(state)? {
                 Status::Running(router) => Some(router.front_door),
-                _ => None,
+                Status::Unhealthy(_) => Some(FrontDoor::load(state)?),
+                Status::Stopped => None,
             };
             let front_door = match (listen.port, running) {
                 (Some(_), _) => requested(state, listen.port)?,

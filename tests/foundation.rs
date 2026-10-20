@@ -452,7 +452,6 @@ fn url_takes_the_service_like_logs_does() {
         url(&["url", "api"]),
         "https://api-auth-demo.localhost:1443\n"
     );
-    assert_eq!(url(&["url", "--service", "api"]), url(&["url", "api"]));
     let unknown = cli(&path, &state, &["url", "nope"]);
     assert!(!unknown.status.success());
 }

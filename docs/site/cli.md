@@ -148,7 +148,7 @@ JSON has the shape `{ready, checks: [{name, ok, detail, fix}], notes}`.
 parcela rm [--prune]
 ```
 
-Forgets a stopped environment and releases names and ports. Refuses a running environment. A configured `hooks.teardown` runs first. If it fails, registration remains. Parcela itself retains source and the runtime directory.
+Forgets a stopped environment and releases names and ports. Refuses a running environment. A configured `hooks.teardown` runs first. Then, for a `compose` service, Parcela removes the environment's containers and network and lists the volumes it keeps. If either fails, registration remains. Parcela itself retains source and the runtime directory.
 
 `--prune` applies to stopped environments whose checkout directory no longer exists. It conflicts with `--workspace`.
 

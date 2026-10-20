@@ -192,19 +192,25 @@ pub fn remove(
             )
             .ok()
         };
-        if !running(&existing, &workspace)?
-            && let Some(manifest) = manifest
-            && let Err(error) = parcela::runtime::teardown(&existing, &manifest, &workspace)
-        {
-            if !prune {
-                return Err(error);
+        let cleaned = match manifest {
+            Some(manifest) if !running(&existing, &workspace)? => {
+                parcela::runtime::teardown(&existing, &manifest, &workspace)
+                    .and_then(|()| parcela::compose::remove(&manifest, &workspace.label))
             }
-            skipped.push(json!({"workspace": workspace, "reason": format!("{error:#}")}));
-            continue;
-        }
+            _ => Ok(Vec::new()),
+        };
+        let volumes = match cleaned {
+            Ok(volumes) => volumes,
+            Err(error) if !prune => return Err(error),
+            Err(error) => {
+                skipped.push(json!({"workspace": workspace, "reason": format!("{error:#}")}));
+                continue;
+            }
+        };
         released.push((
             existing.hosts(&workspace.id)?,
             existing.runtime_path(&workspace),
+            volumes,
         ));
         prepared.push(workspace);
     }
@@ -212,13 +218,19 @@ pub fn remove(
     drop(existing);
     let mut registry = Registry::open(state, true)?.context("registry disappeared")?;
     let mut forgotten = Vec::new();
-    for (workspace, (hosts, runtime)) in targets.into_iter().zip(released) {
+    for (workspace, (hosts, runtime, volumes)) in targets.into_iter().zip(released) {
         match registry.forget(&workspace.id) {
-            Ok(workspace) => forgotten.push(json!({
-                "workspace": workspace,
-                "released_hostnames": hosts.into_values().collect::<Vec<_>>(),
-                "kept": {"source": workspace.source, "runtime_dir": runtime},
-            })),
+            Ok(workspace) => {
+                let mut kept = json!({"source": workspace.source, "runtime_dir": runtime});
+                if !volumes.is_empty() {
+                    kept["volumes"] = json!(volumes);
+                }
+                forgotten.push(json!({
+                    "workspace": workspace,
+                    "released_hostnames": hosts.into_values().collect::<Vec<_>>(),
+                    "kept": kept,
+                }))
+            }
             Err(error) if prune => {
                 skipped.push(json!({"workspace": workspace, "reason": format!("{error:#}")}))
             }
@@ -242,6 +254,19 @@ pub fn remove(
                     cell(&row["kept"]["runtime_dir"])
                 )),
             ));
+            let volumes: Vec<_> = row["kept"]["volumes"]
+                .as_array()
+                .map(|volumes| volumes.iter().map(cell).collect())
+                .unwrap_or_default();
+            if !volumes.is_empty() {
+                text.push_str(&format!(
+                    "  {}\n",
+                    style.dim(&format!(
+                        "volumes kept; delete with docker volume rm {}",
+                        volumes.join(" ")
+                    ))
+                ));
+            }
         }
         for row in &skipped {
             text.push_str(&format!(

@@ -277,8 +277,7 @@ fn only_a_proxy_on_another_protocol_warns() {
         )
     );
 
-    // A proxy started before the protocol was recorded is older.
-    rewrite("0.0.1", None);
+    rewrite("0.0.1", Some(parcela::router::PROTOCOL - 1));
     let warning = format!(
         "the running proxy is from Parcela 0.0.1, older than this {}; run `parcela proxy restart` to update it",
         env!("PARCELA_VERSION")
@@ -288,6 +287,15 @@ fn only_a_proxy_on_another_protocol_warns() {
     let start = cli(&proxy.state, &["--json", "proxy", "start"]);
     assert!(start.status.success());
     assert_eq!(stderr(&start), format!("parcela: {warning}\n"));
+
+    // A record this Parcela cannot read still restarts on the same port.
+    rewrite("0.0.0", None);
+    assert!(
+        status()["error"]
+            .as_str()
+            .unwrap()
+            .ends_with("is from Parcela \"0.0.0\"; run `parcela proxy restart`")
+    );
 
     let restarted = cli(
         &proxy.state,

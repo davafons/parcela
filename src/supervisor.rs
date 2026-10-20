@@ -1001,25 +1001,20 @@ mod tests {
     fn a_stop_command_runs_after_its_dependents_stopped_and_before_the_signal() {
         let temp = tempfile::TempDir::new().unwrap();
         let order = temp.path().join("order");
-        let mut db = node(
-            "db",
-            &format!(
-                "trap 'echo db >> {}; exit 0' TERM; while :; do sleep 0.05; done",
-                order.display()
-            ),
-            &[],
-        );
+        // Each shell marks itself ready once its trap is set, so the signal cannot arrive first.
+        let script = |name: &str| {
+            format!(
+                "trap 'echo {name} >> {}; exit 0' TERM; touch {}; while :; do sleep 0.05; done",
+                order.display(),
+                temp.path().join(format!("{name}.ready")).display()
+            )
+        };
+        let mut db = node("db", &script("db"), &[]);
         db.stop = Some(format!("echo stop >> {}", order.display()));
-        let web = node(
-            "web",
-            &format!(
-                "trap 'echo web >> {}; exit 0' TERM; while :; do sleep 0.05; done",
-                order.display()
-            ),
-            &[("db", Condition::Started)],
-        );
+        let web = node("web", &script("web"), &[("db", Condition::Started)]);
         let mut supervisor = Supervisor::new(vec![db, web], temp.path()).unwrap();
-        run_until(&mut supervisor, |s| s.roots().len() == 2);
+        let ready = |name: &str| temp.path().join(format!("{name}.ready")).exists();
+        run_until(&mut supervisor, |_| ready("db") && ready("web"));
         supervisor.stop();
         run_until(&mut supervisor, |s| s.finished().is_some());
         assert_eq!(std::fs::read_to_string(&order).unwrap(), "web\nstop\ndb\n");
