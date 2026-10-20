@@ -251,7 +251,7 @@ The proxy is one background Caddy that serves the URLs of every environment. `up
 - `stop` stops the proxy and keeps it stopped: running environments do not restart it. Services keep running, but their URLs stop answering until `proxy start` or the next `up`. It says how many environments that affects.
 - `restart` replaces the proxy. Run it after upgrading Parcela.
 - `status` shows the port, process IDs, version and log file. It exits 1 when the proxy is not running.
-- `install`, on macOS, makes URLs portless, like `https://hello.localhost`. It asks for your password once to add the launchd service `org.parcela.https`, which owns port 443 on 127.0.0.1 and hands each connection to `nc` running as you, relaying it to the proxy's port. No Parcela code runs as root, and it survives reboots. It refuses when another program uses 443. Restart running environments afterwards to pick up the new URLs. `uninstall` removes it.
+- `install`, on macOS, makes URLs portless, like `https://hello.localhost`. It asks for your password once to add the launchd service `org.parcela.https`, which owns port 443 on 127.0.0.1 and hands each connection to `nc` running as you, relaying it to the proxy's port. No Parcela code runs as root, and it survives reboots. It refuses when another program uses 443. It also takes port 80 when that is free, so `http://hello.localhost` redirects to `https://`; a busy 80 only loses that redirect. Restart running environments afterwards to pick up the new URLs. `uninstall` removes it.
 
 ```text
 $ parcela proxy status
@@ -262,6 +262,8 @@ $ parcela proxy status
   log      /Users/you/.local/state/parcela/proxy/proxy.log
   Run `parcela trust` to trust these URLs
 ```
+
+The proxy answers plain HTTP on its port with a redirect to HTTPS, so `http://hello.localhost:1443` works too.
 
 If the port is busy, `start` fails and names the process that holds it. It never stops that process and never picks another port.
 

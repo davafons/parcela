@@ -46,6 +46,11 @@ def run(caddy, **_):
         assert b'data: ready' in fetch('live.localhost', '/sse')[2]
         assert fetch('live.localhost', '/ws', headers=WEBSOCKET)[0] == 101
         assert fetch('live.localhost', host_header='unknown.localhost')[0] == 404, 'an unknown Host cannot pick a route by SNI'
+        with socket.create_connection(('127.0.0.1', live.https), timeout=3) as plain:
+            plain.sendall(b'GET /a?b=1 HTTP/1.1\r\nHost: live.localhost\r\nConnection: close\r\n\r\n')
+            redirect = plain.recv(65536)
+        assert redirect.split(b'\r\n')[0].endswith(b' 308 Permanent Redirect'), redirect
+        assert b'\r\nLocation: https://live.localhost/a?b=1\r\n' in redirect, redirect
         duplicate = cli(primary_path, 'run', '--', 'python3', str(SERVICE), check=False)
         assert duplicate.returncode != 0 and primary.poll() is None
         primary.send_signal(signal.SIGTERM)

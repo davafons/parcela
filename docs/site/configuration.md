@@ -1,6 +1,6 @@
 # Configuration
 
-Parcela reads `parcela.yaml` from the root of your checkout. Commands look for it in the current directory, or `--path`, and then in each parent directory. Every field has one spelling and one shape. The [CLI guide](site/cli.md) covers the commands.
+Parcela reads `parcela.yaml` from the root of your checkout. Commands look for it in the current directory, or `--path`, and then in each parent directory. Every field has one spelling and one shape. The [CLI guide](cli.md) covers the commands.
 
 ## A complete example
 

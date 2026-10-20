@@ -359,14 +359,17 @@ fn render(registry: &Registry, router: &Router, ready: &[Route], lan: bool) -> R
     }
     routes.push(json!({"@id":router.id(), "handle":[{"handler":"static_response", "status_code":404, "body":"No ready Parcela route\n"}], "terminal":true}));
     let https_port = router.front_door.https;
+    // Plain HTTP on the HTTPS port, including port 80 through the macOS relay, gets a 308 to
+    // https:// with the same host and path.
+    let wrappers = json!([{"wrapper":"http_redirect"}, {"wrapper":"tls"}]);
     let mut servers = json!({
         "https":{"listen":[format!("127.0.0.1:{https_port}")], "protocols":["h1","h2"],
-            "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":routes}
+            "listener_wrappers":wrappers, "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":routes}
     });
     if !lan_routes.is_empty() {
         lan_routes.push(json!({"handle":[{"handler":"static_response", "status_code":404, "body":"No shared Parcela route\n"}], "terminal":true}));
         servers["lan"] = json!({"listen":lan_listen, "protocols":["h1","h2"],
-            "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":lan_routes});
+            "listener_wrappers":wrappers, "tls_connection_policies":[{}], "automatic_https":{"disable_redirects":true}, "routes":lan_routes});
     }
     let http_app = json!({"https_port": https_port, "servers": servers});
     let mut config = json!({

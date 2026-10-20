@@ -8,6 +8,7 @@
 
 ### Changed
 
+- The proxy redirects plain HTTP on its port to HTTPS. `parcela proxy install` also relays port 80 when it is free, so `http://name.localhost` opens the environment. Run `parcela proxy install` again to add it to an existing install, then `parcela proxy restart`.
 - `up` and `proxy status` suggest `parcela trust` only while the certificate authority is not trusted. `proxy status --json` reports it as `trusted` instead of the always-false `browser_trust_verified`.
 - Rerunning `install.sh` over an earlier version says so and how to finish the upgrade. The FAQ shows how to upgrade each kind of install.
 
@@ -54,7 +55,7 @@ Parcela runs each environment's processes itself, so Process Compose is no longe
 
 ## 0.3.0 - 2026-10-18
 
-`parcela.yaml` has a new format, version 1. Files written for 0.2 or earlier need rewriting, and `parcela doctor` links to the new format. The [configuration reference](docs/configuration.md) shows the new format.
+`parcela.yaml` has a new format, version 1. Files written for 0.2 or earlier need rewriting, and `parcela doctor` links to the new format. The [configuration reference](docs/site/configuration.md) shows the new format.
 
 ### Added
 

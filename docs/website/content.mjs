@@ -19,7 +19,7 @@ export const groups = [
     ['troubleshooting', 'Troubleshooting', 'docs/site/troubleshooting.md'],
   ] },
   { label: 'Reference', pages: [
-    ['configuration', 'Configuration', 'docs/configuration.md'],
+    ['configuration', 'Configuration', 'docs/site/configuration.md'],
     ['operating-skill', 'Operating skill', '.agents/skills/parcela/SKILL.md'],
   ] },
 ];

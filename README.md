@@ -107,8 +107,8 @@ The [FAQ](docs/site/faq.md) answers the questions about certificates, port 1443,
 - [Getting started](docs/site/getting-started.md) builds a small app with an API, a worker and a second worktree.
 - [Parallel worktrees and agents](docs/site/worktrees.md) covers naming, data separation and the Claude Code skill.
 - [Frameworks and data](docs/site/frameworks.md) covers host checks, databases and uploads for Rails, Django, Vite, Next.js, Phoenix and Laravel.
-- [CLI guide](docs/site/cli.md), [configuration reference](docs/configuration.md) and [troubleshooting](docs/site/troubleshooting.md).
-- [Architecture](docs/architecture.md) and [building the docs site](docs/documentation.md) are for contributors. Run `scripts/check` before sending a change.
+- [CLI guide](docs/site/cli.md), [configuration reference](docs/site/configuration.md) and [troubleshooting](docs/site/troubleshooting.md).
+- [Architecture](docs/architecture.md) and [building the docs site](docs/website/README.md) are for contributors. Run `scripts/check` before sending a change.
 
 Releases are tagged, and `parcela --version` prints `0.4.0`. The newest build of `main` is the nightly, which adds the commit date and hash, like `0.4.0+20261020.4fed620`. `install.sh --nightly` installs it.
 

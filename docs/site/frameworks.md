@@ -6,7 +6,7 @@ The examples use the `signup` worktree of a project called `shop`, at `https://s
 
 ## What a process gets
 
-Every service, hook and task gets these, among others. The full list is in the [configuration reference](../configuration.md#environment-variables-parcela-sets).
+Every service, hook and task gets these, among others. The full list is in the [configuration reference](configuration.md#environment-variables-parcela-sets).
 
 | Variable | Use it for |
 |---|---|
@@ -28,7 +28,7 @@ Values in `env` can use `${NAME}` only for variables Parcela sets. `${HOME}` or 
 
 A new worktree is a new directory, so files the app keeps inside the checkout, such as Rails' `storage/` or Django's `db.sqlite3`, already differ per worktree. They start empty and go away with the worktree. Anything outside the checkout, such as a database server, a Redis or an `.env` that points at one, is shared until `parcela.yaml` says otherwise.
 
-`hooks.setup` runs on an environment's first `up`, `hooks.prestart` on every start and `hooks.teardown` on `parcela rm`. The [hooks reference](../configuration.md#hooks) has the details.
+`hooks.setup` runs on an environment's first `up`, `hooks.prestart` on every start and `hooks.teardown` on `parcela rm`. The [hooks reference](configuration.md#hooks) has the details.
 
 ### SQLite
 
@@ -63,9 +63,9 @@ DATABASES = {
 
 ### PostgreSQL
 
-Two ways, as in [Databases](../configuration.md#databases).
+Two ways, as in [Databases](configuration.md#databases).
 
-**A server per environment.** Run `postgres` as a service on a named port, as in [the complete example](../configuration.md#a-complete-example). Its files live in `PARCELA_DATA_DIR` and `down` stops it.
+**A server per environment.** Run `postgres` as a service on a named port, as in [the complete example](configuration.md#a-complete-example). Its files live in `PARCELA_DATA_DIR` and `down` stops it.
 
 **One shared server, one database per environment.** Name the database after the environment. libpq tools such as `psql`, `createdb` and `dropdb` read `PGHOST`:
 

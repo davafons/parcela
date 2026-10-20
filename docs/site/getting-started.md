@@ -305,7 +305,7 @@ curl https://api-hello.localhost:1443
 {"message": "hello from primary", "url": "https://api-hello.localhost:1443"}
 ```
 
-`primary` is this environment's name, from `PARCELA_ENVIRONMENT_NAME`. The API read its URL from `PARCELA_SERVICE_API_URL`. Parcela sets variables like these for every service, so your services can find each other. The [configuration reference](../configuration.md#environment-variables-parcela-sets) lists them all.
+`primary` is this environment's name, from `PARCELA_ENVIRONMENT_NAME`. The API read its URL from `PARCELA_SERVICE_API_URL`. Parcela sets variables like these for every service, so your services can find each other. The [configuration reference](configuration.md#environment-variables-parcela-sets) lists them all.
 
 See what the setup printed:
 
@@ -465,4 +465,4 @@ parcela rm --prune
 
 - [Parallel worktrees and agents](worktrees.md) covers naming, data separation and setting up a coding agent.
 - The [CLI guide](cli.md) explains every command.
-- The [configuration reference](../configuration.md) lists every `parcela.yaml` field.
+- The [configuration reference](configuration.md) lists every `parcela.yaml` field.

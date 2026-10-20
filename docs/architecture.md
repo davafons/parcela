@@ -79,4 +79,4 @@ scripts/check-live recovery --case owner_crash
 
 The runner builds once, runs the suites in order, writes one JSON report per suite to a temporary directory (or `--output DIR`) and exits non-zero if any fails. `--caddy` overrides the binary.
 
-Documentation checks are in [docs/documentation.md](documentation.md).
+Documentation checks are in [docs/website/README.md](website/README.md).

@@ -1,9 +1,15 @@
 import { h } from 'vue';
 import DefaultTheme from 'vitepress/theme';
-import Terminal from './Terminal.vue';
+import HeroBackground from './HeroBackground.vue';
+import HeroDemo from './HeroDemo.vue';
+import HeroTitle from './HeroTitle.vue';
 import '../../src/parcela.css';
 
 export default {
   extends: DefaultTheme,
-  Layout: () => h(DefaultTheme.Layout, null, { 'home-hero-image': () => h(Terminal) }),
+  Layout: () => h(DefaultTheme.Layout, null, {
+    'home-hero-before': () => h(HeroBackground),
+    'home-hero-info': () => h(HeroTitle),
+    'home-hero-after': () => h(HeroDemo),
+  }),
 };

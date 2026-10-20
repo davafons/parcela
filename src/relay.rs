@@ -1,7 +1,8 @@
 //! `parcela proxy install` on macOS: URLs without a port. launchd owns a real socket on
 //! 127.0.0.1:443 and starts `/usr/bin/nc` as the user for each connection, relaying it to the
 //! proxy's port. No Parcela code runs as root, and a busy 443 is a bind error, never a redirect
-//! that hides another program's listener.
+//! that hides another program's listener. A free 80 is relayed to the same port, where the proxy
+//! redirects plain HTTP to HTTPS.
 use crate::frontdoor::FrontDoor;
 use anyhow::{Context, Result, bail, ensure};
 use std::{path::Path, process::Command};
@@ -33,7 +34,21 @@ fn plain_user(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
-fn plist(user: &str, target: u16) -> String {
+fn plist(user: &str, target: u16, http: bool) -> String {
+    let socket = |port: u16| {
+        format!(
+            r#"<dict>
+    <key>SockNodeName</key><string>127.0.0.1</string>
+    <key>SockServiceName</key><string>{port}</string>
+    <key>SockType</key><string>stream</string>
+  </dict>"#
+        )
+    };
+    let http = if http {
+        format!("\n  <key>HTTP</key>{}", socket(80))
+    } else {
+        String::new()
+    };
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -45,15 +60,26 @@ fn plist(user: &str, target: u16) -> String {
   <array><string>/usr/bin/nc</string><string>127.0.0.1</string><string>{target}</string></array>
   <key>inetdCompatibility</key><dict><key>Wait</key><false/></dict>
   <key>Sockets</key>
-  <dict><key>Listeners</key><dict>
-    <key>SockNodeName</key><string>127.0.0.1</string>
-    <key>SockServiceName</key><string>443</string>
-    <key>SockType</key><string>stream</string>
-  </dict></dict>
+  <dict>
+  <key>Listeners</key>{}{http}
+  </dict>
 </dict>
 </plist>
-"#
+"#,
+        socket(443)
     )
+}
+
+/// Whether the installed relay already owns port 80.
+fn relays_http() -> bool {
+    std::fs::read_to_string(PLIST).is_ok_and(|plist| plist.contains("<string>80</string>"))
+}
+
+/// Who holds `port` on loopback, if anyone.
+fn busy(port: u16) -> Option<String> {
+    let holder = crate::process::port_holder(port);
+    (holder != "another process" || std::net::TcpStream::connect(("127.0.0.1", port)).is_ok())
+        .then_some(holder)
 }
 
 pub fn installed() -> bool {
@@ -77,14 +103,22 @@ pub fn install(state: &Path, front_door: FrontDoor) -> Result<FrontDoor> {
         "`parcela proxy install` is for macOS; on Linux run `sudo sysctl net.ipv4.ip_unprivileged_port_start=443`, then `parcela proxy start --port 443`"
     );
     ensure!(front_door.https != 443, "the proxy already listens on 443");
-    if !installed() {
-        let holder = crate::process::port_holder(443);
-        if holder != "another process" || std::net::TcpStream::connect(("127.0.0.1", 443)).is_ok() {
-            bail!("port 443 is already in use by {holder}; Parcela never takes it over");
-        }
+    if !installed()
+        && let Some(holder) = busy(443)
+    {
+        bail!("port 443 is already in use by {holder}; Parcela never takes it over");
     }
+    // Port 80 is optional: a busy one only loses the http:// redirect.
+    let http = if installed() && relays_http() {
+        true
+    } else if let Some(holder) = busy(80) {
+        eprintln!("parcela: port 80 is in use by {holder}; http:// URLs will not redirect");
+        false
+    } else {
+        true
+    };
     let file = state.join("proxy/org.parcela.https.plist");
-    crate::private::write_bytes(&file, plist(&user()?, front_door.https).as_bytes())?;
+    crate::private::write_bytes(&file, plist(&user()?, front_door.https, http).as_bytes())?;
     eprintln!(
         "Installing {PLIST} so URLs need no port. It may ask for your password.\n  undo  parcela proxy uninstall"
     );
@@ -116,7 +150,8 @@ pub fn uninstall(front_door: FrontDoor) -> Result<FrontDoor> {
 mod tests {
     #[test]
     fn the_relay_runs_nc_as_the_user_on_a_launchd_socket() {
-        let plist = super::plist("you", 1443);
+        let plist = super::plist("you", 1443, false);
+        assert!(!plist.contains("<string>80</string>"), "{plist}");
         for part in [
             "<key>UserName</key><string>you</string>",
             "<string>/usr/bin/nc</string><string>127.0.0.1</string><string>1443</string>",
@@ -125,6 +160,17 @@ mod tests {
         ] {
             assert!(plist.contains(part), "{part}\n{plist}");
         }
+    }
+
+    #[test]
+    fn the_relay_also_takes_port_80_when_asked() {
+        let plist = super::plist("you", 1443, true);
+        assert!(plist.contains("<key>HTTP</key><dict>"), "{plist}");
+        assert!(
+            plist.contains("<key>SockServiceName</key><string>80</string>"),
+            "{plist}"
+        );
+        assert_eq!(plist.matches("<string>1443</string>").count(), 1, "{plist}");
     }
 
     #[test]

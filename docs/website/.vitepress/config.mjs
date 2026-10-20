@@ -57,5 +57,9 @@ export default defineConfig({
       items: pages.map(([slug, text]) => ({ text, link: route(slug) })),
     })),
     socialLinks: [{ icon: 'github', link: 'https://github.com/davafons/parcela' }],
+    footer: {
+      message: `Released under the <a href="https://github.com/davafons/parcela/blob/main/LICENSE">AGPL-3.0</a>. <a href="https://github.com/davafons/parcela">GitHub</a> · <a href="${base}getting-started/">Get started</a> · <a href="${base}faq/">FAQ</a>`,
+      copyright: 'Copyright © 2026 David Afonso',
+    },
   },
 });

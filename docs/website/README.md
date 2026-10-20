@@ -6,8 +6,7 @@ The site at `https://parcela.davafons.com/docs/` is built with VitePress from Ma
 
 | File | Page |
 |---|---|
-| `docs/site/*.md` | Home, Getting started, worktrees, CLI guide, troubleshooting |
-| `docs/configuration.md` | Configuration reference |
+| `docs/site/*.md` | User guides and configuration reference |
 | `.agents/skills/parcela/SKILL.md` | Operating skill. The CLI embeds this file for `parcela --skill`. |
 | `examples/docs-demo/` | The finished Getting started app, linked from that page |
 
@@ -17,7 +16,7 @@ A page under `docs/site/` can have YAML frontmatter. The home page uses it for t
 
 ## Build, preview and check
 
-Use Node 22.19 or newer. The repository's own `parcela.yaml` runs the dev server, so each worktree previews its docs at its own URL:
+Use Node 22.19 or newer. Run the commands below from the repository root. The repository's own `parcela.yaml` runs the dev server, so each worktree previews its docs at its own URL:
 
 ```sh
 parcela up --detach

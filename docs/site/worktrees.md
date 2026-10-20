@@ -79,7 +79,7 @@ hooks:
 
 `PARCELA_DATA_DIR` belongs to one environment. `PARCELA_PRIMARY_DIR` is the main checkout, where untracked files like `.env` live. With this, `parcela up` in a fresh worktree copies the secrets, creates and seeds the database, migrates it and starts the app.
 
-For PostgreSQL or another server, run one per environment as a service, or name one database per environment on a shared server. [Databases](../configuration.md#databases) in the configuration reference shows both.
+For PostgreSQL or another server, run one per environment as a service, or name one database per environment on a shared server. [Databases](configuration.md#databases) in the configuration reference shows both.
 
 ## Clean up
 
