@@ -329,18 +329,16 @@ body {
 }
 
 .VPHero .main .actions {
+  align-items: center;
   justify-content: center;
   padding-top: 32px;
-}
-
-.VPHero .main .actions {
-  align-items: center;
 }
 
 /* The one call to action: solid blue and larger than the rest. */
 .VPHero .actions .VPButton.brand {
   padding: 0 30px;
   border-color: #0877b3;
+  border-radius: 999px;
   background: #0877b3;
   color: #ffffff;
   font-size: 19px;
