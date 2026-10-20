@@ -41,7 +41,7 @@ To preview through Parcela instead, run `parcela up --detach` from this reposito
 
 Includes and script blocks are rejected. Raw HTML and template expressions render as text. The landing page uses `layout: home` frontmatter and theme components.
 
-The root route `/` is the landing page. `/docs/` is the documentation index. Other pages use `/docs/<slug>/`. When combining pages, add their old slugs to `redirects` and point them at a retained section. Retired guides are removed from the sidebar and search.
+The root route `/` is the landing page. `/docs/` is the documentation index. Other pages use `/docs/<slug>/`.
 
 ## Check the built site
 
@@ -49,7 +49,7 @@ The root route `/` is the landing page. `/docs/` is the documentation index. Oth
 npm run check --prefix docs/website
 ```
 
-The command builds into `target/docs`. It verifies source coverage, links and anchors, legacy redirects, metadata, social cards, downloads, search, tutorial snippets, and the rendered Claude skill install block. Tool names gain local SVG marks at render time through `brands.mjs`. Code tokens stay unchanged and CSS wraps them within the reading column. It also checks telemetry endpoint validation.
+The command builds into `target/docs`. It verifies source coverage, links and anchors, metadata, social cards, downloads, search, tutorial snippets, and the rendered Claude skill install block. Tool names gain local SVG marks at render time through `brands.mjs`. Code tokens stay unchanged and CSS wraps them within the reading column. It also checks telemetry endpoint validation.
 
 For executable behavior, run:
 
@@ -64,6 +64,6 @@ The Python tests execute the Claude install block in a sandbox. The live suite r
 
 The `Documentation` workflow runs the site check and deploys `target/docs` when a push to `main` matches its path filters. `wrangler.jsonc` configures the Cloudflare Worker `parcela-site` and its static assets. Deployment uses the `CLOUDFLARE_API_TOKEN` repository secret.
 
-The build copies the installer, schema, and downloads into the output. It also writes Cloudflare redirects and headers, `robots.txt`, `sitemap.xml`, and a 1200 by 630 social card per page. `og.mjs` renders the cards with resvg. The Worker serves static pages and the telemetry endpoint on `parcela.run`.
+The build copies the installer, schema, and downloads into the output. It also writes Cloudflare headers, the `/docs` redirect, `robots.txt`, `sitemap.xml`, and a 1200 by 630 social card per page. `og.mjs` renders the cards with resvg. The Worker serves static pages and the telemetry endpoint on `parcela.run`.
 
 `DOCS_BASE` defaults to `/`. `DOCS_SITE` defaults to `https://parcela.run` and controls canonical URLs. `DOCS_OUTPUT` selects the output directory. The standard check uses the production base `/`.

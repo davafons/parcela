@@ -228,10 +228,9 @@ pub fn run(probes: Probes<'_>, out: Output) -> Result<bool> {
         proxy(probes.state),
     ];
     let ready = checks.iter().all(|check| check.ok);
-    let mut notes = vec![
+    let notes = vec![
         "HTTPS trust is not checked, and only `parcela trust` changes it. If the browser warns, run `parcela trust` once.".to_owned(),
     ];
-    notes.extend(parcela::relay::http_warning());
     let next = checks
         .iter()
         .find_map(|check| check.fix.clone())

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- The warning that a relay installed by 0.4 does not redirect port 80, in `parcela proxy status` and `parcela doctor`. Run `parcela proxy install` again to add the redirect.
+- Redirects from the docs pages that the site redesign merged, like `/docs/installation/`.
+
+### Changed
+
+- `install.sh` skips Caddy with `PARCELA_SKIP_CADDY=1`, which replaces `PARCELA_SKIP_BACKENDS`.
+
 ## 0.5.2 - 2026-10-20
 
 ### Fixed

@@ -36,15 +36,6 @@ export const pages = [
   ['docs-site', 'Build the documentation site', 'docs/website/README.md'],
 ];
 export const route = (slug) => slug === 'index' ? '/' : slug === 'docs' ? '/docs/' : `/docs/${slug}/`;
-export const redirects = {
-  installation: ['getting-started', 'install-it-by-hand'],
-  'daily-use': ['getting-started', 'everyday-commands'],
-  'project-setup': ['frameworks', 'services-and-setup'],
-  data: ['frameworks', 'separate-data'],
-  https: ['faq', 'clients-and-certificates'],
-  sharing: ['worktrees', 'share-with-another-device'],
-  concepts: ['worktrees', 'names-and-isolation'],
-};
 
 export const downloads = {
   'parcela-skill.txt': '.agents/skills/parcela/SKILL.md',
@@ -112,10 +103,7 @@ export function prepareContent({ clean = true } = {}) {
   // The installer and the schema live at the site root, next to the pages.
   write(join(srcDir, 'public/install.sh'), readFileSync(join(project, 'install.sh')));
   write(join(srcDir, 'public/schema/v1.json'), readFileSync(join(project, 'schema/v1.json')));
-  write(join(srcDir, 'public/_redirects'), '/docs /docs/ 301\n' + Object.entries(redirects).flatMap(([from, [to, anchor]]) => [
-    `/docs/${from} ${route(to)}#${anchor} 301`,
-    `/docs/${from}/ ${route(to)}#${anchor} 301`,
-  ]).join('\n') + '\n');
+  write(join(srcDir, 'public/_redirects'), '/docs /docs/ 301\n');
   write(join(srcDir, 'public/_headers'), '/install.sh\n  Content-Type: text/x-shellscript; charset=utf-8\n  Cache-Control: public, max-age=300\n');
   for (const [i, [slug, name]] of pages.entries()) {
     const page = describe(files[i][1], name);

@@ -90,14 +90,6 @@ pub fn installed() -> bool {
     Path::new(PLIST).exists()
 }
 
-/// A relay installed by an older release skips port 80; while 80 is free, reinstalling adds the
-/// http:// redirect.
-pub fn http_warning() -> Option<String> {
-    (installed() && !relays_http() && busy(80).is_none()).then(|| {
-        "http:// URLs do not redirect; run `parcela proxy install` to relay port 80".to_owned()
-    })
-}
-
 fn sudo(script: &str, args: &[&str]) -> Result<()> {
     let status = Command::new("/usr/bin/sudo")
         .args(["/bin/sh", "-c", script, "sh"])

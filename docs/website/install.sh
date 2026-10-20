@@ -20,7 +20,7 @@ Options:
   -h, --help   Show this help
 
 Environment:
-  PARCELA_SKIP_BACKENDS=1    Install only Parcela
+  PARCELA_SKIP_CADDY=1       Install only Parcela
   CADDY_VERSION              Caddy version to install (default $CADDY_VERSION)
 EOF
 }
@@ -115,7 +115,7 @@ install_caddy() {
   installed="$installed caddy"
 }
 
-# path_hint prints how to put $BIN on PATH, or ahead of an older backend that shadows it.
+# path_hint prints how to put $BIN on PATH, or ahead of another Caddy that shadows it.
 path_hint() {
   case ":$PATH:" in
     *":$BIN:"*)
@@ -170,7 +170,7 @@ main() {
   wrote=" ~/.local/bin/parcela"
   installed=
 
-  if [ "${PARCELA_SKIP_BACKENDS:-}" != 1 ]; then
+  if [ "${PARCELA_SKIP_CADDY:-}" != 1 ]; then
     case "$(uname -s)-$(uname -m)" in
       Darwin-x86_64) caddy_os=mac arch=amd64 ;;
       Darwin-arm64) caddy_os=mac arch=arm64 ;;

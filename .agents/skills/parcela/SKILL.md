@@ -50,7 +50,7 @@ parcela --path "$CHECKOUT" url api
 - Use the URLs Parcela returns; they carry the proxy port (`:1443` by default). Use declared service names, never an assumed port.
 - `state: ready` means every HTTP service answered its healthcheck. When the task needs proof, request the application path over the returned HTTPS URL with `curl --cacert "$(parcela trust --print)"`. Never disable TLS verification.
 - `parcela trust` changes system trust; run it only when the user asks. Without a terminal, `up` never trusts anything itself. `parcela proxy install` adds a system service; same rule.
-- If backends are missing, report it. Do not install software, start Docker or a GUI, change firewall rules or take over a busy port.
+- If Caddy is missing, report it. Do not install software, start Docker or a GUI, change firewall rules or take over a busy port.
 - `run -- ARGV` runs one foreground command as the only web service. It is not a substitute for `up`.
 
 Report the environment ID, the URLs, what you verified and what you did not.

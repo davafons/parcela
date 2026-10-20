@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { brandNames } from './brands.mjs';
 import { createMarkdownRenderer } from 'vitepress';
-import { downloads, groups, pages, redirects, repository, route } from './content.mjs';
+import { downloads, groups, pages, repository, route } from './content.mjs';
 
 const base = '/';
 const output = process.env.DOCS_OUTPUT ?? join(repository, 'target/docs');
@@ -55,12 +55,6 @@ for (const [slug, , source] of pages) {
     if (target === '/' || target.startsWith('/docs/')) assert.ok(ids.has(target), `${source} links to a published page ${target}`);
     if (ids.has(target)) assert.ok(ids.get(target).has(decodeURIComponent(anchor)), `${source} links to an existing anchor ${path}#${anchor}`);
   }
-}
-
-const rules = readFileSync(join(output, '_redirects'), 'utf8');
-for (const [from, [to, anchor]] of Object.entries(redirects)) {
-  assert.ok(ids.get(route(to))?.has(anchor), `${from} redirects to a published section`);
-  for (const suffix of ['', '/']) assert.ok(rules.includes(`/docs/${from}${suffix} ${route(to)}#${anchor} 301`), `${from}${suffix} retains its old URL`);
 }
 
 for (const [name, source] of Object.entries(downloads)) {

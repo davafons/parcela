@@ -258,7 +258,7 @@ pub fn stop(state: &Path) -> Result<bool> {
     let Some(evidence) = evidence else {
         ensure!(
             !daemon_running,
-            "a proxy started by an older Parcela is running; stop that `parcela proxy run` (Ctrl-C or its launch agent)"
+            "the proxy lock is held by a process Parcela did not record; stop it by hand"
         );
         return Ok(false);
     };

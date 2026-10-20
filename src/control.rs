@@ -206,8 +206,8 @@ impl Drop for Server {
 pub fn request(runtime: &Path, session: &Session, action: Action) -> Result<Value> {
     private::existing_directory(runtime)?;
     let path = crate::sockets::environment(runtime)?.control;
-    crate::sockets::verify(&path).context("live owner unavailable; older or interrupted runs require explicit reconciliation, never PID signaling")?;
-    let metadata = fs::symlink_metadata(&path).context("live owner unavailable; older or interrupted runs require explicit reconciliation, never PID signaling")?;
+    crate::sockets::verify(&path).context("live owner unavailable; interrupted runs require explicit reconciliation, never PID signaling")?;
+    let metadata = fs::symlink_metadata(&path).context("live owner unavailable; interrupted runs require explicit reconciliation, never PID signaling")?;
     // SAFETY: getuid has no pointers or failure case.
     ensure!(
         metadata.file_type().is_socket()
