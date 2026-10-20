@@ -2,7 +2,7 @@
 // worker.mjs only handles /api/*. POSTHOG_KEY is a secret (`wrangler secret put POSTHOG_KEY`).
 {
   "name": "parcela-site",
-  "account_id": "d6619f1b5d5f89902029c436a998bae7",
+  "account_id": "1745c65c70c5efcde26eed7a4d79d42d",
   "compatibility_date": "2025-09-01",
   "main": "worker.mjs",
   "workers_dev": false,
