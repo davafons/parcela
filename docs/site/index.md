@@ -1,6 +1,8 @@
 ---
 layout: home
-title: Parcela
+title: Deployable dev environments for your AI agents
+titleTemplate: 'Parcela: :title'
+description: Run multiple worktrees in parallel without conflicts. Each checkout runs the whole app at its own HTTPS URL, so parallel coding agents can each test a real running app.
 search: false
 hero:
   text: Deployable dev environments for your AI agents

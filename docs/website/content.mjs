@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { renderCard, renderIcon } from './og.mjs';
 
 const project = dirname(fileURLToPath(import.meta.url));
 export const repository = resolve(project, '../..');
@@ -50,6 +51,34 @@ function render(source) {
   });
 }
 
+// A page's title and description for search results and link previews: the frontmatter's
+// when it has them, else the first heading (or the sidebar name, when the heading is just
+// "Parcela") and the first paragraph that does not lead into a list or code block.
+function describe(markdown, name) {
+  const front = /^---\n([\s\S]*?)\n---\n/.exec(markdown)?.[1] ?? '';
+  const field = (name) => new RegExp(`^${name}: (.+)$`, 'm').exec(front)?.[1].trim();
+  const body = markdown.replace(/^---\n[\s\S]*?\n---\n/, '');
+  const plain = (text) => text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\*\*?([^*]+)\*\*?/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const heading = plain(/^# (.+)$/m.exec(body)?.[1] ?? '');
+  const title = field('title') ?? (heading === 'Parcela' ? name : heading);
+  const paragraph = body.split(/\n{2,}/).map((block) => block.trim())
+    .find((block) => /^[A-Za-z`*[]/.test(block) && !block.startsWith('```') && !block.endsWith(':'));
+  let description = field('description') ?? plain(paragraph ?? '');
+  if (description.length > 180) {
+    const cut = description.slice(0, 180);
+    description = cut.includes('. ') ? cut.slice(0, cut.lastIndexOf('. ') + 1) : `${cut.replace(/\s+\S*$/, '')}…`;
+  }
+  return { title, description };
+}
+
+export const meta = new Map();
+export const card = (slug) => `/og/${slug}.png`;
+
 function write(path, bytes) {
   if (existsSync(path) && readFileSync(path).equals(Buffer.from(bytes))) return;
   mkdirSync(dirname(path), { recursive: true });
@@ -61,6 +90,13 @@ export function prepareContent({ clean = true } = {}) {
   if (clean) rmSync(srcDir, { recursive: true, force: true });
   for (const [path, markdown] of files) write(path, markdown);
   for (const [name, source] of Object.entries(downloads)) write(join(srcDir, 'public/assets', name), readFileSync(join(repository, source)));
+  if (clean || !existsSync(join(srcDir, 'public/apple-touch-icon.png'))) write(join(srcDir, 'public/apple-touch-icon.png'), renderIcon(180));
+  for (const [i, [slug, name]] of pages.entries()) {
+    const page = describe(files[i][1], name);
+    if (meta.get(slug)?.title === page.title && meta.get(slug)?.description === page.description) continue;
+    meta.set(slug, page);
+    write(join(srcDir, 'public', card(slug)), renderCard(page));
+  }
 }
 
 export const watchSources = {

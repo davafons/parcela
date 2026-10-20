@@ -1,3 +1,7 @@
+---
+description: What to check when an environment does not start, a URL does not load or the browser does not trust the certificate, starting with parcela doctor and parcela status.
+---
+
 # Troubleshooting
 
 Start with these two commands. Most problems show up in one of them:

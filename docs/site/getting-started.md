@@ -1,3 +1,7 @@
+---
+description: Install Parcela, describe your app in parcela.yaml and run every checkout at its own HTTPS URL, or paste one prompt and let your coding agent set it up.
+---
+
 # Getting started with Parcela
 
 ## Let your agent set it up

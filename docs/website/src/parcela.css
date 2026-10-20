@@ -135,6 +135,11 @@
   --parcela-hero: linear-gradient(120deg, #34bfed 0%, #8adcf6 100%);
 }
 
+/* The root gets the page color too, so pulling past the top or bottom shows no other color. */
+html {
+  background-color: var(--vp-c-bg);
+}
+
 body {
   background: var(--parcela-page) fixed;
 }

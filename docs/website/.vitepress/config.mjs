@@ -1,14 +1,19 @@
 import { defineConfig } from 'vitepress';
 import { slug } from 'github-slugger';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
-import { groups, prepareContent, route, srcDir, watchSources } from '../content.mjs';
+import { join, resolve } from 'node:path';
+import { card, groups, meta, prepareContent, route, srcDir, watchSources } from '../content.mjs';
 
 const project = fileURLToPath(new URL('..', import.meta.url));
 const base = process.env.DOCS_BASE ?? '/';
 const site = process.env.DOCS_SITE ?? 'https://parcela.run';
 
 prepareContent();
+writeFileSync(join(srcDir, 'public/robots.txt'), `User-agent: *\nAllow: /\n\nSitemap: ${site}${base}sitemap.xml\n`);
+
+// docs/faq/index.md -> faq, index.md -> index.
+const slugOf = (relativePath) => relativePath.replace(/^docs\//, '').replace(/\/?index\.md$/, '') || 'index';
 
 export default defineConfig({
   srcDir,
@@ -21,18 +26,49 @@ export default defineConfig({
   outDir: resolve(project, process.env.DOCS_OUTPUT ?? '../../target/docs'),
   cacheDir: resolve(project, '.generated/cache'),
   cleanUrls: true,
+  lang: 'en',
   title: 'Parcela',
   description: 'Deployable dev environments for your AI agents.',
+  sitemap: { hostname: site },
   head: [
     ['link', { rel: 'icon', href: `${base}assets/logo.svg?v=picket-a` }],
-    ['meta', { property: 'og:title', content: 'Parcela' }],
-    ['meta', { property: 'og:description', content: 'Deployable dev environments for your AI agents. Every worktree runs the whole app at its own HTTPS URL.' }],
-    ['meta', { property: 'og:type', content: 'website' }],
+    ['link', { rel: 'apple-touch-icon', href: `${base}apple-touch-icon.png` }],
+    ['meta', { name: 'theme-color', content: '#ffffff', media: '(prefers-color-scheme: light)' }],
+    ['meta', { name: 'theme-color', content: '#181c20', media: '(prefers-color-scheme: dark)' }],
   ],
-  transformHead({ pageData }) {
-    if (pageData.relativePath === '404.md') return [];
-    const path = pageData.relativePath.replace(/index\.md$/, '');
-    return [['link', { rel: 'canonical', href: `${site}${base}${path}` }]];
+  // Each page's title and description come from its source (see content.mjs).
+  transformPageData(pageData) {
+    const page = meta.get(slugOf(pageData.relativePath));
+    if (!page) return;
+    pageData.description = page.description;
+    if (pageData.frontmatter.layout === 'home') return;
+    pageData.title = page.title;
+    if (/\bParcela\b/.test(page.title)) pageData.titleTemplate = false;
+  },
+  transformHead({ pageData, title, description }) {
+    if (pageData.relativePath === '404.md') return [['meta', { name: 'robots', content: 'noindex' }]];
+    const slug = slugOf(pageData.relativePath);
+    const url = `${site}${base}${pageData.relativePath.replace(/index\.md$/, '')}`;
+    const image = `${site}${base}${card(slug).slice(1)}`;
+    const alt = `Parcela: ${meta.get(slug)?.title ?? title}`;
+    return [
+      ['link', { rel: 'canonical', href: url }],
+      ['meta', { property: 'og:type', content: slug === 'index' ? 'website' : 'article' }],
+      ['meta', { property: 'og:site_name', content: 'Parcela' }],
+      ['meta', { property: 'og:url', content: url }],
+      ['meta', { property: 'og:title', content: title }],
+      ['meta', { property: 'og:description', content: description }],
+      ['meta', { property: 'og:image', content: image }],
+      ['meta', { property: 'og:image:type', content: 'image/png' }],
+      ['meta', { property: 'og:image:width', content: '1200' }],
+      ['meta', { property: 'og:image:height', content: '630' }],
+      ['meta', { property: 'og:image:alt', content: alt }],
+      ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+      ['meta', { name: 'twitter:title', content: title }],
+      ['meta', { name: 'twitter:description', content: description }],
+      ['meta', { name: 'twitter:image', content: image }],
+      ['meta', { name: 'twitter:image:alt', content: alt }],
+    ];
   },
   transformHtml(html, _id, { page, content }) {
     if (page !== '404.md') return html;
