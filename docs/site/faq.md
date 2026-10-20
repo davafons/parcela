@@ -73,11 +73,11 @@ Windows is not supported. Parcela uses Unix sockets, process groups and `flock`.
 
 ## Why AGPL?
 
-So improvements to Parcela stay open, including in hosted versions of it. It covers Parcela's own code. Your app only runs under Parcela, like under a shell, so the license puts no terms on your code. There is no contributor license agreement. See [COPYRIGHT](https://github.com/davafons/parcela/blob/main/COPYRIGHT) for the exact terms.
+So improvements to Parcela stay open, including in hosted versions of it. It covers Parcela's own code. Your app only runs under Parcela, like under a shell, so the license puts no terms on your code. There is no contributor license agreement. See [COPYRIGHT](https://github.com/lostcoords/parcela/blob/main/COPYRIGHT) for the exact terms.
 
 ## Is the configuration format stable?
 
-`parcela.yaml` has `version: 1`. Parcela is experimental, so it may still change, and every change is in the [changelog](https://github.com/davafons/parcela/blob/main/CHANGELOG.md). A file without `version: 1` is refused, never misread, and the error says which version this Parcela reads.
+`parcela.yaml` has `version: 1`. Parcela is experimental, so it may still change, and every change is in the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md). A file without `version: 1` is refused, never misread, and the error says which version this Parcela reads.
 
 ## How do I upgrade?
 
@@ -86,12 +86,12 @@ Upgrade the way you installed:
 ```sh
 brew upgrade parcela      # Homebrew
 parcela upgrade           # install.sh: downloads and runs it again
-cargo install --git https://github.com/davafons/parcela --locked --force   # from source
+cargo install --git https://github.com/lostcoords/parcela --locked --force   # from source
 ```
 
 `parcela upgrade` knows how it was installed: for Homebrew or `cargo` it prints the matching command instead.
 
-Then run `parcela proxy restart`, so the proxy runs the new version. Running environments keep going through it; `up` and `proxy status` warn while an older proxy is still running. Read the [changelog](https://github.com/davafons/parcela/blob/main/CHANGELOG.md) first: a release with breaking changes, like 0.4, says what to stop before upgrading.
+Then run `parcela proxy restart`, so the proxy runs the new version. Running environments keep going through it; `up` and `proxy status` warn while an older proxy is still running. Read the [changelog](https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md) first: a release with breaking changes, like 0.4, says what to stop before upgrading.
 
 Parcela never checks for new versions. `parcela upgrade` is the only command that downloads anything, and only when you run it.
 

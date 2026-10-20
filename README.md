@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/status-experimental-e8b44f" alt="Status: experimental">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/built_with-Rust-b45d3c?logo=rust&amp;logoColor=white" alt="Built with Rust"></a>
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-57966f" alt="Platforms: macOS and Linux">
-  <a href="https://github.com/davafons/parcela/actions/workflows/check.yml"><img src="https://github.com/davafons/parcela/actions/workflows/check.yml/badge.svg" alt="Rust checks"></a>
+  <a href="https://github.com/lostcoords/parcela/actions/workflows/check.yml"><img src="https://github.com/lostcoords/parcela/actions/workflows/check.yml/badge.svg" alt="Rust checks"></a>
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ No Docker and no root. Parcela runs the processes itself and uses [Caddy](https:
 curl -fsSL https://parcela.run/install.sh | sh
 ```
 
-It also installs Caddy into `~/.local/bin` when it is missing, checking each download against its release checksums, and never uses `sudo`. With Homebrew: `brew install davafons/tap/parcela`. From source: `cargo install --git https://github.com/davafons/parcela --locked`. Builds cover macOS and Linux.
+It also installs Caddy into `~/.local/bin` when it is missing, checking each download against its release checksums, and never uses `sudo`. With Homebrew: `brew install lostcoords/tap/parcela`. From source: `cargo install --git https://github.com/lostcoords/parcela --locked`. Builds cover macOS and Linux.
 
 ## Quickstart
 

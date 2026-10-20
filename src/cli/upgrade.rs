@@ -56,7 +56,7 @@ pub(super) fn run(nightly: bool, stable: bool) -> Result<i32> {
         Install::Script => {}
         Install::Homebrew => bail!("installed with Homebrew; run `brew upgrade parcela`"),
         Install::Cargo => bail!(
-            "installed with cargo; run `cargo install --git https://github.com/davafons/parcela --locked --force`"
+            "installed with cargo; run `cargo install --git https://github.com/lostcoords/parcela --locked --force`"
         ),
         Install::Unknown => bail!(
             "{} was not installed by install.sh; upgrade it the way you installed it",

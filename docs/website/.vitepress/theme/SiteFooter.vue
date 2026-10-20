@@ -3,7 +3,7 @@ import { useData, withBase } from 'vitepress';
 import { github } from './agents.js';
 
 const { frontmatter } = useData();
-const repo = 'https://github.com/davafons/parcela';
+const repo = 'https://github.com/lostcoords/parcela';
 
 // Small line icons for the project links, drawn on a 24px grid.
 const icons = {

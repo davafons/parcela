@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the latest Parcela release into ~/.local/bin, plus Caddy when no supported version is
 # on PATH. Run with --help for options.
-# Served at https://parcela.run/install.sh from github.com/davafons/parcela.
+# Served at https://parcela.run/install.sh from github.com/lostcoords/parcela.
 set -eu
 
 # The version Parcela's live tests run against.
@@ -163,9 +163,9 @@ main() {
   # Rerunning this script is how an install.sh install upgrades.
   previous=$("$BIN/parcela" --version 2>/dev/null || true)
   if [ -n "$nightly" ]; then
-    install_parcela https://github.com/davafons/parcela/releases/download/nightly
+    install_parcela https://github.com/lostcoords/parcela/releases/download/nightly
   else
-    install_parcela https://github.com/davafons/parcela/releases/latest/download
+    install_parcela https://github.com/lostcoords/parcela/releases/latest/download
   fi
   wrote=" ~/.local/bin/parcela"
   installed=
@@ -190,7 +190,7 @@ main() {
   current=$("$BIN/parcela" --version)
   if [ -n "$previous" ] && [ "$previous" != "$current" ]; then
     echo "Upgraded from ${previous#parcela }. Run parcela proxy restart to use it; running"
-    echo "environments keep running. Breaking changes: https://github.com/davafons/parcela/blob/main/CHANGELOG.md"
+    echo "environments keep running. Breaking changes: https://github.com/lostcoords/parcela/blob/main/CHANGELOG.md"
   elif [ -z "$previous" ]; then
     echo "Next, in your project: parcela init, then parcela up"
   fi

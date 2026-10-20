@@ -112,4 +112,4 @@ Don't kill processes by PID or delete files in the state directory to fix this. 
 
 ## Something else
 
-Run `parcela status --json` and read its `diagnostic` field. Report bugs at [github.com/davafons/parcela/issues](https://github.com/davafons/parcela/issues) with that output and the matching `owner.log`.
+Run `parcela status --json` and read its `diagnostic` field. Report bugs at [github.com/lostcoords/parcela/issues](https://github.com/lostcoords/parcela/issues) with that output and the matching `owner.log`.

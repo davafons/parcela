@@ -43,7 +43,7 @@ tasks:
     command: bin/rails console
 ```
 
-The first `parcela up` in a new worktree creates its database, prepares it and starts the app. Later runs only migrate. The file is in [examples/rails-postgres](https://github.com/davafons/parcela/blob/main/examples/rails-postgres/parcela.yaml).
+The first `parcela up` in a new worktree creates its database, prepares it and starts the app. Later runs only migrate. The file is in [examples/rails-postgres](https://github.com/lostcoords/parcela/blob/main/examples/rails-postgres/parcela.yaml).
 
 ## version and project
 

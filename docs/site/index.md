@@ -13,7 +13,7 @@ hero:
       link: /docs/getting-started/
     - theme: alt
       text: GitHub
-      link: https://github.com/davafons/parcela
+      link: https://github.com/lostcoords/parcela
 ---
 
 ## Install
@@ -22,7 +22,7 @@ hero:
 curl -fsSL https://parcela.run/install.sh | sh
 ```
 
-Or with Homebrew: `brew install davafons/tap/parcela`. Builds cover macOS and Linux.
+Or with Homebrew: `brew install lostcoords/tap/parcela`. Builds cover macOS and Linux.
 
 Using a coding agent? [Paste it this prompt](getting-started.md#let-your-agent-set-it-up) and it installs Parcela and configures your project.
 

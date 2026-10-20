@@ -97,6 +97,6 @@ export default defineConfig({
       text: label,
       items: pages.map(([slug, text]) => ({ text, link: route(slug) })),
     })),
-    socialLinks: [{ icon: 'github', link: 'https://github.com/davafons/parcela' }],
+    socialLinks: [{ icon: 'github', link: 'https://github.com/lostcoords/parcela' }],
   },
 });

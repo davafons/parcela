@@ -49,7 +49,7 @@ You'll build a project called `hello` with:
 
 Then you'll create a Git worktree called `signup`. One `parcela up` there creates its own database and runs the whole app at `https://signup-hello.localhost:1443`, while the first copy keeps running.
 
-The finished files are [parcela.yaml](https://github.com/davafons/parcela/blob/main/examples/docs-demo/parcela.yaml), [index.html](https://github.com/davafons/parcela/blob/main/examples/docs-demo/index.html), [db.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/db.py), [api.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/api.py) and [worker.py](https://github.com/davafons/parcela/blob/main/examples/docs-demo/worker.py).
+The finished files are [parcela.yaml](https://github.com/lostcoords/parcela/blob/main/examples/docs-demo/parcela.yaml), [index.html](https://github.com/lostcoords/parcela/blob/main/examples/docs-demo/index.html), [db.py](https://github.com/lostcoords/parcela/blob/main/examples/docs-demo/db.py), [api.py](https://github.com/lostcoords/parcela/blob/main/examples/docs-demo/api.py) and [worker.py](https://github.com/lostcoords/parcela/blob/main/examples/docs-demo/worker.py).
 
 ## Assumptions
 
@@ -64,7 +64,7 @@ curl -fsSL https://parcela.run/install.sh | sh
 It installs Parcela into `~/.local/bin`, and also [Caddy](https://caddyserver.com), which serves HTTPS, unless a supported version is already on your `PATH`. `sh -s -- --help` lists its options. With Homebrew instead:
 
 ```sh
-brew install davafons/tap/parcela
+brew install lostcoords/tap/parcela
 ```
 
 For the newest build of `main` instead of the latest release, add `--nightly`: `curl -fsSL https://parcela.run/install.sh | sh -s -- --nightly`. Its `parcela --version` includes the commit, like `0.4.0+20261020.4fed620`.
