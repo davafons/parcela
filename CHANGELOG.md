@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-10-20
+
+Databases and other containers can come from the project's own `docker-compose.yml`, with their own containers, volumes, ports and URLs in every environment, next to native apps. `parcela.yaml` files from 0.4 work unchanged.
 
 ### Added
 
 - `services.<name>.compose` runs containers from the project's own Docker Compose file next to native apps: `compose: {file: docker-compose.yml, services: [postgres]}`. Each environment gets its own Compose project, so its own containers, network and volumes, and a leased loopback port for every port the containers publish, as `PARCELA_PORT_<SERVICE>`. The Compose file needs no changes: an override in the environment's runtime directory replaces its host ports and drops `container_name`. Hooks and tasks get `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE`, and the Compose file's default override file applies as with plain `docker compose`. `compose.http` gives a container that serves HTTP its own HTTPS URL, readiness check and sharing, or the environment's own URL for an app that runs entirely in Docker. `parcela doctor` checks the file and services. See [compose](https://parcela.run/docs/configuration/#compose).
 - `services.<name>.stop`: a command that stops what a service started outside its own processes, like `docker compose stop` for a `docker compose up` service. It runs on every stop, after the service's dependents and before its SIGTERM, even if the service already exited or Parcela crashed. A failed one leaves the environment interrupted until `down` runs it again. A `compose` service sets it for you.
+- `parcela completion <shell>` prints shell completions. `parcela open [SERVICE]` opens a URL in the browser, and `url [SERVICE]` prints one service's URL.
+- `-w`/`--workspace` takes an environment's name, URL, hostname or ID. `-C` is short for `--path`.
 - `readiness_timeout_seconds` in `parcela.yaml` sets how long `up` and `restart` wait for the services, instead of 60 seconds.
 - `parcela upgrade` reruns `install.sh` for an install.sh install, staying on nightly or stable unless `--nightly` or `--stable` says otherwise. For Homebrew and `cargo` installs it prints the command to run instead.
 
@@ -15,8 +19,10 @@
 
 ### Changed
 
+- `status` and `ls` answer in about 80 ms instead of 400–800 ms: the supervisor answers requests while it waits, and `status` gets the process list in one reply.
+- Errors name the next step for a missing `parcela.yaml`, an unstarted checkout, an unknown environment and a renamed project. `proxy status` and `doctor` flag a 443 relay installed without port 80.
+- The proxy records a protocol number, so releases that share it take over its proxy quietly.
 - Documentation centers on getting started, app configuration, parallel worktrees, and troubleshooting. Older guide URLs redirect to retained sections. Tool names have icons and accent colors, and code examples wrap within the page.
-
 - Parcela sends anonymous usage data: the command, flag names, exit code, a duration range, version, OS, install method and a random install ID, never paths, names, URLs or values. Nothing is sent before a one-time notice. `parcela telemetry disable`, `DO_NOT_TRACK=1` or `PARCELA_TELEMETRY_DISABLED=1` turns it off, and `PARCELA_TELEMETRY_DEBUG=1` prints the event instead. See https://parcela.run/docs/telemetry/.
 - The repository moved to `github.com/lostcoords/parcela` and the Homebrew tap to `lostcoords/tap`: `brew install lostcoords/tap/parcela`. The old addresses redirect.
 - The website moved to `https://parcela.run`: the landing page at the root, the docs under `/docs/`, and `install.sh` and the schema at `https://parcela.run/install.sh` and `https://parcela.run/schema/v1.json`. `parcela init`, `parcela upgrade` and the schema's `$id` use the new addresses. `parcela.davafons.com` no longer serves the site.
