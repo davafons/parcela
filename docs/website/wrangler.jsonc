@@ -1,0 +1,13 @@
+// Serves the built site, target/docs from `npm run check`, from Cloudflare at parcela.run.
+{
+  "name": "parcela-site",
+  "account_id": "d6619f1b5d5f89902029c436a998bae7",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": false,
+  "assets": {
+    "directory": "../../target/docs",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "parcela.run", "custom_domain": true }]
+}

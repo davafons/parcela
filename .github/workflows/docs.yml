@@ -22,13 +22,14 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
-  build:
+  site:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: site-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,26 +39,10 @@ jobs:
           cache-dependency-path: docs/website/package-lock.json
       - run: npm ci --prefix docs/website
       - run: npm run check --prefix docs/website
-      - name: Assemble the Pages site
-        run: |
-          mv target/docs target/pages
-          cp docs/website/install.sh target/pages/install.sh
-          cp -R docs/website/schema target/pages/schema
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: target/pages
-
-  deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}docs/
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      # target/docs is the whole site; docs/website/wrangler.jsonc serves it at parcela.run.
+      - name: Deploy to Cloudflare
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        working-directory: docs/website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.94.0 deploy
